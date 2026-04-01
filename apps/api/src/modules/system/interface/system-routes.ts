@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { assertInternalRouteAuth } from "../../../shared/http/internal-route-auth.js";
 import {
   clearOperationalHealthHistory,
+  exportOperationalHealthHistoryCsv,
   getHealth,
   getOperationalHealth,
   getOperationalHealthHistory,
@@ -25,6 +26,11 @@ export function registerSystemRoutes(app: FastifyInstance): void {
     "/internal/health/operational/history",
     internalRouteOptions,
     getOperationalHealthHistory,
+  );
+  app.get(
+    "/internal/health/operational/history.csv",
+    internalRouteOptions,
+    exportOperationalHealthHistoryCsv,
   );
   app.delete(
     "/internal/health/operational/history",

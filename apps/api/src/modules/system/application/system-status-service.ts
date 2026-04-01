@@ -60,8 +60,46 @@ export interface OperationalHealthHistoryClearResult {
   removedCount: number;
 }
 
+export interface OperationalHealthHistoryCsvExport {
+  csv: string;
+  exportedCount: number;
+  fileName: string;
+  generatedAt: string;
+  limit: number;
+  totalStored: number;
+}
+
 function roundToTwoDecimals(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function csvEscape(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  const raw = String(value);
+
+  if (raw.includes("\"") || raw.includes(",") || raw.includes("\n") || raw.includes("\r")) {
+    return `"${raw.replaceAll("\"", "\"\"")}"`;
+  }
+
+  return raw;
+}
+
+function buildCsvRow(values: unknown[]): string {
+  return values.map((value) => csvEscape(value)).join(",");
+}
+
+function getScopeFailureRate(
+  record: PersistedOperationalHealthRecord,
+  scope: string,
+): number {
+  const scopeRate = record.snapshot.diagnostics.scopeFailureRates.find(
+    (item) => item.scope === scope,
+  );
+
+  return scopeRate ? scopeRate.failureRatePercent : 0;
 }
 
 function buildScopeFailureRateSummary(
@@ -250,5 +288,59 @@ export class SystemStatusService {
 
   public async clearOperationalHealthHistory(): Promise<OperationalHealthHistoryClearResult> {
     return operationalHealthHistoryStore.clear();
+  }
+
+  public getOperationalHealthHistoryCsv(limit = 50): OperationalHealthHistoryCsvExport {
+    const history = this.getOperationalHealthHistory(limit);
+    const headers = [
+      "recorded_at",
+      "status",
+      "evaluated_at",
+      "budget_remaining_percent",
+      "circuit_state",
+      "consecutive_open_cycles",
+      "reasons_count",
+      "reason_codes",
+      "reason_messages",
+      "hot_failure_rate_percent",
+      "warm_failure_rate_percent",
+      "cold_failure_rate_percent",
+    ];
+
+    const lines = [buildCsvRow(headers)];
+
+    for (const record of history.records) {
+      const reasonCodes = record.snapshot.reasons.map((reason) => reason.code).join("|");
+      const reasonMessages = record.snapshot.reasons.map((reason) => reason.message).join("|");
+
+      lines.push(
+        buildCsvRow([
+          record.recordedAt,
+          record.snapshot.status,
+          record.snapshot.evaluatedAt,
+          record.snapshot.diagnostics.budgetRemainingPercent,
+          record.snapshot.diagnostics.circuitState,
+          record.snapshot.diagnostics.consecutiveOpenCycles,
+          record.snapshot.reasons.length,
+          reasonCodes,
+          reasonMessages,
+          getScopeFailureRate(record, "hot"),
+          getScopeFailureRate(record, "warm"),
+          getScopeFailureRate(record, "cold"),
+        ]),
+      );
+    }
+
+    const generatedAt = new Date().toISOString();
+    const safeDate = generatedAt.replaceAll(":", "-").replaceAll(".", "-");
+
+    return {
+      csv: lines.join("\n"),
+      exportedCount: history.records.length,
+      fileName: `operational-health-history-${safeDate}.csv`,
+      generatedAt,
+      limit: history.limit,
+      totalStored: history.totalStored,
+    };
   }
 }

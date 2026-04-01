@@ -51,3 +51,16 @@ export async function clearOperationalHealthHistory(
   const data = await systemStatusService.clearOperationalHealthHistory();
   void reply.send(buildSuccessResponse(request.id, data));
 }
+
+export function exportOperationalHealthHistoryCsv(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): void {
+  const parsedQuery = historyQuerySchema.parse(request.query);
+  const csvExport = systemStatusService.getOperationalHealthHistoryCsv(parsedQuery.limit);
+
+  void reply
+    .header("Content-Type", "text/csv; charset=utf-8")
+    .header("Content-Disposition", `attachment; filename="${csvExport.fileName}"`)
+    .send(csvExport.csv);
+}
