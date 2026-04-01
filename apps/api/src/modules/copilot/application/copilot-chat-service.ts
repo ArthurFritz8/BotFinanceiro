@@ -5,7 +5,10 @@ import {
 } from "../../../integrations/ai/openrouter-chat-adapter.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { logger } from "../../../shared/logger/logger.js";
-import { copilotChatAuditStore } from "../../../shared/observability/copilot-chat-audit-store.js";
+import {
+  copilotChatAuditStore,
+  type CopilotChatSessionHistory,
+} from "../../../shared/observability/copilot-chat-audit-store.js";
 import {
   CryptoSpotPriceService,
   type SpotPriceResponse,
@@ -19,6 +22,7 @@ import { z } from "zod";
 export interface CopilotChatInput {
   maxTokens?: number;
   message: string;
+  sessionId?: string;
   systemPrompt?: string;
   temperature?: number;
 }
@@ -242,6 +246,7 @@ export class CopilotChatService {
       await copilotChatAuditStore.append({
         completion,
         input,
+        sessionId: input.sessionId,
       });
     } catch (error) {
       logger.warn(
@@ -253,5 +258,12 @@ export class CopilotChatService {
     }
 
     return completion;
+  }
+
+  public async getSessionHistory(input: {
+    limit?: number;
+    sessionId: string;
+  }): Promise<CopilotChatSessionHistory> {
+    return copilotChatAuditStore.getSessionHistory(input);
   }
 }

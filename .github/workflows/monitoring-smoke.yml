@@ -1,0 +1,44 @@
+name: Monitoring Smoke
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: monitoring-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: API Smoke Monitoring
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+
+    env:
+      MONITOR_BASE_URL: ""
+      MONITOR_INTERNAL_TOKEN: ""
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Resolve monitor target URL
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          MONITOR_BASE_URL="$(gh api repos/${{ github.repository }}/actions/variables/MONITOR_BASE_URL --jq '.value' 2>/dev/null || true)"
+          echo "MONITOR_BASE_URL=${MONITOR_BASE_URL}" >> "$GITHUB_ENV"
+
+      - name: Run monitoring smoke checks
+        env:
+          MONITOR_MAX_LATENCY_MS: "4000"
+        run: node scripts/monitoring-smoke.mjs

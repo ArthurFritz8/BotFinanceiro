@@ -19,6 +19,25 @@ Monorepo TypeScript para um ecossistema de mercado financeiro global e cripto.
 2. Typecheck: `npm run typecheck`
 3. Check completo: `npm run check`
 
+## Monitoramento smoke
+
+Workflow dedicado: `.github/workflows/monitoring-smoke.yml`.
+
+1. Executa a cada 30 minutos e em `workflow_dispatch`.
+2. Faz smoke checks de `GET /health`, `GET /ready` e `GET /v1/copilot/history`.
+3. Opcionalmente valida endpoint interno quando `MONITOR_INTERNAL_TOKEN` estiver configurado.
+
+Configuracao no GitHub Actions:
+
+1. Crie a Actions variable `MONITOR_BASE_URL` com a URL base publica da API, ex: `https://api.seudominio.com`
+2. Opcional: defina `MONITOR_INTERNAL_TOKEN` no step do workflow para incluir checks de rotas internas
+
+Execucao local:
+
+```bash
+MONITOR_BASE_URL=http://localhost:3000 npm run monitor:smoke
+```
+
 ## Persistencia (Supabase/Postgres)
 
 Modo recomendado em producao: Supabase Postgres para trilha operacional e auditoria do Copiloto.
@@ -105,7 +124,13 @@ Exemplo de chamada:
 ```bash
 curl "http://localhost:3000/v1/copilot/chat" \
 	-H "Content-Type: application/json" \
-	-d '{"message":"Resuma o mercado cripto de hoje","temperature":0.1,"maxTokens":350}'
+	-d '{"message":"Resuma o mercado cripto de hoje","temperature":0.1,"maxTokens":350,"sessionId":"sessao_demo_001"}'
+```
+
+Historico por sessao:
+
+```bash
+curl "http://localhost:3000/v1/copilot/history?sessionId=sessao_demo_001&limit=30"
 ```
 
 Tool calling read-only habilitado no Copiloto:
@@ -141,4 +166,5 @@ npm run dev:web
 VITE_DEV_API_PROXY_TARGET=http://localhost:3000 npm run dev:web
 ```
 
-5. O frontend salva historico local no navegador e permite limpeza manual no card "Historico local".
+5. O frontend usa `sessionId` persistido no navegador para carregar historico remoto em `GET /v1/copilot/history` e mantém fallback local.
+6. O card "Historico local" limpa mensagens da sessao atual e inicia uma nova sessao local/remota.

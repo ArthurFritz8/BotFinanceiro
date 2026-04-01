@@ -39,6 +39,20 @@ interface CopilotChatResponse {
   };
 }
 
+interface CopilotHistoryResponse {
+  interactions: number;
+  limit: number;
+  messages: Array<{
+    content: string;
+    model?: string;
+    role: "assistant" | "user";
+    timestamp: string;
+    toolCallsUsed?: string[];
+    totalTokens?: number;
+  }>;
+  sessionId: string;
+}
+
 interface MutableEnv {
   OPENROUTER_API_BASE_URL: string;
   OPENROUTER_API_KEY: string;
@@ -403,6 +417,84 @@ void it("POST /v1/copilot/chat executa comparativo multi-ativos com tool calling
   assert.deepEqual(body.data.toolCallsUsed, ["get_crypto_multi_spot_price"]);
   assert.equal(body.data.responseId, "gen-tool-multi-002");
   assert.equal(body.data.usage.totalTokens, 68);
+});
+
+void it("GET /v1/copilot/history retorna mensagens da sessao informada", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  const sessionId = `sessao_history_${Date.now()}`;
+
+  globalThis.fetch = (() => {
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: "Resumo da sessao para historico persistido.",
+                role: "assistant",
+              },
+            },
+          ],
+          id: "gen-history-001",
+          model: "google/gemini-1.5-flash",
+          usage: {
+            completion_tokens: 10,
+            prompt_tokens: 18,
+            total_tokens: 28,
+          },
+        }),
+        {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 200,
+        },
+      ),
+    );
+  }) as typeof fetch;
+
+  const chatResponse = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Mensagem para persistir no historico remoto",
+      sessionId,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(chatResponse.statusCode, 200);
+
+  const historyResponse = await app.inject({
+    method: "GET",
+    url: `/v1/copilot/history?sessionId=${encodeURIComponent(sessionId)}&limit=20`,
+  });
+
+  assert.equal(historyResponse.statusCode, 200);
+
+  const historyBody = historyResponse.json<ApiSuccessResponse<CopilotHistoryResponse>>();
+  assert.equal(historyBody.status, "success");
+  assert.equal(historyBody.data.sessionId, sessionId);
+  assert.equal(historyBody.data.interactions, 1);
+  assert.equal(historyBody.data.messages.length, 2);
+  assert.equal(historyBody.data.messages[0]?.role, "user");
+  assert.equal(historyBody.data.messages[0]?.content, "Mensagem para persistir no historico remoto");
+  assert.equal(historyBody.data.messages[1]?.role, "assistant");
+  assert.equal(historyBody.data.messages[1]?.content, "Resumo da sessao para historico persistido.");
+});
+
+void it("GET /v1/copilot/history retorna 400 para sessionId invalido", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/copilot/history?sessionId=abc",
+  });
+
+  assert.equal(response.statusCode, 400);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "VALIDATION_ERROR");
+  assert.equal(body.error.message, "Invalid payload");
 });
 
 void it("POST /v1/copilot/chat retorna 400 para payload invalido", async () => {

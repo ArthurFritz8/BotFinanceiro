@@ -34,6 +34,13 @@ const copilotChatAuditRecordSchema = z.object({
   completion: copilotChatAuditCompletionSchema,
   input: copilotChatAuditInputSchema,
   recordedAt: z.string(),
+  sessionId: z
+    .string()
+    .trim()
+    .min(8)
+    .max(128)
+    .regex(/^[a-zA-Z0-9_-]+$/)
+    .optional(),
 });
 
 const persistedCopilotChatAuditPayloadSchema = z.object({
@@ -52,6 +59,7 @@ export interface CopilotChatAuditHistoryQueryOptions {
   from?: Date;
   limit?: number;
   offset?: number;
+  sessionId?: string;
   to?: Date;
   toolName?: string;
 }
@@ -59,6 +67,7 @@ export interface CopilotChatAuditHistoryQueryOptions {
 export interface CopilotChatAuditHistory {
   filters: {
     from: string | null;
+    sessionId: string | null;
     to: string | null;
     toolName: string | null;
   };
@@ -74,6 +83,22 @@ export interface CopilotChatAuditClearResult {
   removedCount: number;
 }
 
+export interface CopilotChatSessionHistoryMessage {
+  content: string;
+  model?: string;
+  role: "assistant" | "user";
+  timestamp: string;
+  toolCallsUsed?: string[];
+  totalTokens?: number;
+}
+
+export interface CopilotChatSessionHistory {
+  interactions: number;
+  limit: number;
+  messages: CopilotChatSessionHistoryMessage[];
+  sessionId: string;
+}
+
 export interface CopilotChatAuditAppendInput {
   completion: OpenRouterChatCompletion;
   input: {
@@ -82,6 +107,7 @@ export interface CopilotChatAuditAppendInput {
     systemPrompt?: string;
     temperature?: number;
   };
+  sessionId?: string;
 }
 
 function clampAuditItems(items: number): number {
@@ -112,6 +138,7 @@ function applyAuditFilters(
   options: CopilotChatAuditHistoryQueryOptions,
 ): CopilotChatAuditRecord[] {
   const fromMs = options.from?.getTime();
+  const sessionId = options.sessionId?.trim();
   const toMs = options.to?.getTime();
   const toolName = options.toolName?.trim().toLowerCase();
 
@@ -127,6 +154,10 @@ function applyAuditFilters(
     }
 
     if (toMs !== undefined && recordedAtMs > toMs) {
+      return false;
+    }
+
+    if (sessionId && record.sessionId !== sessionId) {
       return false;
     }
 
@@ -207,6 +238,7 @@ export class CopilotChatAuditStore {
     return {
       filters: {
         from: options.from ? options.from.toISOString() : null,
+        sessionId: options.sessionId?.trim() || null,
         to: options.to ? options.to.toISOString() : null,
         toolName: options.toolName?.trim() || null,
       },
@@ -231,6 +263,7 @@ export class CopilotChatAuditStore {
       completion: input.completion,
       input: input.input,
       recordedAt: new Date().toISOString(),
+      sessionId: input.sessionId,
     });
 
     this.records.push(record);
@@ -286,6 +319,47 @@ export class CopilotChatAuditStore {
       },
       "Copilot chat audit store initialized",
     );
+  }
+
+  public async getSessionHistory(input: {
+    limit?: number;
+    sessionId: string;
+  }): Promise<CopilotChatSessionHistory> {
+    const safeSessionId = input.sessionId.trim();
+    const safeLimit = Math.max(1, Math.min(input.limit ?? 30, 200));
+
+    const history = await this.getHistory({
+      limit: safeLimit,
+      offset: 0,
+      sessionId: safeSessionId,
+    });
+
+    const chronologicalRecords = [...history.records].reverse();
+    const messages: CopilotChatSessionHistoryMessage[] = [];
+
+    for (const record of chronologicalRecords) {
+      messages.push({
+        content: record.input.message,
+        role: "user",
+        timestamp: record.recordedAt,
+      });
+
+      messages.push({
+        content: record.completion.answer,
+        model: record.completion.model,
+        role: "assistant",
+        timestamp: record.completion.fetchedAt,
+        toolCallsUsed: record.completion.toolCallsUsed,
+        totalTokens: record.completion.usage.totalTokens,
+      });
+    }
+
+    return {
+      interactions: history.records.length,
+      limit: safeLimit,
+      messages,
+      sessionId: safeSessionId,
+    };
   }
 
   private async appendToPostgres(record: CopilotChatAuditRecord): Promise<boolean> {
@@ -374,6 +448,11 @@ export class CopilotChatAuditStore {
         whereParts.push(`recorded_at <= $${params.length}`);
       }
 
+      if (options.sessionId && options.sessionId.trim().length > 0) {
+        params.push(options.sessionId.trim());
+        whereParts.push(`payload ->> 'sessionId' = $${params.length}`);
+      }
+
       if (options.toolName && options.toolName.trim().length > 0) {
         params.push(options.toolName.trim());
         whereParts.push(`(payload -> 'completion' -> 'toolCallsUsed') ? $${params.length}`);
@@ -417,6 +496,7 @@ export class CopilotChatAuditStore {
       return {
         filters: {
           from: options.from ? options.from.toISOString() : null,
+          sessionId: options.sessionId?.trim() || null,
           to: options.to ? options.to.toISOString() : null,
           toolName: options.toolName?.trim() || null,
         },

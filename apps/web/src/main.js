@@ -9,11 +9,50 @@ const recentHistoryElement = document.querySelector("#recent-history");
 const clearLocalHistoryButton = document.querySelector("#clear-local-history");
 
 const CHAT_HISTORY_STORAGE_KEY = "botfinanceiro.copilot.history.v1";
+const CHAT_SESSION_STORAGE_KEY = "botfinanceiro.copilot.session.v1";
 const MAX_STORED_MESSAGES = 60;
 const MAX_RECENT_HISTORY_ITEMS = 8;
+const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
 
 const messages = [];
 let isSending = false;
+let chatSessionId = getOrCreateSessionId();
+
+function createSessionId() {
+  return `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function getOrCreateSessionId() {
+  try {
+    const storedValue = localStorage.getItem(CHAT_SESSION_STORAGE_KEY)?.trim();
+
+    if (storedValue && SESSION_ID_PATTERN.test(storedValue)) {
+      return storedValue;
+    }
+  } catch {
+    // Ignore storage errors and create an ephemeral session id.
+  }
+
+  const generatedSessionId = createSessionId();
+
+  try {
+    localStorage.setItem(CHAT_SESSION_STORAGE_KEY, generatedSessionId);
+  } catch {
+    // Ignore storage errors and keep session id in memory.
+  }
+
+  return generatedSessionId;
+}
+
+function rotateSessionId() {
+  chatSessionId = createSessionId();
+
+  try {
+    localStorage.setItem(CHAT_SESSION_STORAGE_KEY, chatSessionId);
+  } catch {
+    // Ignore storage errors and keep session id in memory.
+  }
+}
 
 function normalizeStoredMessage(value) {
   if (!value || typeof value !== "object") {
@@ -75,6 +114,53 @@ function loadMessagesFromLocalStorage() {
   } catch {
     return [];
   }
+}
+
+function normalizeRemoteHistoryMessage(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const role = value.role === "assistant" || value.role === "user" ? value.role : null;
+  const content = typeof value.content === "string" ? value.content : null;
+
+  if (!role || !content) {
+    return null;
+  }
+
+  const timestamp = typeof value.timestamp === "string" ? value.timestamp : "";
+  const parsedTimestamp = timestamp ? new Date(timestamp) : null;
+  const time = parsedTimestamp && !Number.isNaN(parsedTimestamp.getTime())
+    ? parsedTimestamp.toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+    : undefined;
+
+  const meta = {
+    model: typeof value.model === "string" ? value.model : undefined,
+    time,
+    totalTokens: typeof value.totalTokens === "number" ? value.totalTokens : undefined,
+  };
+
+  const normalized = {
+    content,
+    error: false,
+    role,
+  };
+
+  if (meta.model || meta.time || meta.totalTokens !== undefined) {
+    normalized.meta = meta;
+  }
+
+  return normalized;
+}
+
+function replaceMessages(nextMessages) {
+  messages.splice(0, messages.length, ...nextMessages);
+  saveMessagesToLocalStorage();
+  renderMessages();
+  renderRecentHistory();
 }
 
 function renderRecentHistory() {
@@ -210,6 +296,7 @@ async function requestCopilotCompletion(message) {
     body: JSON.stringify({
       maxTokens: 350,
       message,
+      sessionId: chatSessionId,
       temperature: 0.1,
     }),
     headers: {
@@ -232,6 +319,48 @@ async function requestCopilotCompletion(message) {
   }
 
   return payload;
+}
+
+async function loadMessagesFromBackend() {
+  const response = await fetch(
+    `/v1/copilot/history?sessionId=${encodeURIComponent(chatSessionId)}&limit=${MAX_STORED_MESSAGES}`,
+    {
+      method: "GET",
+    },
+  );
+
+  let payload = null;
+
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    return false;
+  }
+
+  const historyMessages = Array.isArray(payload?.data?.messages) ? payload.data.messages : [];
+  const normalizedMessages = historyMessages
+    .map((item) => normalizeRemoteHistoryMessage(item))
+    .filter((item) => item !== null);
+
+  if (normalizedMessages.length === 0) {
+    return false;
+  }
+
+  replaceMessages(normalizedMessages);
+
+  const assistantWithModel = [...normalizedMessages]
+    .reverse()
+    .find((item) => item.role === "assistant" && item.meta?.model);
+
+  if (activeModelElement && assistantWithModel?.meta?.model) {
+    activeModelElement.textContent = assistantWithModel.meta.model;
+  }
+
+  return true;
 }
 
 async function handleSubmit(event) {
@@ -332,13 +461,53 @@ function setupLocalHistoryControls() {
   }
 
   clearLocalHistoryButton.addEventListener("click", () => {
+    rotateSessionId();
     messages.splice(0, messages.length);
     localStorage.removeItem(CHAT_HISTORY_STORAGE_KEY);
     renderMessages();
     renderRecentHistory();
-    setStatus("", "Pronto");
+    setStatus("", "Nova sessao iniciada");
     chatInput?.focus();
   });
+}
+
+async function initializeChatHistory() {
+  setStatus("loading", "Sincronizando");
+
+  try {
+    const loadedFromBackend = await loadMessagesFromBackend();
+
+    if (loadedFromBackend) {
+      setStatus("", "Historico remoto carregado");
+      return;
+    }
+  } catch {
+    // Fallback para historico local quando API estiver indisponivel.
+  }
+
+  const storedMessages = loadMessagesFromLocalStorage();
+
+  if (storedMessages.length > 0) {
+    replaceMessages(storedMessages);
+    setStatus("", "Historico local carregado");
+    return;
+  }
+
+  pushMessage(
+    "assistant",
+    "Pronto para ajudar. Peça um resumo de mercado, riscos de curto prazo ou um plano de monitoramento para hoje.",
+    {
+      meta: {
+        model: "google/gemini-1.5-flash",
+        time: new Date().toLocaleTimeString("pt-BR", {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      },
+    },
+  );
+
+  setStatus("", "Pronto");
 }
 
 if (chatForm) {
@@ -358,25 +527,4 @@ if (chatInput) {
 
 setupQuickPrompts();
 setupLocalHistoryControls();
-
-const storedMessages = loadMessagesFromLocalStorage();
-
-if (storedMessages.length > 0) {
-  messages.push(...storedMessages);
-  renderMessages();
-  renderRecentHistory();
-} else {
-  pushMessage(
-    "assistant",
-    "Pronto para ajudar. Peça um resumo de mercado, riscos de curto prazo ou um plano de monitoramento para hoje.",
-    {
-      meta: {
-        model: "google/gemini-1.5-flash",
-        time: new Date().toLocaleTimeString("pt-BR", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      },
-    },
-  );
-}
+void initializeChatHistory();
