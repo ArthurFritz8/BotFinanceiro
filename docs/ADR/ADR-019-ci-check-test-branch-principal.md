@@ -26,6 +26,7 @@ O fluxo local ja executa `npm run check` e `npm test`, mas sem gate automatizado
 - `npm run check`
 - `npm test`
 4. Adicionado controle de concorrencia para cancelar execucoes antigas no mesmo ref.
+5. Script de testes da API ajustado para runner sem glob de shell (`node scripts/run-tests.mjs`), garantindo compatibilidade no Node 20 do CI.
 
 ## Prevencao
 

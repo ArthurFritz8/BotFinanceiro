@@ -9,7 +9,7 @@
     "dev": "tsx watch src/main/server.ts",
     "lint": "eslint src --ext .ts --max-warnings=0",
     "start": "node dist/main/server.js",
-    "test": "node --import tsx --test src/**/*.test.ts",
+    "test": "node scripts/run-tests.mjs",
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
