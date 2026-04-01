@@ -1,4 +1,9 @@
-import type { FastifyInstance } from "fastify";
+import type {
+  FastifyInstance,
+  FastifyReply,
+  FastifyRequest,
+  HookHandlerDoneFunction,
+} from "fastify";
 
 import { assertInternalRouteAuth } from "../../../shared/http/internal-route-auth.js";
 import {
@@ -14,8 +19,17 @@ import {
 } from "./system-controller.js";
 
 const internalRouteOptions = {
-  preHandler: (request: Parameters<typeof assertInternalRouteAuth>[0]) => {
-    assertInternalRouteAuth(request);
+  preHandler: (
+    request: FastifyRequest,
+    _reply: FastifyReply,
+    done: HookHandlerDoneFunction,
+  ): void => {
+    try {
+      assertInternalRouteAuth(request);
+      done();
+    } catch (error) {
+      done(error as Error);
+    }
   },
 };
 
