@@ -32,6 +32,14 @@ const environmentSchema = z
     OPS_HEALTH_CRITICAL_BUDGET_PERCENT: z.coerce.number().min(0).max(100).default(5),
     OPS_HEALTH_WARNING_SCOPE_FAILURE_RATE_PERCENT: z.coerce.number().min(0).max(100).default(50),
     OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT: z.coerce.number().min(0).max(100).default(80),
+    OPS_HEALTH_SNAPSHOT_ENABLED: booleanFromString.default("true"),
+    OPS_HEALTH_SNAPSHOT_INTERVAL_SECONDS: z.coerce.number().int().min(10).default(60),
+    OPS_HEALTH_SNAPSHOT_MAX_ITEMS: z.coerce.number().int().min(10).max(10000).default(300),
+    OPS_HEALTH_SNAPSHOT_FILE_PATH: z
+      .string()
+      .trim()
+      .min(1)
+      .default(".runtime/operational-health-history.json"),
     CRYPTO_SYNC_TARGET_CURRENCY: z
       .string()
       .trim()

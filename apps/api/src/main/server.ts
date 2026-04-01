@@ -1,4 +1,5 @@
 import { cryptoSyncJobRunner } from "../jobs/crypto-sync-job-runner.js";
+import { operationalHealthSnapshotJobRunner } from "../jobs/operational-health-snapshot-job-runner.js";
 import { env } from "../shared/config/env.js";
 import { logger } from "../shared/logger/logger.js";
 import { buildApp } from "./app.js";
@@ -13,6 +14,7 @@ async function startServer(): Promise<void> {
     });
 
     cryptoSyncJobRunner.start();
+    await operationalHealthSnapshotJobRunner.start();
 
     logger.info({ port: env.APP_PORT }, "API started");
   } catch (error) {
@@ -25,6 +27,7 @@ async function closeServer(signal: string): Promise<void> {
   logger.warn({ signal }, "Shutdown signal received");
 
   try {
+    operationalHealthSnapshotJobRunner.stop();
     cryptoSyncJobRunner.stop();
     await app.close();
     logger.info("Server closed gracefully");

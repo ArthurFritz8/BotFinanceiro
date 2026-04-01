@@ -4,6 +4,10 @@ import {
   type CryptoSchedulerMetricsSnapshot,
 } from "../../../jobs/crypto-sync-job-runner.js";
 import { env } from "../../../shared/config/env.js";
+import {
+  operationalHealthHistoryStore,
+  type PersistedOperationalHealthRecord,
+} from "../../../shared/observability/operational-health-history-store.js";
 
 export interface HealthStatus {
   service: string;
@@ -43,6 +47,12 @@ export interface OperationalHealthStatus {
   evaluatedAt: string;
   reasons: OperationalHealthReason[];
   status: "critical" | "ok" | "warning";
+}
+
+export interface OperationalHealthHistory {
+  limit: number;
+  records: PersistedOperationalHealthRecord[];
+  totalStored: number;
 }
 
 function roundToTwoDecimals(value: number): number {
@@ -219,6 +229,17 @@ export class SystemStatusService {
       evaluatedAt: new Date().toISOString(),
       reasons,
       status,
+    };
+  }
+
+  public getOperationalHealthHistory(limit = 50): OperationalHealthHistory {
+    const safeLimit = Math.max(1, Math.min(limit, env.OPS_HEALTH_SNAPSHOT_MAX_ITEMS));
+    const records = operationalHealthHistoryStore.getRecent(safeLimit);
+
+    return {
+      limit: safeLimit,
+      records,
+      totalStored: operationalHealthHistoryStore.getStoredCount(),
     };
   }
 }
