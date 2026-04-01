@@ -2,12 +2,16 @@ import { cryptoSyncJobRunner } from "../jobs/crypto-sync-job-runner.js";
 import { operationalHealthSnapshotJobRunner } from "../jobs/operational-health-snapshot-job-runner.js";
 import { env } from "../shared/config/env.js";
 import { logger } from "../shared/logger/logger.js";
+import { copilotChatAuditStore } from "../shared/observability/copilot-chat-audit-store.js";
+import { closePostgresPool } from "../shared/persistence/postgres-pool.js";
 import { buildApp } from "./app.js";
 
 const app = buildApp();
 
 async function startServer(): Promise<void> {
   try {
+    await copilotChatAuditStore.initialize();
+
     await app.listen({
       host: "0.0.0.0",
       port: env.APP_PORT,
@@ -30,6 +34,7 @@ async function closeServer(signal: string): Promise<void> {
     operationalHealthSnapshotJobRunner.stop();
     cryptoSyncJobRunner.stop();
     await app.close();
+    await closePostgresPool();
     logger.info("Server closed gracefully");
     process.exit(0);
   } catch (error) {

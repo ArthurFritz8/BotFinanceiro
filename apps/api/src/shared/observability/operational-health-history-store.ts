@@ -5,6 +5,8 @@ import { z } from "zod";
 
 import { env } from "../config/env.js";
 import { logger } from "../logger/logger.js";
+import { resolvePersistenceMode, type PersistenceMode } from "../persistence/persistence-mode.js";
+import { getPostgresPool } from "../persistence/postgres-pool.js";
 
 const healthStatusSchema = z.enum(["ok", "warning", "critical"]);
 
@@ -62,6 +64,8 @@ export class OperationalHealthHistoryStore {
 
   private initialized = false;
 
+  private mode: PersistenceMode = resolvePersistenceMode();
+
   private records: PersistedOperationalHealthRecord[] = [];
 
   public async initialize(): Promise<void> {
@@ -69,8 +73,27 @@ export class OperationalHealthHistoryStore {
       return;
     }
 
-    await this.loadFromDisk();
+    if (this.mode === "postgres") {
+      const initializedInPostgres = await this.initializePostgres();
+
+      if (!initializedInPostgres) {
+        this.mode = "file";
+      }
+    }
+
+    if (this.mode === "file") {
+      await this.loadFromDisk();
+    }
+
     this.initialized = true;
+
+    logger.info(
+      {
+        count: this.records.length,
+        mode: this.mode,
+      },
+      "Operational health history store initialized",
+    );
   }
 
   public getRecent(limit = 100): PersistedOperationalHealthRecord[] {
@@ -89,13 +112,25 @@ export class OperationalHealthHistoryStore {
       await this.initialize();
     }
 
-    this.records.push({
+    const record: PersistedOperationalHealthRecord = {
       recordedAt: new Date().toISOString(),
       snapshot,
-    });
+    };
+
+    this.records.push(record);
 
     if (this.records.length > env.OPS_HEALTH_SNAPSHOT_MAX_ITEMS) {
       this.records = this.records.slice(-env.OPS_HEALTH_SNAPSHOT_MAX_ITEMS);
+    }
+
+    if (this.mode === "postgres") {
+      const persisted = await this.appendToPostgres(record);
+
+      if (persisted) {
+        return;
+      }
+
+      this.mode = "file";
     }
 
     await this.persistToDisk();
@@ -108,12 +143,144 @@ export class OperationalHealthHistoryStore {
 
     const removedCount = this.records.length;
     this.records = [];
+
+    if (this.mode === "postgres") {
+      const cleared = await this.clearPostgres();
+
+      if (cleared) {
+        return {
+          clearedAt: new Date().toISOString(),
+          removedCount,
+        };
+      }
+
+      this.mode = "file";
+    }
+
     await this.persistToDisk();
 
     return {
       clearedAt: new Date().toISOString(),
       removedCount,
     };
+  }
+
+  private async appendToPostgres(record: PersistedOperationalHealthRecord): Promise<boolean> {
+    try {
+      const pool = getPostgresPool();
+
+      await pool.query(
+        `
+          INSERT INTO operational_health_snapshots (recorded_at, snapshot)
+          VALUES ($1, $2::jsonb)
+        `,
+        [record.recordedAt, JSON.stringify(record.snapshot)],
+      );
+
+      await pool.query(
+        `
+          DELETE FROM operational_health_snapshots
+          WHERE id IN (
+            SELECT id
+            FROM operational_health_snapshots
+            ORDER BY recorded_at DESC, id DESC
+            OFFSET $1
+          )
+        `,
+        [env.OPS_HEALTH_SNAPSHOT_MAX_ITEMS],
+      );
+
+      return true;
+    } catch (error) {
+      logger.warn(
+        {
+          err: error,
+        },
+        "Failed to persist operational health snapshot in postgres, switching to file mode",
+      );
+
+      return false;
+    }
+  }
+
+  private async clearPostgres(): Promise<boolean> {
+    try {
+      const pool = getPostgresPool();
+      await pool.query("DELETE FROM operational_health_snapshots");
+      return true;
+    } catch (error) {
+      logger.warn(
+        {
+          err: error,
+        },
+        "Failed to clear operational health snapshots in postgres, switching to file mode",
+      );
+
+      return false;
+    }
+  }
+
+  private async initializePostgres(): Promise<boolean> {
+    try {
+      const pool = getPostgresPool();
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS operational_health_snapshots (
+          id BIGSERIAL PRIMARY KEY,
+          recorded_at TIMESTAMPTZ NOT NULL,
+          snapshot JSONB NOT NULL
+        )
+      `);
+
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_operational_health_snapshots_recorded_at
+        ON operational_health_snapshots (recorded_at DESC)
+      `);
+
+      const result = await pool.query<{ recorded_at: Date | string; snapshot: unknown }>(
+        `
+          SELECT recorded_at, snapshot
+          FROM operational_health_snapshots
+          ORDER BY recorded_at DESC, id DESC
+          LIMIT $1
+        `,
+        [clampLimit(env.OPS_HEALTH_SNAPSHOT_MAX_ITEMS)],
+      );
+
+      const parsedRecords: PersistedOperationalHealthRecord[] = [];
+
+      for (const row of result.rows) {
+        const recordedAt =
+          row.recorded_at instanceof Date ? row.recorded_at.toISOString() : String(row.recorded_at);
+
+        if (Number.isNaN(Date.parse(recordedAt))) {
+          continue;
+        }
+
+        const parsedSnapshot = operationalHealthSnapshotSchema.safeParse(row.snapshot);
+
+        if (!parsedSnapshot.success) {
+          continue;
+        }
+
+        parsedRecords.push({
+          recordedAt,
+          snapshot: parsedSnapshot.data,
+        });
+      }
+
+      this.records = parsedRecords.reverse();
+      return true;
+    } catch (error) {
+      logger.warn(
+        {
+          err: error,
+        },
+        "Failed to initialize operational health snapshots in postgres, using file mode",
+      );
+
+      return false;
+    }
   }
 
   private async loadFromDisk(): Promise<void> {

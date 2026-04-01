@@ -19,6 +19,22 @@ Monorepo TypeScript para um ecossistema de mercado financeiro global e cripto.
 2. Typecheck: `npm run typecheck`
 3. Check completo: `npm run check`
 
+## Persistencia (Supabase/Postgres)
+
+Modo recomendado em producao: Supabase Postgres para trilha operacional e auditoria do Copiloto.
+
+1. `DATABASE_PROVIDER=postgres`
+2. `DATABASE_URL=postgresql://...`
+3. `DATABASE_SSL=true`
+4. `DATABASE_SSL_REJECT_UNAUTHORIZED=false` (comum no Supabase)
+
+Com `DATABASE_PROVIDER=auto` (default), a API usa Postgres quando `DATABASE_URL` existe e faz fallback para arquivo local quando nao existe.
+
+Dados persistidos:
+
+1. snapshots de health operacional
+2. auditoria de interacoes do Copiloto (mensagem, resposta, tools usadas)
+
 ## Estrategia de custo zero
 
 1. Priorizar provedores gratuitos e open-source.

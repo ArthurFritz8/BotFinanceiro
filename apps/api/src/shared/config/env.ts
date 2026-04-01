@@ -93,11 +93,41 @@ const environmentSchema = z
     OPENROUTER_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
     OPENROUTER_APP_NAME: z.string().trim().default("BotFinanceiro"),
     OPENROUTER_APP_URL: z.union([z.string().url(), z.literal("")]).default(""),
+    COPILOT_CHAT_AUDIT_ENABLED: booleanFromString.default("true"),
+    COPILOT_CHAT_AUDIT_MAX_ITEMS: z.coerce.number().int().min(50).max(200000).default(5000),
+    COPILOT_CHAT_AUDIT_FILE_PATH: z
+      .string()
+      .trim()
+      .min(1)
+      .default(".runtime/copilot-chat-audit.json"),
     YAHOO_FINANCE_API_BASE_URL: z.string().url(),
-    DATABASE_URL: z.union([z.string().url(), z.literal("")]).optional(),
+    DATABASE_PROVIDER: z.enum(["auto", "file", "postgres"]).default("auto"),
+    DATABASE_URL: z.union([z.string().url(), z.literal("")]).default(""),
+    DATABASE_SSL: booleanFromString.default("false"),
+    DATABASE_SSL_REJECT_UNAUTHORIZED: booleanFromString.default("true"),
     JWT_SECRET: z.union([z.string().min(16), z.literal("")]).optional(),
   })
   .superRefine((value, ctx) => {
+    const hasDatabaseUrl = value.DATABASE_URL.length > 0;
+    const isPostgresConnectionString =
+      value.DATABASE_URL.startsWith("postgres://") || value.DATABASE_URL.startsWith("postgresql://");
+
+    if (hasDatabaseUrl && !isPostgresConnectionString) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "DATABASE_URL must start with postgres:// or postgresql://",
+        path: ["DATABASE_URL"],
+      });
+    }
+
+    if (value.DATABASE_PROVIDER === "postgres" && !hasDatabaseUrl) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "DATABASE_URL is required when DATABASE_PROVIDER is postgres",
+        path: ["DATABASE_URL"],
+      });
+    }
+
     if (value.NODE_ENV !== "production") {
       return;
     }

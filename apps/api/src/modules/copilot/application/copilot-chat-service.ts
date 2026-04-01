@@ -4,6 +4,8 @@ import {
   type OpenRouterToolDefinition,
 } from "../../../integrations/ai/openrouter-chat-adapter.js";
 import { AppError } from "../../../shared/errors/app-error.js";
+import { logger } from "../../../shared/logger/logger.js";
+import { copilotChatAuditStore } from "../../../shared/observability/copilot-chat-audit-store.js";
 import {
   CryptoSpotPriceService,
   type SpotPriceResponse,
@@ -234,6 +236,22 @@ const copilotTools: OpenRouterToolDefinition[] = [
 
 export class CopilotChatService {
   public async chat(input: CopilotChatInput): Promise<OpenRouterChatCompletion> {
-    return openRouterChatAdapter.createCompletionWithTools(input, copilotTools);
+    const completion = await openRouterChatAdapter.createCompletionWithTools(input, copilotTools);
+
+    try {
+      await copilotChatAuditStore.append({
+        completion,
+        input,
+      });
+    } catch (error) {
+      logger.warn(
+        {
+          err: error,
+        },
+        "Failed to append copilot chat audit record",
+      );
+    }
+
+    return completion;
   }
 }
