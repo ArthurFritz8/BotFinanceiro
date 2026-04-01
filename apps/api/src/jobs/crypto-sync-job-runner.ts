@@ -7,6 +7,7 @@ import {
   type SyncScope,
 } from "../modules/crypto/application/crypto-sync-policy-service.js";
 import { env } from "../shared/config/env.js";
+import { AppError } from "../shared/errors/app-error.js";
 import { logger } from "../shared/logger/logger.js";
 import { DailyBudgetGuard } from "../shared/scheduler/daily-budget-guard.js";
 import { TokenBucketRateLimiter } from "../shared/scheduler/token-bucket-rate-limiter.js";
@@ -106,6 +107,23 @@ function sleep(delayMs: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, delayMs);
   });
+}
+
+function isCoinGeckoRateLimitError(error: unknown): boolean {
+  if (!(error instanceof AppError)) {
+    return false;
+  }
+
+  if (error.code !== "COINGECKO_BAD_STATUS") {
+    return false;
+  }
+
+  if (typeof error.details !== "object" || error.details === null) {
+    return false;
+  }
+
+  const responseStatus = (error.details as Record<string, unknown>).responseStatus;
+  return responseStatus === 429;
 }
 
 export class CryptoSyncJobRunner {
@@ -369,6 +387,22 @@ export class CryptoSyncJobRunner {
       } catch (error) {
         this.budgetGuard.consume(1);
         failed += 1;
+
+        if (isCoinGeckoRateLimitError(error)) {
+          logger.info(
+            {
+              assetId,
+              currency: env.CRYPTO_SYNC_TARGET_CURRENCY,
+              responseStatus: 429,
+              scope: schedule.scope,
+            },
+            "CoinGecko rate limit during scheduler refresh",
+          );
+
+          processedAssets += 1;
+          await sleep(this.getInterRequestDelayMs());
+          continue;
+        }
 
         logger.warn(
           {

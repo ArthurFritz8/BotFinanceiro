@@ -52,6 +52,23 @@ function isRetryableProviderError(error: unknown): boolean {
   return error.details.retryable;
 }
 
+function isRateLimitedProviderError(error: unknown): boolean {
+  if (!(error instanceof AppError)) {
+    return false;
+  }
+
+  if (error.code !== "COINGECKO_BAD_STATUS") {
+    return false;
+  }
+
+  if (typeof error.details !== "object" || error.details === null) {
+    return false;
+  }
+
+  const responseStatus = (error.details as Record<string, unknown>).responseStatus;
+  return responseStatus === 429;
+}
+
 function isRetryableStatusCode(statusCode: number): boolean {
   return statusCode === 408 || statusCode === 425 || statusCode === 429 || statusCode >= 500;
 }
@@ -102,6 +119,20 @@ export class CoinGeckoSpotPriceAdapter {
     } catch (error) {
       if (isRetryableProviderError(error)) {
         coinGeckoCircuitBreaker.onFailure();
+
+        if (isRateLimitedProviderError(error)) {
+          logger.info(
+            {
+              assetId: parsedInput.assetId,
+              circuit: coinGeckoCircuitBreaker.getSnapshot(),
+              currency: parsedInput.currency,
+              responseStatus: 429,
+            },
+            "CoinGecko rate limit detected by circuit breaker",
+          );
+
+          throw error;
+        }
 
         logger.warn(
           {
