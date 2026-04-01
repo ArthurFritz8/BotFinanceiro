@@ -87,6 +87,12 @@ const environmentSchema = z
           .map((ip) => ip.trim())
           .filter((ip) => ip.length > 0),
       ),
+    OPENROUTER_API_KEY: z.string().trim().default(""),
+    OPENROUTER_MODEL: z.string().trim().min(1).default("google/gemini-1.5-flash"),
+    OPENROUTER_API_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
+    OPENROUTER_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
+    OPENROUTER_APP_NAME: z.string().trim().default("BotFinanceiro"),
+    OPENROUTER_APP_URL: z.union([z.string().url(), z.literal("")]).default(""),
     YAHOO_FINANCE_API_BASE_URL: z.string().url(),
     DATABASE_URL: z.union([z.string().url(), z.literal("")]).optional(),
     JWT_SECRET: z.union([z.string().min(16), z.literal("")]).optional(),

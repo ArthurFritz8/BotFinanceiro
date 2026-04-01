@@ -48,3 +48,22 @@ curl "http://localhost:3000/internal/health/operational/history/aggregate.csv?gr
 	-H "x-internal-token: $INTERNAL_API_TOKEN" \
 	-o operational-health-aggregate.csv
 ```
+
+## Copiloto IA (OpenRouter)
+
+Configure as variaveis no `.env`:
+
+1. `OPENROUTER_API_KEY`
+2. `OPENROUTER_MODEL`
+3. `OPENROUTER_API_BASE_URL`
+4. `OPENROUTER_TIMEOUT_MS`
+5. `OPENROUTER_APP_NAME`
+6. `OPENROUTER_APP_URL` (opcional)
+
+Exemplo de chamada:
+
+```bash
+curl "http://localhost:3000/v1/copilot/chat" \
+	-H "Content-Type: application/json" \
+	-d '{"message":"Resuma o mercado cripto de hoje","temperature":0.1,"maxTokens":350}'
+```

@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 
+import { registerCopilotRoutes } from "../modules/copilot/interface/copilot-routes.js";
 import { registerCryptoRoutes } from "../modules/crypto/interface/crypto-routes.js";
 import { registerSystemRoutes } from "../modules/system/interface/system-routes.js";
 import { httpErrorHandler } from "../shared/errors/http-error-handler.js";
@@ -28,6 +29,7 @@ export function buildApp() {
   registerSystemRoutes(app);
   void app.register(
     (instance, _, done) => {
+      registerCopilotRoutes(instance);
       registerCryptoRoutes(instance);
       done();
     },
