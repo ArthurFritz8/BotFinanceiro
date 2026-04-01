@@ -31,6 +31,7 @@ interface CopilotChatResponse {
   model: string;
   provider: "openrouter";
   responseId: string;
+  toolCallsUsed: string[];
   usage: {
     completionTokens?: number;
     promptTokens?: number;
@@ -155,7 +156,114 @@ void it("POST /v1/copilot/chat retorna resposta da IA quando OpenRouter esta con
   assert.equal(body.data.model, "google/gemini-1.5-flash");
   assert.equal(body.data.answer, "Resumo: BTC em consolidacao e ETH com leve alta.");
   assert.equal(body.data.responseId, "gen-test-001");
+  assert.deepEqual(body.data.toolCallsUsed, []);
   assert.equal(body.data.usage.totalTokens, 32);
+});
+
+void it("POST /v1/copilot/chat executa fluxo de tool calling read-only", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  const capturedRequestBodies: string[] = [];
+  let fetchCallCount = 0;
+
+  globalThis.fetch = ((_, init) => {
+    fetchCallCount += 1;
+    capturedRequestBodies.push(typeof init?.body === "string" ? init.body : "");
+
+    if (fetchCallCount === 1) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: null,
+                  role: "assistant",
+                  tool_calls: [
+                    {
+                      function: {
+                        arguments: "{}",
+                        name: "get_crypto_sync_policy",
+                      },
+                      id: "call_sync_1",
+                      type: "function",
+                    },
+                  ],
+                },
+              },
+            ],
+            id: "gen-tool-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 18,
+              prompt_tokens: 26,
+              total_tokens: 44,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content:
+                  "A politica atual esta em modo normal com intervalos de hot em 180s, warm em 300s e cold em 21600s.",
+                role: "assistant",
+              },
+            },
+          ],
+          id: "gen-tool-002",
+          model: "google/gemini-1.5-flash",
+          usage: {
+            completion_tokens: 21,
+            prompt_tokens: 41,
+            total_tokens: 62,
+          },
+        }),
+        {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 200,
+        },
+      ),
+    );
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Qual a politica de sincronizacao atual?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(fetchCallCount, 2);
+  assert.match(capturedRequestBodies[0] ?? "", /"tools":\[/);
+  assert.match(capturedRequestBodies[1] ?? "", /"role":"tool"/);
+  assert.match(capturedRequestBodies[1] ?? "", /"name":"get_crypto_sync_policy"/);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(
+    body.data.answer,
+    "A politica atual esta em modo normal com intervalos de hot em 180s, warm em 300s e cold em 21600s.",
+  );
+  assert.deepEqual(body.data.toolCallsUsed, ["get_crypto_sync_policy"]);
+  assert.equal(body.data.responseId, "gen-tool-002");
+  assert.equal(body.data.usage.totalTokens, 62);
 });
 
 void it("POST /v1/copilot/chat retorna 400 para payload invalido", async () => {

@@ -68,6 +68,14 @@ curl "http://localhost:3000/v1/copilot/chat" \
 	-d '{"message":"Resuma o mercado cripto de hoje","temperature":0.1,"maxTokens":350}'
 ```
 
+Tool calling read-only habilitado no Copiloto:
+
+1. `get_crypto_spot_price`
+2. `get_operational_health`
+3. `get_crypto_sync_policy`
+
+Quando o modelo usa ferramentas, a resposta inclui `toolCallsUsed` com a lista das tools executadas no fluxo.
+
 ## Interface web do Copiloto
 
 1. Suba a API:
