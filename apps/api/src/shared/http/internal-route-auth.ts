@@ -6,6 +6,7 @@ import { env } from "../config/env.js";
 import { AppError } from "../errors/app-error.js";
 
 const INTERNAL_TOKEN_HEADER = "x-internal-token";
+const FORWARDED_FOR_HEADER = "x-forwarded-for";
 
 function extractHeaderToken(request: FastifyRequest): string | null {
   const headerValue = request.headers[INTERNAL_TOKEN_HEADER];
@@ -31,6 +32,40 @@ function constantTimeCompare(left: string, right: string): boolean {
   }
 
   return timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function extractClientIps(request: FastifyRequest): string[] {
+  const candidates = new Set<string>();
+
+  if (typeof request.ip === "string" && request.ip.trim().length > 0) {
+    candidates.add(request.ip.trim());
+  }
+
+  const forwardedForHeader = request.headers[FORWARDED_FOR_HEADER];
+
+  if (typeof forwardedForHeader === "string") {
+    for (const ip of forwardedForHeader.split(",").map((value) => value.trim())) {
+      if (ip.length > 0) {
+        candidates.add(ip);
+      }
+    }
+  }
+
+  if (Array.isArray(forwardedForHeader)) {
+    for (const value of forwardedForHeader) {
+      if (typeof value !== "string") {
+        continue;
+      }
+
+      for (const ip of value.split(",").map((item) => item.trim())) {
+        if (ip.length > 0) {
+          candidates.add(ip);
+        }
+      }
+    }
+  }
+
+  return [...candidates];
 }
 
 export function assertInternalRouteAuth(request: FastifyRequest): void {
@@ -59,4 +94,24 @@ export function assertInternalRouteAuth(request: FastifyRequest): void {
       statusCode: 401,
     });
   }
+
+  if (env.INTERNAL_ALLOWED_IPS.length === 0) {
+    return;
+  }
+
+  const clientIps = extractClientIps(request);
+  const isAllowed = clientIps.some((ip) => env.INTERNAL_ALLOWED_IPS.includes(ip));
+
+  if (isAllowed) {
+    return;
+  }
+
+  throw new AppError({
+    code: "INTERNAL_AUTH_IP_NOT_ALLOWED",
+    details: {
+      clientIps,
+    },
+    message: "Client IP is not allowed for internal routes",
+    statusCode: 403,
+  });
 }

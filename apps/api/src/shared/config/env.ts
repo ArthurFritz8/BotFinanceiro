@@ -59,6 +59,15 @@ const environmentSchema = z
       )
       .refine((assets) => assets.length > 0, "CRYPTO_SYNC_COLD_ASSETS must have at least one asset"),
     INTERNAL_API_TOKEN: z.string().trim().default(""),
+    INTERNAL_ALLOWED_IPS: z
+      .string()
+      .default("")
+      .transform((value) =>
+        value
+          .split(",")
+          .map((ip) => ip.trim())
+          .filter((ip) => ip.length > 0),
+      ),
     YAHOO_FINANCE_API_BASE_URL: z.string().url(),
     DATABASE_URL: z.union([z.string().url(), z.literal("")]).optional(),
     JWT_SECRET: z.union([z.string().min(16), z.literal("")]).optional(),
