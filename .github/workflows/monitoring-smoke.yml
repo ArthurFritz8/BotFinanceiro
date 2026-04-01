@@ -46,8 +46,14 @@ jobs:
       - name: Start local API fallback when URL is missing
         run: |
           if [[ -n "${MONITOR_BASE_URL}" ]]; then
-            echo "Using external MONITOR_BASE_URL=${MONITOR_BASE_URL}"
-            exit 0
+            echo "External MONITOR_BASE_URL configured: ${MONITOR_BASE_URL}"
+
+            if curl --silent --fail --max-time 15 "${MONITOR_BASE_URL}/health" >/dev/null; then
+              echo "External monitor target is reachable."
+              exit 0
+            fi
+
+            echo "External monitor target is not reachable. Falling back to local API."
           fi
 
           echo "MONITOR_BASE_URL not configured. Starting local API fallback."
