@@ -131,3 +131,21 @@ export function getOperationalHealthHistoryAggregated(
 
   void reply.send(buildSuccessResponse(request.id, data));
 }
+
+export function exportOperationalHealthHistoryAggregatedCsv(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): void {
+  const parsedQuery = aggregateHistoryQuerySchema.parse(request.query);
+  const csvExport = systemStatusService.getOperationalHealthHistoryAggregatedCsv({
+    bucketLimit: parsedQuery.bucketLimit,
+    from: parsedQuery.from,
+    granularity: parsedQuery.granularity,
+    to: parsedQuery.to,
+  });
+
+  void reply
+    .header("Content-Type", "text/csv; charset=utf-8")
+    .header("Content-Disposition", `attachment; filename="${csvExport.fileName}"`)
+    .send(csvExport.csv);
+}

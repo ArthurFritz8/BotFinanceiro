@@ -95,6 +95,21 @@ export interface OperationalHealthHistoryAggregated {
   totalStored: number;
 }
 
+export interface OperationalHealthHistoryAggregatedCsvExport {
+  bucketLimit: number;
+  csv: string;
+  exportedCount: number;
+  fileName: string;
+  filters: {
+    from: string | null;
+    to: string | null;
+  };
+  generatedAt: string;
+  granularity: OperationalHealthAggregationGranularity;
+  totalBuckets: number;
+  totalStored: number;
+}
+
 export interface OperationalHealthHistoryCsvExport {
   csv: string;
   exportedCount: number;
@@ -556,5 +571,54 @@ export class SystemStatusService {
   ): OperationalHealthHistoryAggregated {
     const records = operationalHealthHistoryStore.getRecent(env.OPS_HEALTH_SNAPSHOT_MAX_ITEMS);
     return aggregateHistoryByGranularity(records, options);
+  }
+
+  public getOperationalHealthHistoryAggregatedCsv(
+    options: OperationalHistoryAggregationOptions = {},
+  ): OperationalHealthHistoryAggregatedCsvExport {
+    const aggregatedHistory = this.getOperationalHealthHistoryAggregated(options);
+    const headers = [
+      "bucket_start",
+      "bucket_end",
+      "sample_count",
+      "status_ok",
+      "status_warning",
+      "status_critical",
+      "avg_budget_remaining_percent",
+      "max_consecutive_open_cycles",
+      "max_scope_failure_rate_percent",
+    ];
+    const lines = [buildCsvRow(headers)];
+
+    for (const bucket of aggregatedHistory.buckets) {
+      lines.push(
+        buildCsvRow([
+          bucket.bucketStart,
+          bucket.bucketEnd,
+          bucket.sampleCount,
+          bucket.statusCounts.ok,
+          bucket.statusCounts.warning,
+          bucket.statusCounts.critical,
+          bucket.avgBudgetRemainingPercent,
+          bucket.maxConsecutiveOpenCycles,
+          bucket.maxScopeFailureRatePercent,
+        ]),
+      );
+    }
+
+    const generatedAt = new Date().toISOString();
+    const safeDate = generatedAt.replaceAll(":", "-").replaceAll(".", "-");
+
+    return {
+      bucketLimit: aggregatedHistory.bucketLimit,
+      csv: lines.join("\n"),
+      exportedCount: aggregatedHistory.buckets.length,
+      fileName: `operational-health-history-aggregate-${aggregatedHistory.granularity}-${safeDate}.csv`,
+      filters: aggregatedHistory.filters,
+      generatedAt,
+      granularity: aggregatedHistory.granularity,
+      totalBuckets: aggregatedHistory.totalBuckets,
+      totalStored: aggregatedHistory.totalStored,
+    };
   }
 }
