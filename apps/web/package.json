@@ -1,0 +1,12 @@
+{
+  "name": "@botfinanceiro/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo \"Web scaffold pending\"",
+    "dev": "echo \"Web scaffold pending\"",
+    "test": "echo \"No web tests yet\"",
+    "typecheck": "echo \"No web typecheck yet\""
+  }
+}

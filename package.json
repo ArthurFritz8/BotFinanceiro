@@ -1,0 +1,33 @@
+{
+  "name": "botfinanceiro",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/api",
+    "apps/web",
+    "packages/shared_types",
+    "packages/shared_schemas",
+    "packages/shared_utils",
+    "packages/eslint_tsconfig_presets"
+  ],
+  "scripts": {
+    "build": "npm run build -ws --if-present",
+    "check": "npm run lint && npm run typecheck",
+    "dev:api": "npm run dev -w @botfinanceiro/api",
+    "format": "prettier --write .",
+    "lint": "eslint apps/api/src --ext .ts --max-warnings=0",
+    "test": "npm run test -ws --if-present",
+    "typecheck": "tsc -b"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.3.3",
+    "typescript": "5.5.4"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

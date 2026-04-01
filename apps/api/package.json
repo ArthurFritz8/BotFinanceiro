@@ -1,0 +1,25 @@
+{
+  "name": "@botfinanceiro/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main/server.js",
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsx watch src/main/server.ts",
+    "lint": "eslint src --ext .ts --max-warnings=0",
+    "start": "node dist/main/server.js",
+    "test": "echo \"No API tests yet\"",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "fastify": "^5.1.0",
+    "pino": "^9.5.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "tsx": "^4.19.2"
+  }
+}
