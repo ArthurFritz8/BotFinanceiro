@@ -101,6 +101,21 @@ export class OperationalHealthHistoryStore {
     await this.persistToDisk();
   }
 
+  public async clear(): Promise<{ clearedAt: string; removedCount: number }> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    const removedCount = this.records.length;
+    this.records = [];
+    await this.persistToDisk();
+
+    return {
+      clearedAt: new Date().toISOString(),
+      removedCount,
+    };
+  }
+
   private async loadFromDisk(): Promise<void> {
     try {
       const content = await readFile(this.filePath, "utf8");

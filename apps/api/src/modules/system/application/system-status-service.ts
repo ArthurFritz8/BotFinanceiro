@@ -55,6 +55,11 @@ export interface OperationalHealthHistory {
   totalStored: number;
 }
 
+export interface OperationalHealthHistoryClearResult {
+  clearedAt: string;
+  removedCount: number;
+}
+
 function roundToTwoDecimals(value: number): number {
   return Math.round(value * 100) / 100;
 }
@@ -241,5 +246,9 @@ export class SystemStatusService {
       records,
       totalStored: operationalHealthHistoryStore.getStoredCount(),
     };
+  }
+
+  public async clearOperationalHealthHistory(): Promise<OperationalHealthHistoryClearResult> {
+    return operationalHealthHistoryStore.clear();
   }
 }
