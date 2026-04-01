@@ -50,8 +50,13 @@ export interface OperationalHealthStatus {
 }
 
 export interface OperationalHealthHistory {
+  filters: {
+    from: string | null;
+    to: string | null;
+  };
   limit: number;
   records: PersistedOperationalHealthRecord[];
+  totalMatched: number;
   totalStored: number;
 }
 
@@ -64,9 +69,20 @@ export interface OperationalHealthHistoryCsvExport {
   csv: string;
   exportedCount: number;
   fileName: string;
+  filters: {
+    from: string | null;
+    to: string | null;
+  };
   generatedAt: string;
   limit: number;
+  totalMatched: number;
   totalStored: number;
+}
+
+export interface OperationalHistoryQueryOptions {
+  from?: Date;
+  limit?: number;
+  to?: Date;
 }
 
 function roundToTwoDecimals(value: number): number {
@@ -117,6 +133,32 @@ function buildScopeFailureRateSummary(
     scope,
     synced: metrics.lastRunSynced,
   };
+}
+
+function applyPeriodFilter(
+  records: PersistedOperationalHealthRecord[],
+  options: OperationalHistoryQueryOptions,
+): PersistedOperationalHealthRecord[] {
+  const fromMs = options.from?.getTime();
+  const toMs = options.to?.getTime();
+
+  return records.filter((record) => {
+    const recordedAtMs = Date.parse(record.recordedAt);
+
+    if (Number.isNaN(recordedAtMs)) {
+      return false;
+    }
+
+    if (fromMs !== undefined && recordedAtMs < fromMs) {
+      return false;
+    }
+
+    if (toMs !== undefined && recordedAtMs > toMs) {
+      return false;
+    }
+
+    return true;
+  });
 }
 
 export class SystemStatusService {
@@ -275,13 +317,20 @@ export class SystemStatusService {
     };
   }
 
-  public getOperationalHealthHistory(limit = 50): OperationalHealthHistory {
-    const safeLimit = Math.max(1, Math.min(limit, env.OPS_HEALTH_SNAPSHOT_MAX_ITEMS));
-    const records = operationalHealthHistoryStore.getRecent(safeLimit);
+  public getOperationalHealthHistory(options: OperationalHistoryQueryOptions = {}): OperationalHealthHistory {
+    const safeLimit = Math.max(1, Math.min(options.limit ?? 50, env.OPS_HEALTH_SNAPSHOT_MAX_ITEMS));
+    const allRecords = operationalHealthHistoryStore.getRecent(env.OPS_HEALTH_SNAPSHOT_MAX_ITEMS);
+    const filteredRecords = applyPeriodFilter(allRecords, options);
+    const limitedRecords = filteredRecords.slice(0, safeLimit);
 
     return {
+      filters: {
+        from: options.from ? options.from.toISOString() : null,
+        to: options.to ? options.to.toISOString() : null,
+      },
       limit: safeLimit,
-      records,
+      records: limitedRecords,
+      totalMatched: filteredRecords.length,
       totalStored: operationalHealthHistoryStore.getStoredCount(),
     };
   }
@@ -290,8 +339,10 @@ export class SystemStatusService {
     return operationalHealthHistoryStore.clear();
   }
 
-  public getOperationalHealthHistoryCsv(limit = 50): OperationalHealthHistoryCsvExport {
-    const history = this.getOperationalHealthHistory(limit);
+  public getOperationalHealthHistoryCsv(
+    options: OperationalHistoryQueryOptions = {},
+  ): OperationalHealthHistoryCsvExport {
+    const history = this.getOperationalHealthHistory(options);
     const headers = [
       "recorded_at",
       "status",
@@ -338,8 +389,10 @@ export class SystemStatusService {
       csv: lines.join("\n"),
       exportedCount: history.records.length,
       fileName: `operational-health-history-${safeDate}.csv`,
+      filters: history.filters,
       generatedAt,
       limit: history.limit,
+      totalMatched: history.totalMatched,
       totalStored: history.totalStored,
     };
   }

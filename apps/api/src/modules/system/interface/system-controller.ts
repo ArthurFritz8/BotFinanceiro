@@ -6,8 +6,31 @@ import { SystemStatusService } from "../application/system-status-service.js";
 
 const systemStatusService = new SystemStatusService();
 
+const optionalDateTimeSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .transform((value) => new Date(value))
+  .refine((value) => !Number.isNaN(value.getTime()), "must be a valid datetime");
+
 const historyQuerySchema = z.object({
+  from: optionalDateTimeSchema.optional(),
   limit: z.coerce.number().int().min(1).max(10000).default(50),
+  to: optionalDateTimeSchema.optional(),
+}).superRefine((value, ctx) => {
+  if (!value.from || !value.to) {
+    return;
+  }
+
+  if (value.from.getTime() <= value.to.getTime()) {
+    return;
+  }
+
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    message: "from must be less than or equal to to",
+    path: ["from"],
+  });
 });
 
 const clearHistoryQuerySchema = z.object({
@@ -39,7 +62,11 @@ export function getOperationalHealth(request: FastifyRequest, reply: FastifyRepl
 
 export function getOperationalHealthHistory(request: FastifyRequest, reply: FastifyReply): void {
   const parsedQuery = historyQuerySchema.parse(request.query);
-  const data = systemStatusService.getOperationalHealthHistory(parsedQuery.limit);
+  const data = systemStatusService.getOperationalHealthHistory({
+    from: parsedQuery.from,
+    limit: parsedQuery.limit,
+    to: parsedQuery.to,
+  });
   void reply.send(buildSuccessResponse(request.id, data));
 }
 
@@ -57,7 +84,11 @@ export function exportOperationalHealthHistoryCsv(
   reply: FastifyReply,
 ): void {
   const parsedQuery = historyQuerySchema.parse(request.query);
-  const csvExport = systemStatusService.getOperationalHealthHistoryCsv(parsedQuery.limit);
+  const csvExport = systemStatusService.getOperationalHealthHistoryCsv({
+    from: parsedQuery.from,
+    limit: parsedQuery.limit,
+    to: parsedQuery.to,
+  });
 
   void reply
     .header("Content-Type", "text/csv; charset=utf-8")
