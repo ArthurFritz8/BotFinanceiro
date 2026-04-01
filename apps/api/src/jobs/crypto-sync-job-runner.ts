@@ -16,6 +16,81 @@ interface ScopeSchedule {
   scope: SyncScope;
 }
 
+interface ScopeRuntimeMetrics {
+  assets: string[];
+  intervalSeconds: number;
+  lastRunCompletedAt: string | null;
+  lastRunDurationMs: number | null;
+  lastRunFailed: number;
+  lastRunSkippedByBudget: number;
+  lastRunSkippedByRate: number;
+  lastRunStartedAt: string | null;
+  lastRunSynced: number;
+  nextRunAt: string | null;
+  totalFailed: number;
+  totalRuns: number;
+  totalSkippedByBudget: number;
+  totalSkippedByRate: number;
+  totalSynced: number;
+}
+
+export interface CryptoSchedulerScopeMetrics {
+  assets: string[];
+  intervalSeconds: number;
+  lastRunCompletedAt: string | null;
+  lastRunDurationMs: number | null;
+  lastRunFailed: number;
+  lastRunSkippedByBudget: number;
+  lastRunSkippedByRate: number;
+  lastRunStartedAt: string | null;
+  lastRunSynced: number;
+  nextRunAt: string | null;
+  scope: SyncScope;
+  totalFailed: number;
+  totalRuns: number;
+  totalSkippedByBudget: number;
+  totalSkippedByRate: number;
+  totalSynced: number;
+}
+
+export interface CryptoSchedulerMetricsSnapshot {
+  dailyBudget: {
+    consumed: number;
+    limit: number;
+    remaining: number;
+  };
+  generatedAt: string;
+  rateLimiter: {
+    availableTokens: number;
+    maxRequestsPerMinute: number;
+  };
+  schedulerEconomyMode: boolean;
+  schedulerEnabled: boolean;
+  schedulerStarted: boolean;
+  scopes: Record<SyncScope, CryptoSchedulerScopeMetrics>;
+  targetCurrency: string;
+}
+
+function createInitialScopeMetrics(): ScopeRuntimeMetrics {
+  return {
+    assets: [],
+    intervalSeconds: 0,
+    lastRunCompletedAt: null,
+    lastRunDurationMs: null,
+    lastRunFailed: 0,
+    lastRunSkippedByBudget: 0,
+    lastRunSkippedByRate: 0,
+    lastRunStartedAt: null,
+    lastRunSynced: 0,
+    nextRunAt: null,
+    totalFailed: 0,
+    totalRuns: 0,
+    totalSkippedByBudget: 0,
+    totalSkippedByRate: 0,
+    totalSynced: 0,
+  };
+}
+
 function sleep(delayMs: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, delayMs);
@@ -31,6 +106,11 @@ export class CryptoSyncJobRunner {
   private readonly syncPolicyService = new CryptoSyncPolicyService();
   private readonly spotPriceService = new CryptoSpotPriceService();
   private readonly timeoutSet = new Set<NodeJS.Timeout>();
+  private readonly scopeMetrics: Record<SyncScope, ScopeRuntimeMetrics> = {
+    cold: createInitialScopeMetrics(),
+    hot: createInitialScopeMetrics(),
+    warm: createInitialScopeMetrics(),
+  };
 
   private started = false;
 
@@ -67,6 +147,30 @@ export class CryptoSyncJobRunner {
     }
   }
 
+  public getMetricsSnapshot(): CryptoSchedulerMetricsSnapshot {
+    return {
+      dailyBudget: {
+        consumed: this.budgetGuard.getConsumed(),
+        limit: env.COINGECKO_DAILY_BUDGET,
+        remaining: this.budgetGuard.getRemaining(),
+      },
+      generatedAt: new Date().toISOString(),
+      rateLimiter: {
+        availableTokens: this.rateLimiter.getAvailableTokens(),
+        maxRequestsPerMinute: env.COINGECKO_MAX_REQUESTS_PER_MINUTE,
+      },
+      schedulerEconomyMode: env.SCHEDULER_ECONOMY_MODE,
+      schedulerEnabled: env.SCHEDULER_ENABLED,
+      schedulerStarted: this.started,
+      scopes: {
+        cold: this.buildScopeSnapshot("cold"),
+        hot: this.buildScopeSnapshot("hot"),
+        warm: this.buildScopeSnapshot("warm"),
+      },
+      targetCurrency: env.CRYPTO_SYNC_TARGET_CURRENCY,
+    };
+  }
+
   public stop(): void {
     if (!this.started) {
       return;
@@ -85,7 +189,7 @@ export class CryptoSyncJobRunner {
   private buildScopeSchedules(): ScopeSchedule[] {
     const fullPolicy = this.syncPolicyService.getPolicy();
 
-    return [
+    const schedules: ScopeSchedule[] = [
       {
         assets: env.CRYPTO_SYNC_HOT_ASSETS,
         intervalSeconds: fullPolicy.policy.hot.intervalSeconds,
@@ -102,6 +206,37 @@ export class CryptoSyncJobRunner {
         scope: "cold",
       },
     ];
+
+    for (const schedule of schedules) {
+      const metrics = this.scopeMetrics[schedule.scope];
+      metrics.assets = [...schedule.assets];
+      metrics.intervalSeconds = schedule.intervalSeconds;
+    }
+
+    return schedules;
+  }
+
+  private buildScopeSnapshot(scope: SyncScope): CryptoSchedulerScopeMetrics {
+    const metrics = this.scopeMetrics[scope];
+
+    return {
+      assets: [...metrics.assets],
+      intervalSeconds: metrics.intervalSeconds,
+      lastRunCompletedAt: metrics.lastRunCompletedAt,
+      lastRunDurationMs: metrics.lastRunDurationMs,
+      lastRunFailed: metrics.lastRunFailed,
+      lastRunSkippedByBudget: metrics.lastRunSkippedByBudget,
+      lastRunSkippedByRate: metrics.lastRunSkippedByRate,
+      lastRunStartedAt: metrics.lastRunStartedAt,
+      lastRunSynced: metrics.lastRunSynced,
+      nextRunAt: metrics.nextRunAt,
+      scope,
+      totalFailed: metrics.totalFailed,
+      totalRuns: metrics.totalRuns,
+      totalSkippedByBudget: metrics.totalSkippedByBudget,
+      totalSkippedByRate: metrics.totalSkippedByRate,
+      totalSynced: metrics.totalSynced,
+    };
   }
 
   private computeInitialDelayMs(intervalSeconds: number): number {
@@ -126,8 +261,12 @@ export class CryptoSyncJobRunner {
   }
 
   private scheduleScopeRun(schedule: ScopeSchedule, delayMs: number): void {
+    const metrics = this.scopeMetrics[schedule.scope];
+    metrics.nextRunAt = new Date(Date.now() + delayMs).toISOString();
+
     const timeoutHandle = setTimeout(() => {
       this.timeoutSet.delete(timeoutHandle);
+      this.scopeMetrics[schedule.scope].nextRunAt = null;
 
       void this.runScopeCycle(schedule)
         .catch((error: unknown) => {
@@ -157,6 +296,9 @@ export class CryptoSyncJobRunner {
 
   private async runScopeCycle(schedule: ScopeSchedule): Promise<void> {
     const startedAt = Date.now();
+    const metrics = this.scopeMetrics[schedule.scope];
+    metrics.lastRunStartedAt = new Date(startedAt).toISOString();
+
     let synced = 0;
     let failed = 0;
     let skippedByBudget = 0;
@@ -165,7 +307,7 @@ export class CryptoSyncJobRunner {
 
     for (const assetId of schedule.assets) {
       if (!this.started) {
-        return;
+        break;
       }
 
       if (!this.budgetGuard.canConsume(1)) {
@@ -217,12 +359,27 @@ export class CryptoSyncJobRunner {
       await sleep(this.getInterRequestDelayMs());
     }
 
+    const completedAt = Date.now();
+    const runDurationMs = completedAt - startedAt;
+
+    metrics.lastRunCompletedAt = new Date(completedAt).toISOString();
+    metrics.lastRunDurationMs = runDurationMs;
+    metrics.lastRunFailed = failed;
+    metrics.lastRunSkippedByBudget = skippedByBudget;
+    metrics.lastRunSkippedByRate = skippedByRate;
+    metrics.lastRunSynced = synced;
+    metrics.totalFailed += failed;
+    metrics.totalRuns += 1;
+    metrics.totalSkippedByBudget += skippedByBudget;
+    metrics.totalSkippedByRate += skippedByRate;
+    metrics.totalSynced += synced;
+
     logger.info(
       {
         availableTokens: this.rateLimiter.getAvailableTokens(),
         failed,
         remainingBudget: this.budgetGuard.getRemaining(),
-        runDurationMs: Date.now() - startedAt,
+        runDurationMs,
         scope: schedule.scope,
         skippedByBudget,
         skippedByRate,

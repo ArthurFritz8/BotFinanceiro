@@ -14,3 +14,8 @@ export function getReady(request: FastifyRequest, reply: FastifyReply): void {
   const data = systemStatusService.getReadinessStatus();
   void reply.send(buildSuccessResponse(request.id, data));
 }
+
+export function getSchedulerMetrics(request: FastifyRequest, reply: FastifyReply): void {
+  const data = systemStatusService.getSchedulerMetrics();
+  void reply.send(buildSuccessResponse(request.id, data));
+}

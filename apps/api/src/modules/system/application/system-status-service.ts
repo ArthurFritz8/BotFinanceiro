@@ -1,3 +1,7 @@
+import {
+  cryptoSyncJobRunner,
+  type CryptoSchedulerMetricsSnapshot,
+} from "../../../jobs/crypto-sync-job-runner.js";
 import { env } from "../../../shared/config/env.js";
 
 export interface HealthStatus {
@@ -25,5 +29,9 @@ export class SystemStatusService {
       schedulerEnabled: env.SCHEDULER_ENABLED,
       status: "ready",
     };
+  }
+
+  public getSchedulerMetrics(): CryptoSchedulerMetricsSnapshot {
+    return cryptoSyncJobRunner.getMetricsSnapshot();
   }
 }
