@@ -24,6 +24,16 @@ function buildCacheKey(assetId: string, currency: string): string {
   return `crypto:spot-price:${assetId}:${currency}`;
 }
 
+function normalizeInput(input: { assetId: string; currency: string }): {
+  assetId: string;
+  currency: string;
+} {
+  return {
+    assetId: input.assetId.toLowerCase(),
+    currency: input.currency.toLowerCase(),
+  };
+}
+
 function toResponse(
   payload: SpotPriceData,
   cacheState: SpotPriceCacheState,
@@ -45,10 +55,21 @@ function toResponse(
 export class CryptoSpotPriceService {
   private readonly adapter = new CoinGeckoSpotPriceAdapter();
 
+  public async refreshSpotPrice(input: {
+    assetId: string;
+    currency: string;
+  }): Promise<SpotPriceResponse> {
+    const normalizedInput = normalizeInput(input);
+    const cacheKey = buildCacheKey(normalizedInput.assetId, normalizedInput.currency);
+    const livePrice = await this.adapter.getSpotPrice(normalizedInput);
+
+    memoryCache.set(cacheKey, livePrice, env.CACHE_DEFAULT_TTL_SECONDS, env.CACHE_STALE_SECONDS);
+    return toResponse(livePrice, "refreshed", false);
+  }
+
   public async getSpotPrice(input: { assetId: string; currency: string }): Promise<SpotPriceResponse> {
-    const normalizedAssetId = input.assetId.toLowerCase();
-    const normalizedCurrency = input.currency.toLowerCase();
-    const cacheKey = buildCacheKey(normalizedAssetId, normalizedCurrency);
+    const normalizedInput = normalizeInput(input);
+    const cacheKey = buildCacheKey(normalizedInput.assetId, normalizedInput.currency);
     const cachedPrice = memoryCache.get<SpotPriceData>(cacheKey);
 
     if (cachedPrice.state === "fresh") {
@@ -57,25 +78,13 @@ export class CryptoSpotPriceService {
 
     if (cachedPrice.state === "stale") {
       try {
-        const refreshedPrice = await this.adapter.getSpotPrice({
-          assetId: normalizedAssetId,
-          currency: normalizedCurrency,
-        });
-
-        memoryCache.set(
-          cacheKey,
-          refreshedPrice,
-          env.CACHE_DEFAULT_TTL_SECONDS,
-          env.CACHE_STALE_SECONDS,
-        );
-
-        return toResponse(refreshedPrice, "refreshed", false);
+        return await this.refreshSpotPrice(normalizedInput);
       } catch (error) {
         logger.warn(
           {
-            assetId: normalizedAssetId,
+            assetId: normalizedInput.assetId,
             cacheState: cachedPrice.state,
-            currency: normalizedCurrency,
+            currency: normalizedInput.currency,
             err: error,
           },
           "Using stale crypto spot price due provider failure",
@@ -85,11 +94,7 @@ export class CryptoSpotPriceService {
       }
     }
 
-    const livePrice = await this.adapter.getSpotPrice({
-      assetId: normalizedAssetId,
-      currency: normalizedCurrency,
-    });
-
+    const livePrice = await this.adapter.getSpotPrice(normalizedInput);
     memoryCache.set(cacheKey, livePrice, env.CACHE_DEFAULT_TTL_SECONDS, env.CACHE_STALE_SECONDS);
     return toResponse(livePrice, "miss", false);
   }

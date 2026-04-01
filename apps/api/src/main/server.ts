@@ -1,3 +1,4 @@
+import { cryptoSyncJobRunner } from "../jobs/crypto-sync-job-runner.js";
 import { env } from "../shared/config/env.js";
 import { logger } from "../shared/logger/logger.js";
 import { buildApp } from "./app.js";
@@ -11,6 +12,8 @@ async function startServer(): Promise<void> {
       port: env.APP_PORT,
     });
 
+    cryptoSyncJobRunner.start();
+
     logger.info({ port: env.APP_PORT }, "API started");
   } catch (error) {
     logger.fatal({ err: error }, "Failed to start API");
@@ -22,6 +25,7 @@ async function closeServer(signal: string): Promise<void> {
   logger.warn({ signal }, "Shutdown signal received");
 
   try {
+    cryptoSyncJobRunner.stop();
     await app.close();
     logger.info("Server closed gracefully");
     process.exit(0);

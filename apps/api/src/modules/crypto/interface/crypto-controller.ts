@@ -23,7 +23,9 @@ const cryptoSpotPriceService = new CryptoSpotPriceService();
 
 export function getSyncPolicy(request: FastifyRequest, reply: FastifyReply): void {
   const parsedQuery = syncPolicyQuerySchema.parse(request.query);
-  const policy = cryptoSyncPolicyService.getPolicy(parsedQuery.scope);
+  const policy = parsedQuery.scope
+    ? cryptoSyncPolicyService.getPolicy(parsedQuery.scope)
+    : cryptoSyncPolicyService.getPolicy();
 
   void reply.send(buildSuccessResponse(request.id, policy));
 }

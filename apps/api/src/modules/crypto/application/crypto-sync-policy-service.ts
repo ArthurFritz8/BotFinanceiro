@@ -15,6 +15,8 @@ export interface CryptoSyncPolicy {
 }
 
 export class CryptoSyncPolicyService {
+  public getPolicy(): CryptoSyncPolicy;
+  public getPolicy(scope: SyncScope): SyncPolicyItem;
   public getPolicy(scope?: SyncScope): CryptoSyncPolicy | SyncPolicyItem {
     const mode = env.SCHEDULER_ECONOMY_MODE ? "economy" : "normal";
 
