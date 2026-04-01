@@ -3,8 +3,10 @@ import {
   type OpenRouterChatCompletion,
   type OpenRouterToolDefinition,
 } from "../../../integrations/ai/openrouter-chat-adapter.js";
+import { AppError } from "../../../shared/errors/app-error.js";
 import {
   CryptoSpotPriceService,
+  type SpotPriceResponse,
 } from "../../crypto/application/crypto-spot-price-service.js";
 import {
   CryptoSyncPolicyService,
@@ -29,11 +31,54 @@ const copilotSpotPriceToolInputSchema = z.object({
   currency: z.string().trim().min(2).max(10).default("usd"),
 });
 
+const copilotMultiSpotPriceToolInputSchema = z.object({
+  assetIds: z
+    .array(z.string().trim().min(1).max(50).transform((value) => value.toLowerCase()))
+    .min(2)
+    .max(8)
+    .default(["bitcoin", "ethereum"]),
+  currency: z.string().trim().min(2).max(10).default("usd"),
+});
+
 const copilotSyncPolicyToolInputSchema = z.object({
   scope: z.enum(["hot", "warm", "cold"]).optional(),
 });
 
 const copilotOperationalHealthToolInputSchema = z.object({});
+
+interface MultiSpotPriceSuccessResult {
+  assetId: string;
+  cacheState: SpotPriceResponse["cache"]["state"];
+  fetchedAt: string;
+  price: number;
+  stale: boolean;
+}
+
+interface MultiSpotPriceFailureResult {
+  assetId: string;
+  error: {
+    code: string;
+    message: string;
+  };
+}
+
+function buildPriceComparisonTable(
+  currency: string,
+  successes: MultiSpotPriceSuccessResult[],
+  failures: MultiSpotPriceFailureResult[],
+): string {
+  const lines = ["| Ativo | Preco | Cache |", "| --- | ---: | --- |"];
+
+  for (const item of successes) {
+    lines.push(`| ${item.assetId} | ${item.price} ${currency.toUpperCase()} | ${item.cacheState}${item.stale ? " (stale)" : ""} |`);
+  }
+
+  for (const item of failures) {
+    lines.push(`| ${item.assetId} | n/a | erro: ${item.error.code} |`);
+  }
+
+  return lines.join("\n");
+}
 
 const copilotTools: OpenRouterToolDefinition[] = [
   {
@@ -59,6 +104,92 @@ const copilotTools: OpenRouterToolDefinition[] = [
     },
     run: (input: z.infer<typeof copilotSpotPriceToolInputSchema>) => {
       return cryptoSpotPriceService.getSpotPrice(input);
+    },
+  },
+  {
+    description:
+      "Compara preco spot de varios ativos cripto na mesma moeda e retorna tabela. Use para perguntas de comparacao entre multiplos ativos.",
+    inputSchema: copilotMultiSpotPriceToolInputSchema,
+    name: "get_crypto_multi_spot_price",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        assetIds: {
+          description: "Lista de ativos no padrao CoinGecko para comparar, exemplo: [bitcoin, ethereum, solana]",
+          items: {
+            type: "string",
+          },
+          maxItems: 8,
+          minItems: 2,
+          type: "array",
+        },
+        currency: {
+          default: "usd",
+          description: "Moeda da comparacao, exemplo: usd, brl, eur",
+          type: "string",
+        },
+      },
+      required: ["assetIds"],
+      type: "object",
+    },
+    run: async (input: z.infer<typeof copilotMultiSpotPriceToolInputSchema>) => {
+      const deduplicatedAssetIds = [...new Set(input.assetIds.map((assetId) => assetId.toLowerCase()))];
+      const comparisonResults = await Promise.all(
+        deduplicatedAssetIds.map(async (assetId) => {
+          try {
+            const spotPrice = await cryptoSpotPriceService.getSpotPrice({
+              assetId,
+              currency: input.currency,
+            });
+
+            const successResult: MultiSpotPriceSuccessResult = {
+              assetId: spotPrice.assetId,
+              cacheState: spotPrice.cache.state,
+              fetchedAt: spotPrice.fetchedAt,
+              price: spotPrice.price,
+              stale: spotPrice.cache.stale,
+            };
+
+            return {
+              ok: true as const,
+              value: successResult,
+            };
+          } catch (error) {
+            const failureResult: MultiSpotPriceFailureResult = {
+              assetId,
+              error: {
+                code: error instanceof AppError ? error.code : "SPOT_PRICE_COMPARISON_ERROR",
+                message: error instanceof Error ? error.message : "Unexpected spot price comparison error",
+              },
+            };
+
+            return {
+              ok: false as const,
+              value: failureResult,
+            };
+          }
+        }),
+      );
+
+      const successes = comparisonResults
+        .filter((item) => item.ok)
+        .map((item) => item.value)
+        .sort((left, right) => right.price - left.price);
+      const failures = comparisonResults.filter((item) => !item.ok).map((item) => item.value);
+
+      return {
+        comparedAssets: deduplicatedAssetIds.length,
+        currency: input.currency.toLowerCase(),
+        failures,
+        ranking: successes.map((item, index) => ({
+          assetId: item.assetId,
+          position: index + 1,
+          price: item.price,
+        })),
+        rows: successes,
+        successCount: successes.length,
+        tableMarkdown: buildPriceComparisonTable(input.currency, successes, failures),
+      };
     },
   },
   {

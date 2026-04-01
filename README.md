@@ -71,8 +71,9 @@ curl "http://localhost:3000/v1/copilot/chat" \
 Tool calling read-only habilitado no Copiloto:
 
 1. `get_crypto_spot_price`
-2. `get_operational_health`
-3. `get_crypto_sync_policy`
+2. `get_crypto_multi_spot_price`
+3. `get_operational_health`
+4. `get_crypto_sync_policy`
 
 Quando o modelo usa ferramentas, a resposta inclui `toolCallsUsed` com a lista das tools executadas no fluxo.
 

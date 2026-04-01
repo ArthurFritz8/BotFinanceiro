@@ -266,6 +266,145 @@ void it("POST /v1/copilot/chat executa fluxo de tool calling read-only", async (
   assert.equal(body.data.usage.totalTokens, 62);
 });
 
+void it("POST /v1/copilot/chat executa comparativo multi-ativos com tool calling", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let openRouterCalls = 0;
+  let coinGeckoCalls = 0;
+  const capturedOpenRouterBodies: string[] = [];
+
+  globalThis.fetch = ((input, init) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+      capturedOpenRouterBodies.push(typeof init?.body === "string" ? init.body : "");
+
+      if (openRouterCalls === 1) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content: null,
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        function: {
+                          arguments: '{"assetIds":["bitcoin","ethereum"],"currency":"usd"}',
+                          name: "get_crypto_multi_spot_price",
+                        },
+                        id: "call_multi_spot_1",
+                        type: "function",
+                      },
+                    ],
+                  },
+                },
+              ],
+              id: "gen-tool-multi-001",
+              model: "google/gemini-1.5-flash",
+              usage: {
+                completion_tokens: 22,
+                prompt_tokens: 29,
+                total_tokens: 51,
+              },
+            }),
+            {
+              headers: {
+                "content-type": "application/json",
+              },
+              status: 200,
+            },
+          ),
+        );
+      }
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    "Comparativo: bitcoin esta acima de ethereum em USD, com tabela enviada no contexto da ferramenta.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-tool-multi-002",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 24,
+              prompt_tokens: 44,
+              total_tokens: 68,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("/simple/price")) {
+      coinGeckoCalls += 1;
+
+      const parsedUrl = new URL(requestUrl);
+      const assetId = parsedUrl.searchParams.get("ids") ?? "";
+      const currency = parsedUrl.searchParams.get("vs_currencies") ?? "usd";
+      const quotedPrice = assetId === "bitcoin" ? 64000 : assetId === "ethereum" ? 3200 : 0;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            [assetId]: {
+              [currency]: quotedPrice,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Compare bitcoin e ethereum em usd",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 2);
+  assert.equal(coinGeckoCalls, 2);
+  assert.match(capturedOpenRouterBodies[0] ?? "", /"name":"get_crypto_multi_spot_price"/);
+  assert.match(capturedOpenRouterBodies[1] ?? "", /"name":"get_crypto_multi_spot_price"/);
+  assert.match(capturedOpenRouterBodies[1] ?? "", /tableMarkdown/);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(
+    body.data.answer,
+    "Comparativo: bitcoin esta acima de ethereum em USD, com tabela enviada no contexto da ferramenta.",
+  );
+  assert.deepEqual(body.data.toolCallsUsed, ["get_crypto_multi_spot_price"]);
+  assert.equal(body.data.responseId, "gen-tool-multi-002");
+  assert.equal(body.data.usage.totalTokens, 68);
+});
+
 void it("POST /v1/copilot/chat retorna 400 para payload invalido", async () => {
   const response = await app.inject({
     method: "POST",
