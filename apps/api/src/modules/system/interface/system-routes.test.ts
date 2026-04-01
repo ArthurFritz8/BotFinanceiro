@@ -44,6 +44,41 @@ interface MutableOperationalHealthHistoryStore {
   records: PersistedOperationalHealthRecord[];
 }
 
+interface ApiSuccessResponse<TData> {
+  data: TData;
+  meta: {
+    requestId: string;
+    timestamp: string;
+  };
+  status: "success";
+}
+
+interface OperationalHealthAggregatedBucket {
+  avgBudgetRemainingPercent: number;
+  bucketEnd: string;
+  bucketStart: string;
+  maxConsecutiveOpenCycles: number;
+  maxScopeFailureRatePercent: number;
+  sampleCount: number;
+  statusCounts: {
+    critical: number;
+    ok: number;
+    warning: number;
+  };
+}
+
+interface OperationalHealthHistoryAggregatedResponse {
+  bucketLimit: number;
+  buckets: OperationalHealthAggregatedBucket[];
+  filters: {
+    from: string | null;
+    to: string | null;
+  };
+  granularity: "hour" | "day";
+  totalBuckets: number;
+  totalStored: number;
+}
+
 function createRecord(
   recordedAt: string,
   status: "ok" | "warning" | "critical",
@@ -174,4 +209,54 @@ void it("GET /internal/health/operational/history/aggregate.csv retorna CSV com 
     ].join(","),
   );
   assert.equal(lines.length, 3);
+});
+
+void it("GET /internal/health/operational/history/aggregate retorna 401 sem token", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/internal/health/operational/history/aggregate",
+  });
+
+  assert.equal(response.statusCode, 401);
+
+  const body = response.json<{
+    error: { code: string; message: string };
+    status: string;
+  }>();
+
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "INTERNAL_AUTH_MISSING_TOKEN");
+  assert.equal(body.error.message, "Missing internal route token");
+});
+
+void it("GET /internal/health/operational/history/aggregate retorna payload agregado com token valido", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/health/operational/history/aggregate?granularity=day&bucketLimit=10",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<OperationalHealthHistoryAggregatedResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.granularity, "day");
+  assert.equal(body.data.bucketLimit, 10);
+  assert.equal(body.data.totalStored, 3);
+  assert.equal(body.data.totalBuckets, 2);
+  assert.equal(body.data.buckets.length, 2);
+
+  const firstBucket = body.data.buckets[0];
+  assert.ok(firstBucket);
+  assert.equal(firstBucket.sampleCount, 2);
+  assert.equal(firstBucket.statusCounts.warning, 1);
+  assert.equal(firstBucket.statusCounts.critical, 1);
+  assert.equal(firstBucket.statusCounts.ok, 0);
+  assert.equal(firstBucket.avgBudgetRemainingPercent, 35);
+  assert.equal(firstBucket.maxConsecutiveOpenCycles, 5);
+  assert.equal(firstBucket.maxScopeFailureRatePercent, 90);
+  assert.match(firstBucket.bucketStart, /^2026-03-31T00:00:00.000Z$/);
+  assert.match(firstBucket.bucketEnd, /^2026-03-31T23:59:59.999Z$/);
 });
