@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BotFinanceiro | Copiloto</title>
+    <meta
+      name="description"
+      content="Copiloto financeiro com respostas de IA e foco em custo zero operacional."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Sora:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div class="bg-orb bg-orb-left" aria-hidden="true"></div>
+    <div class="bg-orb bg-orb-right" aria-hidden="true"></div>
+
+    <main class="app-shell">
+      <section class="hero reveal">
+        <p class="eyebrow">Copiloto Financeiro</p>
+        <h1>Converse com sua mesa de estrategia em tempo real.</h1>
+        <p class="subtitle">
+          Um chat unico para diagnostico de mercado, resumo rapido e proximo passo sugerido,
+          conectado ao backend ja protegido do projeto.
+        </p>
+
+        <div class="hero-badges">
+          <span class="badge">OpenRouter</span>
+          <span class="badge">Custo Zero First</span>
+          <span class="badge">Resposta Estruturada</span>
+        </div>
+      </section>
+
+      <section class="layout-grid reveal reveal-delay-1">
+        <aside class="insights-card">
+          <h2>Atalhos Inteligentes</h2>
+          <p>
+            Use prompts de partida para acelerar sua analise diaria e manter consistencia.
+          </p>
+
+          <div class="quick-prompts" id="quick-prompts">
+            <button type="button" data-prompt="Resuma o mercado cripto de hoje em 5 linhas.">
+              Resumo rapido do mercado
+            </button>
+            <button
+              type="button"
+              data-prompt="Quais os principais riscos de curto prazo para Bitcoin e Ethereum?"
+            >
+              Riscos de curto prazo
+            </button>
+            <button
+              type="button"
+              data-prompt="Me de um plano de monitoramento para hoje com 3 checkpoints."
+            >
+              Plano de monitoramento
+            </button>
+          </div>
+
+          <div class="stack-note">
+            <h3>Stack em uso</h3>
+            <p>
+              Endpoint: <strong>/v1/copilot/chat</strong><br />
+              Modelo atual: <strong id="active-model">google/gemini-1.5-flash</strong>
+            </p>
+          </div>
+        </aside>
+
+        <section class="chat-panel">
+          <header class="chat-header">
+            <h2>Conversa</h2>
+            <span class="status-pill" id="connection-status">Pronto</span>
+          </header>
+
+          <div class="messages" id="messages" aria-live="polite"></div>
+
+          <form id="chat-form" class="composer">
+            <label for="chat-input">Mensagem</label>
+            <textarea
+              id="chat-input"
+              name="message"
+              rows="4"
+              maxlength="4000"
+              placeholder="Ex.: Quais sinais devo acompanhar hoje no mercado cripto?"
+              required
+            ></textarea>
+
+            <div class="composer-footer">
+              <div class="hint">Enter para enviar • Shift + Enter para quebrar linha</div>
+              <button id="send-button" type="submit">Enviar ao Copiloto</button>
+            </div>
+          </form>
+        </section>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

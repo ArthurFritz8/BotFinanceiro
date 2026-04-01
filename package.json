@@ -14,6 +14,7 @@
     "build": "npm run build -ws --if-present",
     "check": "npm run lint && npm run typecheck",
     "dev:api": "npm run dev -w @botfinanceiro/api",
+    "dev:web": "npm run dev -w @botfinanceiro/web",
     "format": "prettier --write .",
     "lint": "eslint apps/api/src --ext .ts --max-warnings=0",
     "test": "npm run test -ws --if-present",

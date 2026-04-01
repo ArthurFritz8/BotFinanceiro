@@ -67,3 +67,27 @@ curl "http://localhost:3000/v1/copilot/chat" \
 	-H "Content-Type: application/json" \
 	-d '{"message":"Resuma o mercado cripto de hoje","temperature":0.1,"maxTokens":350}'
 ```
+
+## Interface web do Copiloto
+
+1. Suba a API:
+
+```bash
+npm run dev:api
+```
+
+2. Em outro terminal, suba o frontend:
+
+```bash
+npm run dev:web
+```
+
+3. Abra no navegador:
+
+`http://localhost:5173`
+
+4. Opcional: para usar API em outro host no dev web:
+
+```bash
+VITE_DEV_API_PROXY_TARGET=http://localhost:3000 npm run dev:web
+```

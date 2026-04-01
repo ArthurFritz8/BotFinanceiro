@@ -4,9 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "echo \"Web scaffold pending\"",
-    "dev": "echo \"Web scaffold pending\"",
+    "build": "vite build",
+    "dev": "vite",
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
     "test": "echo \"No web tests yet\"",
     "typecheck": "echo \"No web typecheck yet\""
+  },
+  "devDependencies": {
+    "vite": "^8.0.3"
   }
 }
