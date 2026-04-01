@@ -33,6 +33,27 @@ const historyQuerySchema = z.object({
   });
 });
 
+const aggregateHistoryQuerySchema = z.object({
+  bucketLimit: z.coerce.number().int().min(1).max(10000).default(48),
+  from: optionalDateTimeSchema.optional(),
+  granularity: z.enum(["hour", "day"]).default("hour"),
+  to: optionalDateTimeSchema.optional(),
+}).superRefine((value, ctx) => {
+  if (!value.from || !value.to) {
+    return;
+  }
+
+  if (value.from.getTime() <= value.to.getTime()) {
+    return;
+  }
+
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    message: "from must be less than or equal to to",
+    path: ["from"],
+  });
+});
+
 const clearHistoryQuerySchema = z.object({
   confirm: z
     .string()
@@ -94,4 +115,19 @@ export function exportOperationalHealthHistoryCsv(
     .header("Content-Type", "text/csv; charset=utf-8")
     .header("Content-Disposition", `attachment; filename="${csvExport.fileName}"`)
     .send(csvExport.csv);
+}
+
+export function getOperationalHealthHistoryAggregated(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): void {
+  const parsedQuery = aggregateHistoryQuerySchema.parse(request.query);
+  const data = systemStatusService.getOperationalHealthHistoryAggregated({
+    bucketLimit: parsedQuery.bucketLimit,
+    from: parsedQuery.from,
+    granularity: parsedQuery.granularity,
+    to: parsedQuery.to,
+  });
+
+  void reply.send(buildSuccessResponse(request.id, data));
 }

@@ -5,6 +5,7 @@ import {
   clearOperationalHealthHistory,
   exportOperationalHealthHistoryCsv,
   getHealth,
+  getOperationalHealthHistoryAggregated,
   getOperationalHealth,
   getOperationalHealthHistory,
   getReady,
@@ -31,6 +32,11 @@ export function registerSystemRoutes(app: FastifyInstance): void {
     "/internal/health/operational/history.csv",
     internalRouteOptions,
     exportOperationalHealthHistoryCsv,
+  );
+  app.get(
+    "/internal/health/operational/history/aggregate",
+    internalRouteOptions,
+    getOperationalHealthHistoryAggregated,
   );
   app.delete(
     "/internal/health/operational/history",

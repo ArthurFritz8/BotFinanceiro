@@ -22,6 +22,8 @@ export interface ReadinessStatus {
 
 type OperationalSeverity = "critical" | "warning";
 
+export type OperationalHealthAggregationGranularity = "day" | "hour";
+
 export interface OperationalHealthReason {
   code: string;
   details?: unknown;
@@ -65,6 +67,34 @@ export interface OperationalHealthHistoryClearResult {
   removedCount: number;
 }
 
+interface StatusCountSummary {
+  critical: number;
+  ok: number;
+  warning: number;
+}
+
+export interface OperationalHealthAggregatedBucket {
+  avgBudgetRemainingPercent: number;
+  bucketEnd: string;
+  bucketStart: string;
+  maxConsecutiveOpenCycles: number;
+  maxScopeFailureRatePercent: number;
+  sampleCount: number;
+  statusCounts: StatusCountSummary;
+}
+
+export interface OperationalHealthHistoryAggregated {
+  bucketLimit: number;
+  buckets: OperationalHealthAggregatedBucket[];
+  filters: {
+    from: string | null;
+    to: string | null;
+  };
+  granularity: OperationalHealthAggregationGranularity;
+  totalBuckets: number;
+  totalStored: number;
+}
+
 export interface OperationalHealthHistoryCsvExport {
   csv: string;
   exportedCount: number;
@@ -83,6 +113,22 @@ export interface OperationalHistoryQueryOptions {
   from?: Date;
   limit?: number;
   to?: Date;
+}
+
+export interface OperationalHistoryAggregationOptions {
+  bucketLimit?: number;
+  from?: Date;
+  granularity?: OperationalHealthAggregationGranularity;
+  to?: Date;
+}
+
+interface AggregationBucketAccumulator {
+  bucketStartMs: number;
+  budgetSum: number;
+  maxConsecutiveOpenCycles: number;
+  maxScopeFailureRatePercent: number;
+  sampleCount: number;
+  statusCounts: StatusCountSummary;
 }
 
 function roundToTwoDecimals(value: number): number {
@@ -105,6 +151,35 @@ function csvEscape(value: unknown): string {
 
 function buildCsvRow(values: unknown[]): string {
   return values.map((value) => csvEscape(value)).join(",");
+}
+
+function buildBucketStartMs(
+  timestampMs: number,
+  granularity: OperationalHealthAggregationGranularity,
+): number {
+  const date = new Date(timestampMs);
+
+  if (granularity === "day") {
+    return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  }
+
+  return Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate(),
+    date.getUTCHours(),
+  );
+}
+
+function getBucketDurationMs(granularity: OperationalHealthAggregationGranularity): number {
+  return granularity === "day" ? 86_400_000 : 3_600_000;
+}
+
+function getMaxScopeFailureRate(record: PersistedOperationalHealthRecord): number {
+  return record.snapshot.diagnostics.scopeFailureRates.reduce(
+    (currentMax, item) => Math.max(currentMax, item.failureRatePercent),
+    0,
+  );
 }
 
 function getScopeFailureRate(
@@ -159,6 +234,85 @@ function applyPeriodFilter(
 
     return true;
   });
+}
+
+function aggregateHistoryByGranularity(
+  records: PersistedOperationalHealthRecord[],
+  options: OperationalHistoryAggregationOptions,
+): OperationalHealthHistoryAggregated {
+  const granularity = options.granularity ?? "hour";
+  const bucketLimit = Math.max(1, Math.min(options.bucketLimit ?? 48, env.OPS_HEALTH_SNAPSHOT_MAX_ITEMS));
+  const filteredRecords = applyPeriodFilter(records, options);
+  const accumulators = new Map<number, AggregationBucketAccumulator>();
+
+  for (const record of filteredRecords) {
+    const recordedAtMs = Date.parse(record.recordedAt);
+
+    if (Number.isNaN(recordedAtMs)) {
+      continue;
+    }
+
+    const bucketStartMs = buildBucketStartMs(recordedAtMs, granularity);
+    const existingAccumulator = accumulators.get(bucketStartMs);
+
+    if (existingAccumulator) {
+      existingAccumulator.budgetSum += record.snapshot.diagnostics.budgetRemainingPercent;
+      existingAccumulator.maxConsecutiveOpenCycles = Math.max(
+        existingAccumulator.maxConsecutiveOpenCycles,
+        record.snapshot.diagnostics.consecutiveOpenCycles,
+      );
+      existingAccumulator.maxScopeFailureRatePercent = Math.max(
+        existingAccumulator.maxScopeFailureRatePercent,
+        getMaxScopeFailureRate(record),
+      );
+      existingAccumulator.sampleCount += 1;
+      existingAccumulator.statusCounts[record.snapshot.status] += 1;
+      continue;
+    }
+
+    accumulators.set(bucketStartMs, {
+      bucketStartMs,
+      budgetSum: record.snapshot.diagnostics.budgetRemainingPercent,
+      maxConsecutiveOpenCycles: record.snapshot.diagnostics.consecutiveOpenCycles,
+      maxScopeFailureRatePercent: getMaxScopeFailureRate(record),
+      sampleCount: 1,
+      statusCounts: {
+        critical: record.snapshot.status === "critical" ? 1 : 0,
+        ok: record.snapshot.status === "ok" ? 1 : 0,
+        warning: record.snapshot.status === "warning" ? 1 : 0,
+      },
+    });
+  }
+
+  const bucketDurationMs = getBucketDurationMs(granularity);
+  const sortedBuckets = [...accumulators.values()].sort(
+    (left, right) => right.bucketStartMs - left.bucketStartMs,
+  );
+  const limitedBuckets = sortedBuckets.slice(0, bucketLimit);
+
+  return {
+    bucketLimit,
+    buckets: limitedBuckets.map((bucket) => ({
+      avgBudgetRemainingPercent: roundToTwoDecimals(bucket.budgetSum / bucket.sampleCount),
+      bucketEnd: new Date(bucket.bucketStartMs + bucketDurationMs - 1).toISOString(),
+      bucketStart: new Date(bucket.bucketStartMs).toISOString(),
+      maxConsecutiveOpenCycles: bucket.maxConsecutiveOpenCycles,
+      maxScopeFailureRatePercent: roundToTwoDecimals(bucket.maxScopeFailureRatePercent),
+      sampleCount: bucket.sampleCount,
+      statusCounts: {
+        critical: bucket.statusCounts.critical,
+        ok: bucket.statusCounts.ok,
+        warning: bucket.statusCounts.warning,
+      },
+    })),
+    filters: {
+      from: options.from ? options.from.toISOString() : null,
+      to: options.to ? options.to.toISOString() : null,
+    },
+    granularity,
+    totalBuckets: sortedBuckets.length,
+    totalStored: records.length,
+  };
 }
 
 export class SystemStatusService {
@@ -395,5 +549,12 @@ export class SystemStatusService {
       totalMatched: history.totalMatched,
       totalStored: history.totalStored,
     };
+  }
+
+  public getOperationalHealthHistoryAggregated(
+    options: OperationalHistoryAggregationOptions = {},
+  ): OperationalHealthHistoryAggregated {
+    const records = operationalHealthHistoryStore.getRecent(env.OPS_HEALTH_SNAPSHOT_MAX_ITEMS);
+    return aggregateHistoryByGranularity(records, options);
   }
 }
