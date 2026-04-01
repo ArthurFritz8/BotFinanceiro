@@ -503,7 +503,7 @@ async function initializeChatHistory() {
     "Pronto para ajudar. Peça um resumo de mercado, riscos de curto prazo ou um plano de monitoramento para hoje.",
     {
       meta: {
-        model: "google/gemini-1.5-flash",
+        model: "google/gemini-2.0-flash-001",
         time: new Date().toLocaleTimeString("pt-BR", {
           hour: "2-digit",
           minute: "2-digit",

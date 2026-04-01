@@ -114,7 +114,7 @@ const environmentSchema = z
           .filter((ip) => ip.length > 0),
       ),
     OPENROUTER_API_KEY: z.string().trim().default(""),
-    OPENROUTER_MODEL: z.string().trim().min(1).default("google/gemini-1.5-flash"),
+    OPENROUTER_MODEL: z.string().trim().min(1).default("google/gemini-2.0-flash-001"),
     OPENROUTER_API_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
     OPENROUTER_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
     OPENROUTER_APP_NAME: z.string().trim().default("BotFinanceiro"),
