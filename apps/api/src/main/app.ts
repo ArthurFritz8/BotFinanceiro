@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 
-import { env } from "../shared/config/env.js";
+import { registerCryptoRoutes } from "../modules/crypto/interface/crypto-routes.js";
+import { registerSystemRoutes } from "../modules/system/interface/system-routes.js";
 import { httpErrorHandler } from "../shared/errors/http-error-handler.js";
 import { logger } from "../shared/logger/logger.js";
 
@@ -24,22 +25,14 @@ export function buildApp() {
     );
   });
 
-  app.get("/health", () => {
-    return {
-      service: "botfinanceiro-api",
-      status: "ok",
-      timestamp: new Date().toISOString(),
-    };
-  });
-
-  app.get("/ready", () => {
-    return {
-      schedulerEconomyMode: env.SCHEDULER_ECONOMY_MODE,
-      schedulerEnabled: env.SCHEDULER_ENABLED,
-      status: "ready",
-      timestamp: new Date().toISOString(),
-    };
-  });
+  registerSystemRoutes(app);
+  void app.register(
+    (instance, _, done) => {
+      registerCryptoRoutes(instance);
+      done();
+    },
+    { prefix: "/v1" },
+  );
 
   return app;
 }

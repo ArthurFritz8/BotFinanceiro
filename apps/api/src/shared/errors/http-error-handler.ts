@@ -1,6 +1,7 @@
 import type { FastifyError, FastifyReply, FastifyRequest } from "fastify";
 import { ZodError } from "zod";
 
+import { buildErrorResponse } from "../http/api-response.js";
 import { logger } from "../logger/logger.js";
 import { AppError } from "./app-error.js";
 
@@ -28,13 +29,15 @@ export function httpErrorHandler(
       error.message,
     );
 
-    void reply.status(error.statusCode).send({
-      error: {
-        code: error.code,
-        details: error.details,
-        message: error.message,
-      },
-    });
+    void reply
+      .status(error.statusCode)
+      .send(
+        buildErrorResponse(request.id, {
+          code: error.code,
+          details: error.details,
+          message: error.message,
+        }),
+      );
     return;
   }
 
@@ -48,13 +51,15 @@ export function httpErrorHandler(
       "Validation error",
     );
 
-    void reply.status(400).send({
-      error: {
-        code: "VALIDATION_ERROR",
-        details: error.issues,
-        message: "Invalid payload",
-      },
-    });
+    void reply
+      .status(400)
+      .send(
+        buildErrorResponse(request.id, {
+          code: "VALIDATION_ERROR",
+          details: error.issues,
+          message: "Invalid payload",
+        }),
+      );
     return;
   }
 
@@ -70,10 +75,12 @@ export function httpErrorHandler(
     "Unhandled request error",
   );
 
-  void reply.status(statusCode).send({
-    error: {
-      code: "INTERNAL_ERROR",
-      message: publicMessage,
-    },
-  });
+  void reply
+    .status(statusCode)
+    .send(
+      buildErrorResponse(request.id, {
+        code: "INTERNAL_ERROR",
+        message: publicMessage,
+      }),
+    );
 }
