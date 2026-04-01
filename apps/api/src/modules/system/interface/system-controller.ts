@@ -19,3 +19,8 @@ export function getSchedulerMetrics(request: FastifyRequest, reply: FastifyReply
   const data = systemStatusService.getSchedulerMetrics();
   void reply.send(buildSuccessResponse(request.id, data));
 }
+
+export function getOperationalHealth(request: FastifyRequest, reply: FastifyReply): void {
+  const data = systemStatusService.getOperationalHealth();
+  void reply.send(buildSuccessResponse(request.id, data));
+}

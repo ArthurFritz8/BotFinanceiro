@@ -28,6 +28,10 @@ const environmentSchema = z
     COINGECKO_CIRCUIT_COOLDOWN_MS: z.coerce.number().int().positive().default(60000),
     COINGECKO_CIRCUIT_ALERT_OPEN_CYCLES: z.coerce.number().int().min(1).max(100).default(3),
     COINGECKO_CIRCUIT_ALERT_COOLDOWN_MS: z.coerce.number().int().positive().default(300000),
+    OPS_HEALTH_WARNING_BUDGET_PERCENT: z.coerce.number().min(0).max(100).default(20),
+    OPS_HEALTH_CRITICAL_BUDGET_PERCENT: z.coerce.number().min(0).max(100).default(5),
+    OPS_HEALTH_WARNING_SCOPE_FAILURE_RATE_PERCENT: z.coerce.number().min(0).max(100).default(50),
+    OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT: z.coerce.number().min(0).max(100).default(80),
     CRYPTO_SYNC_TARGET_CURRENCY: z
       .string()
       .trim()
@@ -85,6 +89,35 @@ const environmentSchema = z
     }
 
     if (value.INTERNAL_API_TOKEN.length >= 16) {
+      if (
+        value.OPS_HEALTH_CRITICAL_BUDGET_PERCENT <= value.OPS_HEALTH_WARNING_BUDGET_PERCENT &&
+        value.OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT <=
+          value.OPS_HEALTH_WARNING_SCOPE_FAILURE_RATE_PERCENT
+      ) {
+        return;
+      }
+
+      if (value.OPS_HEALTH_CRITICAL_BUDGET_PERCENT > value.OPS_HEALTH_WARNING_BUDGET_PERCENT) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "OPS_HEALTH_CRITICAL_BUDGET_PERCENT must be less than or equal to OPS_HEALTH_WARNING_BUDGET_PERCENT",
+          path: ["OPS_HEALTH_CRITICAL_BUDGET_PERCENT"],
+        });
+      }
+
+      if (
+        value.OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT >
+        value.OPS_HEALTH_WARNING_SCOPE_FAILURE_RATE_PERCENT
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT must be less than or equal to OPS_HEALTH_WARNING_SCOPE_FAILURE_RATE_PERCENT",
+          path: ["OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT"],
+        });
+      }
+
       return;
     }
 
@@ -94,6 +127,27 @@ const environmentSchema = z
         "INTERNAL_API_TOKEN must have at least 16 characters when NODE_ENV is production",
       path: ["INTERNAL_API_TOKEN"],
     });
+
+    if (value.OPS_HEALTH_CRITICAL_BUDGET_PERCENT > value.OPS_HEALTH_WARNING_BUDGET_PERCENT) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "OPS_HEALTH_CRITICAL_BUDGET_PERCENT must be less than or equal to OPS_HEALTH_WARNING_BUDGET_PERCENT",
+        path: ["OPS_HEALTH_CRITICAL_BUDGET_PERCENT"],
+      });
+    }
+
+    if (
+      value.OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT >
+      value.OPS_HEALTH_WARNING_SCOPE_FAILURE_RATE_PERCENT
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT must be less than or equal to OPS_HEALTH_WARNING_SCOPE_FAILURE_RATE_PERCENT",
+        path: ["OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT"],
+      });
+    }
   });
 
 const parsedEnvironment = environmentSchema.safeParse(process.env);
