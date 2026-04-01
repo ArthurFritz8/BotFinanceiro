@@ -1,6 +1,7 @@
 import {
   CryptoSpotPriceService,
 } from "../modules/crypto/application/crypto-spot-price-service.js";
+import { getCoinGeckoCircuitSnapshot } from "../integrations/market_data/coingecko-spot-price-adapter.js";
 import {
   CryptoSyncPolicyService,
   type SyncScope,
@@ -60,6 +61,11 @@ export interface CryptoSchedulerMetricsSnapshot {
     remaining: number;
   };
   generatedAt: string;
+  providers: {
+    coingecko: {
+      circuit: ReturnType<typeof getCoinGeckoCircuitSnapshot>;
+    };
+  };
   rateLimiter: {
     availableTokens: number;
     maxRequestsPerMinute: number;
@@ -155,6 +161,11 @@ export class CryptoSyncJobRunner {
         remaining: this.budgetGuard.getRemaining(),
       },
       generatedAt: new Date().toISOString(),
+      providers: {
+        coingecko: {
+          circuit: getCoinGeckoCircuitSnapshot(),
+        },
+      },
       rateLimiter: {
         availableTokens: this.rateLimiter.getAvailableTokens(),
         maxRequestsPerMinute: env.COINGECKO_MAX_REQUESTS_PER_MINUTE,
