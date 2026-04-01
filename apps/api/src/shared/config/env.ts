@@ -16,6 +16,7 @@ const environmentSchema = z.object({
   CACHE_DEFAULT_TTL_SECONDS: z.coerce.number().int().positive().default(120),
   CACHE_STALE_SECONDS: z.coerce.number().int().positive().default(300),
   COINGECKO_API_BASE_URL: z.string().url(),
+  COINGECKO_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
   YAHOO_FINANCE_API_BASE_URL: z.string().url(),
   DATABASE_URL: z.union([z.string().url(), z.literal("")]).optional(),
   JWT_SECRET: z.union([z.string().min(16), z.literal("")]).optional(),
