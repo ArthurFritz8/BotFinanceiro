@@ -63,6 +63,11 @@ export interface CryptoSchedulerMetricsSnapshot {
   generatedAt: string;
   providers: {
     coingecko: {
+      alerts: {
+        consecutiveOpenCycles: number;
+        lastOpenAlertAt: string | null;
+        openCyclesThreshold: number;
+      };
       circuit: ReturnType<typeof getCoinGeckoCircuitSnapshot>;
     };
   };
@@ -118,6 +123,9 @@ export class CryptoSyncJobRunner {
     warm: createInitialScopeMetrics(),
   };
 
+  private consecutiveCircuitOpenCycles = 0;
+  private lastCircuitOpenAlertAt: number | null = null;
+
   private started = false;
 
   public start(): void {
@@ -163,6 +171,13 @@ export class CryptoSyncJobRunner {
       generatedAt: new Date().toISOString(),
       providers: {
         coingecko: {
+          alerts: {
+            consecutiveOpenCycles: this.consecutiveCircuitOpenCycles,
+            lastOpenAlertAt: this.lastCircuitOpenAlertAt
+              ? new Date(this.lastCircuitOpenAlertAt).toISOString()
+              : null,
+            openCyclesThreshold: env.COINGECKO_CIRCUIT_ALERT_OPEN_CYCLES,
+          },
           circuit: getCoinGeckoCircuitSnapshot(),
         },
       },
@@ -385,6 +400,8 @@ export class CryptoSyncJobRunner {
     metrics.totalSkippedByRate += skippedByRate;
     metrics.totalSynced += synced;
 
+    this.handleCoinGeckoCircuitAlert(schedule.scope);
+
     logger.info(
       {
         availableTokens: this.rateLimiter.getAvailableTokens(),
@@ -397,6 +414,46 @@ export class CryptoSyncJobRunner {
         synced,
       },
       "Crypto sync scope cycle completed",
+    );
+  }
+
+  private handleCoinGeckoCircuitAlert(scope: SyncScope): void {
+    const circuit = getCoinGeckoCircuitSnapshot();
+
+    if (circuit.state !== "open") {
+      this.consecutiveCircuitOpenCycles = 0;
+      return;
+    }
+
+    this.consecutiveCircuitOpenCycles += 1;
+
+    const reachedThreshold =
+      this.consecutiveCircuitOpenCycles >= env.COINGECKO_CIRCUIT_ALERT_OPEN_CYCLES;
+
+    if (!reachedThreshold) {
+      return;
+    }
+
+    const now = Date.now();
+    const inCooldown =
+      this.lastCircuitOpenAlertAt !== null &&
+      now - this.lastCircuitOpenAlertAt < env.COINGECKO_CIRCUIT_ALERT_COOLDOWN_MS;
+
+    if (inCooldown) {
+      return;
+    }
+
+    this.lastCircuitOpenAlertAt = now;
+
+    logger.error(
+      {
+        circuit,
+        consecutiveOpenCycles: this.consecutiveCircuitOpenCycles,
+        cooldownMs: env.COINGECKO_CIRCUIT_ALERT_COOLDOWN_MS,
+        openCyclesThreshold: env.COINGECKO_CIRCUIT_ALERT_OPEN_CYCLES,
+        scope,
+      },
+      "CoinGecko circuit is open for consecutive scheduler cycles",
     );
   }
 }
