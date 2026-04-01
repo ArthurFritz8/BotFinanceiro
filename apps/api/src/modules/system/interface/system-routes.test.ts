@@ -40,6 +40,7 @@ type PersistedOperationalHealthRecord = {
 };
 
 interface MutableOperationalHealthHistoryStore {
+  clear: () => Promise<{ clearedAt: string; removedCount: number }>;
   initialized: boolean;
   records: PersistedOperationalHealthRecord[];
 }
@@ -90,6 +91,22 @@ interface OperationalHealthHistoryAggregatedResponse {
   granularity: "hour" | "day";
   totalBuckets: number;
   totalStored: number;
+}
+
+interface OperationalHealthHistoryResponse {
+  filters: {
+    from: string | null;
+    to: string | null;
+  };
+  limit: number;
+  records: PersistedOperationalHealthRecord[];
+  totalMatched: number;
+  totalStored: number;
+}
+
+interface OperationalHealthHistoryClearResult {
+  clearedAt: string;
+  removedCount: number;
 }
 
 function createRecord(
@@ -146,6 +163,7 @@ function buildFixtureRecords(): PersistedOperationalHealthRecord[] {
 }
 
 const storeInternal = operationalHealthHistoryStore as unknown as MutableOperationalHealthHistoryStore;
+const originalClear = operationalHealthHistoryStore.clear.bind(operationalHealthHistoryStore);
 const originalStoreState = {
   initialized: storeInternal.initialized,
   records: [...storeInternal.records],
@@ -154,12 +172,184 @@ const originalStoreState = {
 void beforeEach(() => {
   storeInternal.initialized = true;
   storeInternal.records = buildFixtureRecords();
+  storeInternal.clear = () => {
+    const removedCount = storeInternal.records.length;
+    storeInternal.records = [];
+
+    return Promise.resolve({
+      clearedAt: new Date().toISOString(),
+      removedCount,
+    });
+  };
 });
 
 void after(async () => {
   await app.close();
+  storeInternal.clear = originalClear;
   storeInternal.initialized = originalStoreState.initialized;
   storeInternal.records = originalStoreState.records;
+});
+
+void it("GET /internal/health/operational/history retorna 401 sem token", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/internal/health/operational/history?limit=2",
+  });
+
+  assert.equal(response.statusCode, 401);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "INTERNAL_AUTH_MISSING_TOKEN");
+  assert.equal(body.error.message, "Missing internal route token");
+});
+
+void it("GET /internal/health/operational/history retorna payload esperado com token valido", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/health/operational/history?limit=2",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<OperationalHealthHistoryResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.limit, 2);
+  assert.equal(body.data.totalStored, 3);
+  assert.equal(body.data.totalMatched, 3);
+  assert.equal(body.data.records.length, 2);
+  assert.equal(body.data.records[0]?.snapshot.status, "critical");
+  assert.equal(body.data.records[1]?.snapshot.status, "warning");
+});
+
+void it("GET /internal/health/operational/history retorna 400 quando from e maior que to", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/health/operational/history?from=2026-04-01T01:00:00.000Z&to=2026-04-01T00:00:00.000Z",
+  });
+
+  assert.equal(response.statusCode, 400);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "VALIDATION_ERROR");
+  assert.equal(body.error.message, "Invalid payload");
+});
+
+void it("GET /internal/health/operational/history.csv retorna CSV esperado com token valido", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/health/operational/history.csv?limit=2",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const contentTypeHeader = response.headers["content-type"];
+  const contentType = Array.isArray(contentTypeHeader)
+    ? contentTypeHeader.join(";")
+    : contentTypeHeader ?? "";
+  assert.match(contentType, /^text\/csv/);
+
+  const contentDispositionHeader = response.headers["content-disposition"];
+  const contentDisposition = Array.isArray(contentDispositionHeader)
+    ? contentDispositionHeader.join(";")
+    : contentDispositionHeader ?? "";
+  assert.match(contentDisposition, /^attachment; filename="operational-health-history-/);
+
+  const lines = response.body.split("\n");
+  assert.equal(
+    lines[0],
+    [
+      "recorded_at",
+      "status",
+      "evaluated_at",
+      "budget_remaining_percent",
+      "circuit_state",
+      "consecutive_open_cycles",
+      "reasons_count",
+      "reason_codes",
+      "reason_messages",
+      "hot_failure_rate_percent",
+      "warm_failure_rate_percent",
+      "cold_failure_rate_percent",
+    ].join(","),
+  );
+  assert.equal(lines.length, 3);
+});
+
+void it("GET /internal/health/operational/history.csv retorna 400 quando from e maior que to", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/health/operational/history.csv?from=2026-04-01T01:00:00.000Z&to=2026-04-01T00:00:00.000Z",
+  });
+
+  assert.equal(response.statusCode, 400);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "VALIDATION_ERROR");
+  assert.equal(body.error.message, "Invalid payload");
+});
+
+void it("DELETE /internal/health/operational/history retorna 401 sem token", async () => {
+  const response = await app.inject({
+    method: "DELETE",
+    url: "/internal/health/operational/history?confirm=true",
+  });
+
+  assert.equal(response.statusCode, 401);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "INTERNAL_AUTH_MISSING_TOKEN");
+  assert.equal(body.error.message, "Missing internal route token");
+});
+
+void it("DELETE /internal/health/operational/history retorna 400 sem confirm=true", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "DELETE",
+    url: "/internal/health/operational/history",
+  });
+
+  assert.equal(response.statusCode, 400);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "VALIDATION_ERROR");
+  assert.equal(body.error.message, "Invalid payload");
+});
+
+void it("DELETE /internal/health/operational/history retorna sucesso com confirm=true", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "DELETE",
+    url: "/internal/health/operational/history?confirm=true",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<OperationalHealthHistoryClearResult>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.removedCount, 3);
+  assert.ok(body.data.clearedAt.length > 0);
+  assert.equal(storeInternal.records.length, 0);
 });
 
 void it("GET /internal/health/operational/history/aggregate.csv retorna 401 sem token", async () => {
