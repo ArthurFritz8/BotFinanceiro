@@ -13,10 +13,15 @@ const CHAT_SESSION_STORAGE_KEY = "botfinanceiro.copilot.session.v1";
 const MAX_STORED_MESSAGES = 60;
 const MAX_RECENT_HISTORY_ITEMS = 8;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").trim().replace(/\/$/, "");
 
 const messages = [];
 let isSending = false;
 let chatSessionId = getOrCreateSessionId();
+
+function buildApiUrl(path) {
+  return API_BASE_URL.length > 0 ? `${API_BASE_URL}${path}` : path;
+}
 
 function createSessionId() {
   return `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
@@ -292,7 +297,7 @@ function setSendingState(nextValue) {
 }
 
 async function requestCopilotCompletion(message) {
-  const response = await fetch("/v1/copilot/chat", {
+  const response = await fetch(buildApiUrl("/v1/copilot/chat"), {
     body: JSON.stringify({
       maxTokens: 350,
       message,
@@ -323,7 +328,7 @@ async function requestCopilotCompletion(message) {
 
 async function loadMessagesFromBackend() {
   const response = await fetch(
-    `/v1/copilot/history?sessionId=${encodeURIComponent(chatSessionId)}&limit=${MAX_STORED_MESSAGES}`,
+    buildApiUrl(`/v1/copilot/history?sessionId=${encodeURIComponent(chatSessionId)}&limit=${MAX_STORED_MESSAGES}`),
     {
       method: "GET",
     },

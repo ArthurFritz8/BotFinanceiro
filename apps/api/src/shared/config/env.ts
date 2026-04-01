@@ -28,6 +28,15 @@ const environmentSchema = z
     LOG_LEVEL: z
       .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
       .default("info"),
+    CORS_ALLOWED_ORIGINS: z
+      .string()
+      .default("")
+      .transform((value) =>
+        value
+          .split(",")
+          .map((origin) => origin.trim().replace(/\/$/, ""))
+          .filter((origin) => origin.length > 0),
+      ),
     SCHEDULER_ENABLED: booleanFromString.default("true"),
     SCHEDULER_ECONOMY_MODE: booleanFromString.default("false"),
     SCHEDULER_JITTER_MAX_PERCENT: z.coerce.number().int().min(0).max(100).default(20),

@@ -168,3 +168,24 @@ VITE_DEV_API_PROXY_TARGET=http://localhost:3000 npm run dev:web
 
 5. O frontend usa `sessionId` persistido no navegador para carregar historico remoto em `GET /v1/copilot/history` e mantém fallback local.
 6. O card "Historico local" limpa mensagens da sessao atual e inicia uma nova sessao local/remota.
+
+## Frontend publico
+
+Para publicar frontend e API em dominios diferentes:
+
+1. Configure no backend (`.env` da API):
+- `CORS_ALLOWED_ORIGINS=https://seu-frontend.exemplo.com`
+2. Configure no frontend (`apps/web/.env` ou env da plataforma):
+- `VITE_API_BASE_URL=https://sua-api.exemplo.com`
+
+Exemplo build do frontend com URL publica da API:
+
+```bash
+VITE_API_BASE_URL=https://sua-api.exemplo.com npm run build -w @botfinanceiro/web
+```
+
+Exemplo deploy rapido em host estatico:
+
+1. Netlify/Vercel/Cloudflare Pages para `apps/web/dist`
+2. API continua no Render
+3. Ajuste `CORS_ALLOWED_ORIGINS` na API com o dominio final do frontend
