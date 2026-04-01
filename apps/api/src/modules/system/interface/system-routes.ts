@@ -7,9 +7,11 @@ import type {
 
 import { assertInternalRouteAuth } from "../../../shared/http/internal-route-auth.js";
 import {
+  clearCopilotAuditHistory,
   clearOperationalHealthHistory,
   exportOperationalHealthHistoryAggregatedCsv,
   exportOperationalHealthHistoryCsv,
+  getCopilotAuditHistory,
   getHealth,
   getOperationalHealthHistoryAggregated,
   getOperationalHealth,
@@ -58,9 +60,19 @@ export function registerSystemRoutes(app: FastifyInstance): void {
     internalRouteOptions,
     exportOperationalHealthHistoryAggregatedCsv,
   );
+  app.get(
+    "/internal/copilot/audit/history",
+    internalRouteOptions,
+    getCopilotAuditHistory,
+  );
   app.delete(
     "/internal/health/operational/history",
     internalRouteOptions,
     clearOperationalHealthHistory,
+  );
+  app.delete(
+    "/internal/copilot/audit/history",
+    internalRouteOptions,
+    clearCopilotAuditHistory,
   );
 }

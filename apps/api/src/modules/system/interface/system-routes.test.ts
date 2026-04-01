@@ -8,6 +8,9 @@ process.env.INTERNAL_API_TOKEN ??= "test_internal_token_12345";
 
 const { buildApp } = await import("../../../main/app.js");
 const {
+  copilotChatAuditStore,
+} = await import("../../../shared/observability/copilot-chat-audit-store.js");
+const {
   operationalHealthHistoryStore,
 } = await import("../../../shared/observability/operational-health-history-store.js");
 const app = buildApp();
@@ -39,10 +42,57 @@ type PersistedOperationalHealthRecord = {
   };
 };
 
+type CopilotAuditRecord = {
+  completion: {
+    answer: string;
+    fetchedAt: string;
+    model: string;
+    provider: "openrouter";
+    responseId: string;
+    toolCallsUsed: string[];
+    usage: {
+      completionTokens?: number;
+      promptTokens?: number;
+      totalTokens?: number;
+    };
+  };
+  input: {
+    maxTokens?: number;
+    message: string;
+    systemPrompt?: string;
+    temperature?: number;
+  };
+  recordedAt: string;
+};
+
 interface MutableOperationalHealthHistoryStore {
   clear: () => Promise<{ clearedAt: string; removedCount: number }>;
   initialized: boolean;
   records: PersistedOperationalHealthRecord[];
+}
+
+interface MutableCopilotChatAuditStore {
+  clear: () => Promise<{ clearedAt: string; removedCount: number }>;
+  getHistory: (options?: {
+    from?: Date;
+    limit?: number;
+    offset?: number;
+    to?: Date;
+    toolName?: string;
+  }) => Promise<{
+    filters: {
+      from: string | null;
+      to: string | null;
+      toolName: string | null;
+    };
+    limit: number;
+    offset: number;
+    records: CopilotAuditRecord[];
+    totalMatched: number;
+    totalStored: number;
+  }>;
+  initialized: boolean;
+  records: CopilotAuditRecord[];
 }
 
 interface ApiSuccessResponse<TData> {
@@ -109,6 +159,19 @@ interface OperationalHealthHistoryClearResult {
   removedCount: number;
 }
 
+interface CopilotAuditHistoryResponse {
+  filters: {
+    from: string | null;
+    to: string | null;
+    toolName: string | null;
+  };
+  limit: number;
+  offset: number;
+  records: CopilotAuditRecord[];
+  totalMatched: number;
+  totalStored: number;
+}
+
 function createRecord(
   recordedAt: string,
   status: "ok" | "warning" | "critical",
@@ -162,11 +225,59 @@ function buildFixtureRecords(): PersistedOperationalHealthRecord[] {
   ];
 }
 
+function buildCopilotAuditFixtureRecords(): CopilotAuditRecord[] {
+  return [
+    {
+      completion: {
+        answer: "Politica de sync normal retornada.",
+        fetchedAt: "2026-03-31T10:00:01.000Z",
+        model: "google/gemini-1.5-flash",
+        provider: "openrouter",
+        responseId: "copilot-audit-001",
+        toolCallsUsed: ["get_crypto_sync_policy"],
+        usage: {
+          totalTokens: 40,
+        },
+      },
+      input: {
+        message: "Qual a politica de sync atual?",
+        temperature: 0.1,
+      },
+      recordedAt: "2026-03-31T10:00:00.000Z",
+    },
+    {
+      completion: {
+        answer: "Comparativo entre bitcoin e ethereum concluido.",
+        fetchedAt: "2026-03-31T11:00:01.000Z",
+        model: "google/gemini-1.5-flash",
+        provider: "openrouter",
+        responseId: "copilot-audit-002",
+        toolCallsUsed: ["get_crypto_multi_spot_price"],
+        usage: {
+          totalTokens: 68,
+        },
+      },
+      input: {
+        message: "Compare bitcoin e ethereum em usd",
+        temperature: 0.1,
+      },
+      recordedAt: "2026-03-31T11:00:00.000Z",
+    },
+  ];
+}
+
 const storeInternal = operationalHealthHistoryStore as unknown as MutableOperationalHealthHistoryStore;
 const originalClear = operationalHealthHistoryStore.clear.bind(operationalHealthHistoryStore);
 const originalStoreState = {
   initialized: storeInternal.initialized,
   records: [...storeInternal.records],
+};
+const copilotStoreInternal = copilotChatAuditStore as unknown as MutableCopilotChatAuditStore;
+const originalCopilotClear = copilotChatAuditStore.clear.bind(copilotChatAuditStore);
+const originalCopilotGetHistory = copilotChatAuditStore.getHistory.bind(copilotChatAuditStore);
+const originalCopilotStoreState = {
+  initialized: copilotStoreInternal.initialized,
+  records: [...copilotStoreInternal.records],
 };
 
 void beforeEach(() => {
@@ -181,6 +292,62 @@ void beforeEach(() => {
       removedCount,
     });
   };
+
+  copilotStoreInternal.initialized = true;
+  copilotStoreInternal.records = buildCopilotAuditFixtureRecords();
+  copilotStoreInternal.clear = () => {
+    const removedCount = copilotStoreInternal.records.length;
+    copilotStoreInternal.records = [];
+
+    return Promise.resolve({
+      clearedAt: new Date().toISOString(),
+      removedCount,
+    });
+  };
+
+  copilotStoreInternal.getHistory = (options = {}) => {
+    const safeLimit = Math.max(1, Math.min(options.limit ?? 50, 10000));
+    const safeOffset = Math.max(0, options.offset ?? 0);
+    const fromMs = options.from?.getTime();
+    const toMs = options.to?.getTime();
+    const toolName = options.toolName?.trim().toLowerCase();
+
+    const newestFirst = [...copilotStoreInternal.records].reverse();
+    const filtered = newestFirst.filter((record) => {
+      const recordedAtMs = Date.parse(record.recordedAt);
+
+      if (Number.isNaN(recordedAtMs)) {
+        return false;
+      }
+
+      if (fromMs !== undefined && recordedAtMs < fromMs) {
+        return false;
+      }
+
+      if (toMs !== undefined && recordedAtMs > toMs) {
+        return false;
+      }
+
+      if (toolName) {
+        return record.completion.toolCallsUsed.some((item) => item.toLowerCase() === toolName);
+      }
+
+      return true;
+    });
+
+    return Promise.resolve({
+      filters: {
+        from: options.from ? options.from.toISOString() : null,
+        to: options.to ? options.to.toISOString() : null,
+        toolName: options.toolName?.trim() || null,
+      },
+      limit: safeLimit,
+      offset: safeOffset,
+      records: filtered.slice(safeOffset, safeOffset + safeLimit),
+      totalMatched: filtered.length,
+      totalStored: copilotStoreInternal.records.length,
+    });
+  };
 });
 
 void after(async () => {
@@ -188,6 +355,10 @@ void after(async () => {
   storeInternal.clear = originalClear;
   storeInternal.initialized = originalStoreState.initialized;
   storeInternal.records = originalStoreState.records;
+  copilotStoreInternal.clear = originalCopilotClear;
+  copilotStoreInternal.getHistory = originalCopilotGetHistory;
+  copilotStoreInternal.initialized = originalCopilotStoreState.initialized;
+  copilotStoreInternal.records = originalCopilotStoreState.records;
 });
 
 void it("GET /internal/health/operational/history retorna 401 sem token", async () => {
@@ -564,4 +735,74 @@ void it("GET /internal/health/operational/history/aggregate retorna 400 para buc
   assert.equal(body.status, "error");
   assert.equal(body.error.code, "VALIDATION_ERROR");
   assert.equal(body.error.message, "Invalid payload");
+});
+
+void it("GET /internal/copilot/audit/history retorna 401 sem token", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/internal/copilot/audit/history?limit=2",
+  });
+
+  assert.equal(response.statusCode, 401);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "INTERNAL_AUTH_MISSING_TOKEN");
+  assert.equal(body.error.message, "Missing internal route token");
+});
+
+void it("GET /internal/copilot/audit/history retorna payload com filtro de tool", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/copilot/audit/history?limit=5&offset=0&toolName=get_crypto_multi_spot_price",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<CopilotAuditHistoryResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.limit, 5);
+  assert.equal(body.data.offset, 0);
+  assert.equal(body.data.totalStored, 2);
+  assert.equal(body.data.totalMatched, 1);
+  assert.equal(body.data.records.length, 1);
+  assert.equal(body.data.records[0]?.completion.responseId, "copilot-audit-002");
+  assert.equal(body.data.filters.toolName, "get_crypto_multi_spot_price");
+});
+
+void it("DELETE /internal/copilot/audit/history retorna 400 sem confirm=true", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "DELETE",
+    url: "/internal/copilot/audit/history",
+  });
+
+  assert.equal(response.statusCode, 400);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "VALIDATION_ERROR");
+  assert.equal(body.error.message, "Invalid payload");
+});
+
+void it("DELETE /internal/copilot/audit/history retorna sucesso com confirm=true", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "DELETE",
+    url: "/internal/copilot/audit/history?confirm=true",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<{ clearedAt: string; removedCount: number }>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.removedCount, 2);
+  assert.ok(body.data.clearedAt.length > 0);
 });

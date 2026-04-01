@@ -1,7 +1,23 @@
 import { config as loadDotEnv } from "dotenv";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
-loadDotEnv();
+const apiRootPath = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
+const repoRootPath = resolve(fileURLToPath(new URL("../../../../../", import.meta.url)));
+
+const dotenvPaths = [
+  resolve(process.cwd(), ".env"),
+  resolve(apiRootPath, ".env"),
+  resolve(repoRootPath, ".env"),
+];
+
+for (const dotenvPath of dotenvPaths) {
+  loadDotEnv({
+    override: false,
+    path: dotenvPath,
+  });
+}
 
 const booleanFromString = z.enum(["true", "false"]).transform((value) => value === "true");
 
@@ -35,6 +51,7 @@ const environmentSchema = z
     OPS_HEALTH_SNAPSHOT_ENABLED: booleanFromString.default("true"),
     OPS_HEALTH_SNAPSHOT_INTERVAL_SECONDS: z.coerce.number().int().min(10).default(60),
     OPS_HEALTH_SNAPSHOT_MAX_ITEMS: z.coerce.number().int().min(10).max(10000).default(300),
+    OPS_HEALTH_SNAPSHOT_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
     OPS_HEALTH_SNAPSHOT_FILE_PATH: z
       .string()
       .trim()
@@ -95,6 +112,7 @@ const environmentSchema = z
     OPENROUTER_APP_URL: z.union([z.string().url(), z.literal("")]).default(""),
     COPILOT_CHAT_AUDIT_ENABLED: booleanFromString.default("true"),
     COPILOT_CHAT_AUDIT_MAX_ITEMS: z.coerce.number().int().min(50).max(200000).default(5000),
+    COPILOT_CHAT_AUDIT_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(90),
     COPILOT_CHAT_AUDIT_FILE_PATH: z
       .string()
       .trim()
@@ -102,6 +120,7 @@ const environmentSchema = z
       .default(".runtime/copilot-chat-audit.json"),
     YAHOO_FINANCE_API_BASE_URL: z.string().url(),
     DATABASE_PROVIDER: z.enum(["auto", "file", "postgres"]).default("auto"),
+    DATABASE_AUTO_MIGRATE: booleanFromString.default("true"),
     DATABASE_URL: z.union([z.string().url(), z.literal("")]).default(""),
     DATABASE_SSL: booleanFromString.default("false"),
     DATABASE_SSL_REJECT_UNAUTHORIZED: booleanFromString.default("true"),

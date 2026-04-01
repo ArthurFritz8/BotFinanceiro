@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import { buildSuccessResponse } from "../../../shared/http/api-response.js";
+import { copilotChatAuditStore } from "../../../shared/observability/copilot-chat-audit-store.js";
 import { SystemStatusService } from "../application/system-status-service.js";
 
 const systemStatusService = new SystemStatusService();
@@ -38,6 +39,28 @@ const aggregateHistoryQuerySchema = z.object({
   from: optionalDateTimeSchema.optional(),
   granularity: z.enum(["hour", "day"]).default("hour"),
   to: optionalDateTimeSchema.optional(),
+}).superRefine((value, ctx) => {
+  if (!value.from || !value.to) {
+    return;
+  }
+
+  if (value.from.getTime() <= value.to.getTime()) {
+    return;
+  }
+
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    message: "from must be less than or equal to to",
+    path: ["from"],
+  });
+});
+
+const copilotAuditHistoryQuerySchema = z.object({
+  from: optionalDateTimeSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(10000).default(50),
+  offset: z.coerce.number().int().min(0).max(100000).default(0),
+  to: optionalDateTimeSchema.optional(),
+  toolName: z.string().trim().min(1).max(100).optional(),
 }).superRefine((value, ctx) => {
   if (!value.from || !value.to) {
     return;
@@ -97,6 +120,32 @@ export async function clearOperationalHealthHistory(
 ): Promise<void> {
   void clearHistoryQuerySchema.parse(request.query);
   const data = await systemStatusService.clearOperationalHealthHistory();
+  void reply.send(buildSuccessResponse(request.id, data));
+}
+
+export async function getCopilotAuditHistory(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const parsedQuery = copilotAuditHistoryQuerySchema.parse(request.query);
+  const data = await copilotChatAuditStore.getHistory({
+    from: parsedQuery.from,
+    limit: parsedQuery.limit,
+    offset: parsedQuery.offset,
+    to: parsedQuery.to,
+    toolName: parsedQuery.toolName,
+  });
+
+  void reply.send(buildSuccessResponse(request.id, data));
+}
+
+export async function clearCopilotAuditHistory(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  void clearHistoryQuerySchema.parse(request.query);
+  const data = await copilotChatAuditStore.clear();
+
   void reply.send(buildSuccessResponse(request.id, data));
 }
 

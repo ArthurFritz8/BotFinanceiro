@@ -6,6 +6,7 @@
   "main": "dist/main/server.js",
   "scripts": {
     "build": "tsc -b",
+    "db:migrate": "tsx src/shared/persistence/run-migrations-cli.ts",
     "dev": "tsx watch src/main/server.ts",
     "lint": "eslint src --ext .ts --max-warnings=0",
     "start": "node dist/main/server.js",

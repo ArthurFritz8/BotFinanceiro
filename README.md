@@ -30,10 +30,20 @@ Modo recomendado em producao: Supabase Postgres para trilha operacional e audito
 
 Com `DATABASE_PROVIDER=auto` (default), a API usa Postgres quando `DATABASE_URL` existe e faz fallback para arquivo local quando nao existe.
 
+Migracoes versionadas:
+
+1. `npm run db:migrate`
+2. Startup aplica migracoes automaticamente quando `DATABASE_AUTO_MIGRATE=true`
+
 Dados persistidos:
 
 1. snapshots de health operacional
 2. auditoria de interacoes do Copiloto (mensagem, resposta, tools usadas)
+
+Politica de retencao:
+
+1. `OPS_HEALTH_SNAPSHOT_RETENTION_DAYS`
+2. `COPILOT_CHAT_AUDIT_RETENTION_DAYS`
 
 ## Estrategia de custo zero
 
@@ -63,6 +73,20 @@ curl "http://localhost:3000/internal/health/operational/history/aggregate?granul
 curl "http://localhost:3000/internal/health/operational/history/aggregate.csv?granularity=day&bucketLimit=30&from=2026-03-01T00:00:00.000Z&to=2026-04-01T00:00:00.000Z" \
 	-H "x-internal-token: $INTERNAL_API_TOKEN" \
 	-o operational-health-aggregate.csv
+```
+
+3. Auditoria do Copiloto (JSON)
+
+```bash
+curl "http://localhost:3000/internal/copilot/audit/history?limit=20&offset=0&toolName=get_crypto_multi_spot_price" \
+	-H "x-internal-token: $INTERNAL_API_TOKEN"
+```
+
+4. Limpeza da auditoria do Copiloto
+
+```bash
+curl -X DELETE "http://localhost:3000/internal/copilot/audit/history?confirm=true" \
+	-H "x-internal-token: $INTERNAL_API_TOKEN"
 ```
 
 ## Copiloto IA (OpenRouter)
@@ -116,3 +140,5 @@ npm run dev:web
 ```bash
 VITE_DEV_API_PROXY_TARGET=http://localhost:3000 npm run dev:web
 ```
+
+5. O frontend salva historico local no navegador e permite limpeza manual no card "Historico local".

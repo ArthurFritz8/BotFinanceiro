@@ -4,12 +4,20 @@ import { env } from "../shared/config/env.js";
 import { logger } from "../shared/logger/logger.js";
 import { copilotChatAuditStore } from "../shared/observability/copilot-chat-audit-store.js";
 import { closePostgresPool } from "../shared/persistence/postgres-pool.js";
+import { runPostgresMigrations } from "../shared/persistence/postgres-migrator.js";
+import { resolvePersistenceMode } from "../shared/persistence/persistence-mode.js";
 import { buildApp } from "./app.js";
 
 const app = buildApp();
 
 async function startServer(): Promise<void> {
   try {
+    const persistenceMode = resolvePersistenceMode();
+
+    if (persistenceMode === "postgres" && env.DATABASE_AUTO_MIGRATE) {
+      await runPostgresMigrations();
+    }
+
     await copilotChatAuditStore.initialize();
 
     await app.listen({

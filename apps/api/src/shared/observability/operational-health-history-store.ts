@@ -59,6 +59,21 @@ function clampLimit(limit: number): number {
   return Math.max(1, Math.min(limit, env.OPS_HEALTH_SNAPSHOT_MAX_ITEMS));
 }
 
+function getRetentionCutoffDate(): Date {
+  const cutoffTime = Date.now() - env.OPS_HEALTH_SNAPSHOT_RETENTION_DAYS * 86_400_000;
+  return new Date(cutoffTime);
+}
+
+function isRecordAfterCutoff(record: PersistedOperationalHealthRecord, cutoffDate: Date): boolean {
+  const recordedAtMs = Date.parse(record.recordedAt);
+
+  if (Number.isNaN(recordedAtMs)) {
+    return false;
+  }
+
+  return recordedAtMs >= cutoffDate.getTime();
+}
+
 export class OperationalHealthHistoryStore {
   private readonly filePath = resolve(process.cwd(), env.OPS_HEALTH_SNAPSHOT_FILE_PATH);
 
@@ -118,6 +133,7 @@ export class OperationalHealthHistoryStore {
     };
 
     this.records.push(record);
+    this.records = this.records.filter((item) => isRecordAfterCutoff(item, getRetentionCutoffDate()));
 
     if (this.records.length > env.OPS_HEALTH_SNAPSHOT_MAX_ITEMS) {
       this.records = this.records.slice(-env.OPS_HEALTH_SNAPSHOT_MAX_ITEMS);
@@ -168,6 +184,7 @@ export class OperationalHealthHistoryStore {
   private async appendToPostgres(record: PersistedOperationalHealthRecord): Promise<boolean> {
     try {
       const pool = getPostgresPool();
+      const retentionCutoff = getRetentionCutoffDate();
 
       await pool.query(
         `
@@ -175,6 +192,14 @@ export class OperationalHealthHistoryStore {
           VALUES ($1, $2::jsonb)
         `,
         [record.recordedAt, JSON.stringify(record.snapshot)],
+      );
+
+      await pool.query(
+        `
+          DELETE FROM operational_health_snapshots
+          WHERE recorded_at < $1
+        `,
+        [retentionCutoff.toISOString()],
       );
 
       await pool.query(
@@ -223,28 +248,25 @@ export class OperationalHealthHistoryStore {
   private async initializePostgres(): Promise<boolean> {
     try {
       const pool = getPostgresPool();
+      const retentionCutoff = getRetentionCutoffDate();
 
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS operational_health_snapshots (
-          id BIGSERIAL PRIMARY KEY,
-          recorded_at TIMESTAMPTZ NOT NULL,
-          snapshot JSONB NOT NULL
-        )
-      `);
-
-      await pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_operational_health_snapshots_recorded_at
-        ON operational_health_snapshots (recorded_at DESC)
-      `);
+      await pool.query(
+        `
+          DELETE FROM operational_health_snapshots
+          WHERE recorded_at < $1
+        `,
+        [retentionCutoff.toISOString()],
+      );
 
       const result = await pool.query<{ recorded_at: Date | string; snapshot: unknown }>(
         `
           SELECT recorded_at, snapshot
           FROM operational_health_snapshots
+          WHERE recorded_at >= $1
           ORDER BY recorded_at DESC, id DESC
-          LIMIT $1
+          LIMIT $2
         `,
-        [clampLimit(env.OPS_HEALTH_SNAPSHOT_MAX_ITEMS)],
+        [retentionCutoff.toISOString(), clampLimit(env.OPS_HEALTH_SNAPSHOT_MAX_ITEMS)],
       );
 
       const parsedRecords: PersistedOperationalHealthRecord[] = [];
@@ -288,7 +310,12 @@ export class OperationalHealthHistoryStore {
       const content = await readFile(this.filePath, "utf8");
       const payload = persistedPayloadSchema.parse(JSON.parse(content));
 
-      this.records = payload.records.slice(-env.OPS_HEALTH_SNAPSHOT_MAX_ITEMS);
+      const retentionCutoff = getRetentionCutoffDate();
+      const retainedRecords = payload.records.filter((record) =>
+        isRecordAfterCutoff(record, retentionCutoff),
+      );
+
+      this.records = retainedRecords.slice(-env.OPS_HEALTH_SNAPSHOT_MAX_ITEMS);
       logger.info(
         {
           count: this.records.length,
