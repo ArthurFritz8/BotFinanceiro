@@ -21,6 +21,11 @@ const environmentSchema = z
     COINGECKO_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
     COINGECKO_DAILY_BUDGET: z.coerce.number().int().positive().default(1000),
     COINGECKO_MAX_REQUESTS_PER_MINUTE: z.coerce.number().int().positive().default(10),
+    COINGECKO_RETRY_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
+    COINGECKO_RETRY_BASE_DELAY_MS: z.coerce.number().int().positive().default(250),
+    COINGECKO_RETRY_JITTER_PERCENT: z.coerce.number().int().min(0).max(100).default(25),
+    COINGECKO_CIRCUIT_FAILURE_THRESHOLD: z.coerce.number().int().min(1).max(50).default(5),
+    COINGECKO_CIRCUIT_COOLDOWN_MS: z.coerce.number().int().positive().default(60000),
     CRYPTO_SYNC_TARGET_CURRENCY: z
       .string()
       .trim()
