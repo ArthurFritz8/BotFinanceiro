@@ -189,3 +189,18 @@ Exemplo deploy rapido em host estatico:
 1. Netlify/Vercel/Cloudflare Pages para `apps/web/dist`
 2. API continua no Render
 3. Ajuste `CORS_ALLOWED_ORIGINS` na API com o dominio final do frontend
+
+### Opcao 100% gratis: GitHub Pages
+
+Workflow pronto no repositório: `.github/workflows/deploy-web-pages.yml`.
+
+1. No GitHub: `Settings -> Pages -> Build and deployment -> Source: GitHub Actions`
+2. No GitHub: `Settings -> Secrets and variables -> Actions -> Variables`
+3. Crie a variável `VITE_API_BASE_URL` com a URL pública da API (ex.: `https://sua-api.onrender.com`)
+4. Rode o workflow `Deploy Web Pages` em `Actions`
+5. URL final esperada: `https://SEU_USUARIO.github.io/BotFinanceiro/`
+6. No backend (Render), ajuste `CORS_ALLOWED_ORIGINS` para essa URL final do GitHub Pages
+
+Observacao:
+
+1. O build usa `VITE_BASE_PATH=/<nome-repo>/` automaticamente para funcionar em subdiretório no GitHub Pages.
