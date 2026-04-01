@@ -154,7 +154,7 @@ const environmentSchema = z
     if (value.INTERNAL_API_TOKEN.length >= 16) {
       if (
         value.OPS_HEALTH_CRITICAL_BUDGET_PERCENT <= value.OPS_HEALTH_WARNING_BUDGET_PERCENT &&
-        value.OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT <=
+        value.OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT >=
           value.OPS_HEALTH_WARNING_SCOPE_FAILURE_RATE_PERCENT
       ) {
         return;
@@ -170,13 +170,13 @@ const environmentSchema = z
       }
 
       if (
-        value.OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT >
+        value.OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT <
         value.OPS_HEALTH_WARNING_SCOPE_FAILURE_RATE_PERCENT
       ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message:
-            "OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT must be less than or equal to OPS_HEALTH_WARNING_SCOPE_FAILURE_RATE_PERCENT",
+            "OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT must be greater than or equal to OPS_HEALTH_WARNING_SCOPE_FAILURE_RATE_PERCENT",
           path: ["OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT"],
         });
       }
@@ -201,13 +201,13 @@ const environmentSchema = z
     }
 
     if (
-      value.OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT >
+      value.OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT <
       value.OPS_HEALTH_WARNING_SCOPE_FAILURE_RATE_PERCENT
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message:
-          "OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT must be less than or equal to OPS_HEALTH_WARNING_SCOPE_FAILURE_RATE_PERCENT",
+          "OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT must be greater than or equal to OPS_HEALTH_WARNING_SCOPE_FAILURE_RATE_PERCENT",
         path: ["OPS_HEALTH_CRITICAL_SCOPE_FAILURE_RATE_PERCENT"],
       });
     }
