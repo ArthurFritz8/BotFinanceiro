@@ -13,7 +13,7 @@ jobs:
   smoke:
     name: API Smoke Monitoring
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       actions: read
       contents: read
@@ -30,6 +30,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Resolve monitor target URL
         env:
@@ -38,7 +43,52 @@ jobs:
           MONITOR_BASE_URL="$(gh api repos/${{ github.repository }}/actions/variables/MONITOR_BASE_URL --jq '.value' 2>/dev/null || true)"
           echo "MONITOR_BASE_URL=${MONITOR_BASE_URL}" >> "$GITHUB_ENV"
 
+      - name: Start local API fallback when URL is missing
+        run: |
+          if [[ -n "${MONITOR_BASE_URL}" ]]; then
+            echo "Using external MONITOR_BASE_URL=${MONITOR_BASE_URL}"
+            exit 0
+          fi
+
+          echo "MONITOR_BASE_URL not configured. Starting local API fallback."
+          export COINGECKO_API_BASE_URL="https://api.coingecko.com/api/v3"
+          export YAHOO_FINANCE_API_BASE_URL="https://query1.finance.yahoo.com"
+          export DATABASE_PROVIDER="file"
+          export SCHEDULER_ENABLED="false"
+          export OPS_HEALTH_SNAPSHOT_ENABLED="false"
+
+          npm run dev:api > /tmp/botfinanceiro-api.log 2>&1 &
+          API_PID="$!"
+
+          echo "API_PID=${API_PID}" >> "$GITHUB_ENV"
+          echo "MONITOR_BASE_URL=http://127.0.0.1:3000" >> "$GITHUB_ENV"
+
+          for attempt in {1..30}; do
+            if curl --silent --fail "http://127.0.0.1:3000/health" >/dev/null; then
+              echo "Local API fallback is ready."
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          echo "Local API fallback failed to become ready."
+          tail -n 80 /tmp/botfinanceiro-api.log || true
+          exit 1
+
       - name: Run monitoring smoke checks
         env:
           MONITOR_MAX_LATENCY_MS: "4000"
         run: node scripts/monitoring-smoke.mjs
+
+      - name: Cleanup local API fallback
+        if: always()
+        run: |
+          if [[ -n "${API_PID}" ]]; then
+            kill "${API_PID}" || true
+          fi
+
+          if [[ -f /tmp/botfinanceiro-api.log ]]; then
+            echo "=== Local API log tail ==="
+            tail -n 80 /tmp/botfinanceiro-api.log || true
+          fi

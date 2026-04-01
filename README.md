@@ -25,12 +25,12 @@ Workflow dedicado: `.github/workflows/monitoring-smoke.yml`.
 
 1. Executa a cada 30 minutos e em `workflow_dispatch`.
 2. Faz smoke checks de `GET /health`, `GET /ready` e `GET /v1/copilot/history`.
-3. Opcionalmente valida endpoint interno quando `MONITOR_INTERNAL_TOKEN` estiver configurado.
+3. Quando `MONITOR_BASE_URL` nao existe, sobe uma API local no job como fallback e roda os checks nela.
 
 Configuracao no GitHub Actions:
 
-1. Crie a Actions variable `MONITOR_BASE_URL` com a URL base publica da API, ex: `https://api.seudominio.com`
-2. Opcional: defina `MONITOR_INTERNAL_TOKEN` no step do workflow para incluir checks de rotas internas
+1. Opcional: crie a Actions variable `MONITOR_BASE_URL` com a URL base publica da API, ex: `https://api.seudominio.com`
+2. Sem essa variable, o workflow continua funcional via fallback local (nao monitora disponibilidade externa)
 
 Execucao local:
 
