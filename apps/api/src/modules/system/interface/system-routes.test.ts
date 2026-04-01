@@ -53,6 +53,19 @@ interface ApiSuccessResponse<TData> {
   status: "success";
 }
 
+interface ApiErrorResponse {
+  error: {
+    code: string;
+    details?: unknown;
+    message: string;
+  };
+  meta: {
+    requestId: string;
+    timestamp: string;
+  };
+  status: "error";
+}
+
 interface OperationalHealthAggregatedBucket {
   avgBudgetRemainingPercent: number;
   bucketEnd: string;
@@ -211,6 +224,23 @@ void it("GET /internal/health/operational/history/aggregate.csv retorna CSV com 
   assert.equal(lines.length, 3);
 });
 
+void it("GET /internal/health/operational/history/aggregate.csv retorna 401 com token invalido", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": "invalid_internal_token",
+    },
+    method: "GET",
+    url: "/internal/health/operational/history/aggregate.csv",
+  });
+
+  assert.equal(response.statusCode, 401);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "INTERNAL_AUTH_INVALID_TOKEN");
+  assert.equal(body.error.message, "Invalid internal route token");
+});
+
 void it("GET /internal/health/operational/history/aggregate retorna 401 sem token", async () => {
   const response = await app.inject({
     method: "GET",
@@ -259,4 +289,89 @@ void it("GET /internal/health/operational/history/aggregate retorna payload agre
   assert.equal(firstBucket.maxScopeFailureRatePercent, 90);
   assert.match(firstBucket.bucketStart, /^2026-03-31T00:00:00.000Z$/);
   assert.match(firstBucket.bucketEnd, /^2026-03-31T23:59:59.999Z$/);
+});
+
+void it("GET /internal/health/operational/history/aggregate retorna 401 com token invalido", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": "invalid_internal_token",
+    },
+    method: "GET",
+    url: "/internal/health/operational/history/aggregate",
+  });
+
+  assert.equal(response.statusCode, 401);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "INTERNAL_AUTH_INVALID_TOKEN");
+  assert.equal(body.error.message, "Invalid internal route token");
+});
+
+void it("GET /internal/health/operational/history/aggregate retorna 400 quando from e maior que to", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/health/operational/history/aggregate?from=2026-04-01T01:00:00.000Z&to=2026-04-01T00:00:00.000Z",
+  });
+
+  assert.equal(response.statusCode, 400);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "VALIDATION_ERROR");
+  assert.equal(body.error.message, "Invalid payload");
+});
+
+void it("GET /internal/health/operational/history/aggregate.csv retorna 400 quando from e maior que to", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/health/operational/history/aggregate.csv?from=2026-04-01T01:00:00.000Z&to=2026-04-01T00:00:00.000Z",
+  });
+
+  assert.equal(response.statusCode, 400);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "VALIDATION_ERROR");
+  assert.equal(body.error.message, "Invalid payload");
+});
+
+void it("GET /internal/health/operational/history/aggregate retorna 400 para granularity invalida", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/health/operational/history/aggregate?granularity=minute",
+  });
+
+  assert.equal(response.statusCode, 400);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "VALIDATION_ERROR");
+  assert.equal(body.error.message, "Invalid payload");
+});
+
+void it("GET /internal/health/operational/history/aggregate retorna 400 para bucketLimit fora do intervalo", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/health/operational/history/aggregate?bucketLimit=0",
+  });
+
+  assert.equal(response.statusCode, 400);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "VALIDATION_ERROR");
+  assert.equal(body.error.message, "Invalid payload");
 });
