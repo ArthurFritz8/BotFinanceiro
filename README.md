@@ -29,3 +29,22 @@ Monorepo TypeScript para um ecossistema de mercado financeiro global e cripto.
 
 1. ADR 001: `docs/ADR/ADR-001-politica-degradacao-rate-limit.md`
 2. ADR 002: `docs/ADR/ADR-002-fundacao-tecnica-monorepo-typescript.md`
+
+## Exemplos de chamadas internas
+
+Use o header `x-internal-token` para endpoints internos.
+
+1. Historico operacional agregado (JSON)
+
+```bash
+curl "http://localhost:3000/internal/health/operational/history/aggregate?granularity=hour&bucketLimit=48&from=2026-03-31T00:00:00.000Z&to=2026-04-01T00:00:00.000Z" \
+	-H "x-internal-token: $INTERNAL_API_TOKEN"
+```
+
+2. Historico operacional agregado (CSV)
+
+```bash
+curl "http://localhost:3000/internal/health/operational/history/aggregate.csv?granularity=day&bucketLimit=30&from=2026-03-01T00:00:00.000Z&to=2026-04-01T00:00:00.000Z" \
+	-H "x-internal-token: $INTERNAL_API_TOKEN" \
+	-o operational-health-aggregate.csv
+```
