@@ -211,14 +211,22 @@ void it("GET /v1/crypto/chart retorna pontos e insights tecnicos", async () => {
       };
       currency: string;
       insights: {
+        confidenceScore: number;
         changePercent: number;
         currentPrice: number;
+        tradeAction: "buy" | "sell" | "wait";
         trend: "bearish" | "bullish" | "sideways";
         volatilityPercent: number;
       };
+      live: null;
+      mode: "delayed";
       points: Array<{
-        price: number;
+        close: number;
+        high: number;
+        low: number;
+        open: number;
         timestamp: string;
+        volume: number | null;
       }>;
       provider: "coingecko";
       range: "24h" | "7d" | "30d" | "90d" | "1y";
@@ -231,11 +239,183 @@ void it("GET /v1/crypto/chart retorna pontos e insights tecnicos", async () => {
   assert.equal(body.data.currency, "usd");
   assert.equal(body.data.range, "7d");
   assert.equal(body.data.provider, "coingecko");
-  assert.equal(body.data.cache.state, "miss");
+  assert.equal(body.data.mode, "delayed");
+  assert.equal(body.data.live, null);
+  assert.equal(body.data.cache.state, "refreshed");
   assert.equal(body.data.cache.stale, false);
   assert.equal(body.data.points.length, 6);
   assert.equal(typeof body.data.points[0]?.timestamp, "string");
+  assert.equal(body.data.points[0]?.close, 64200);
   assert.equal(body.data.insights.currentPrice, 65300);
+  assert.equal(typeof body.data.insights.tradeAction, "string");
+  assert.equal(typeof body.data.insights.confidenceScore, "number");
   assert.equal(typeof body.data.insights.changePercent, "number");
   assert.equal(typeof body.data.insights.volatilityPercent, "number");
+});
+
+void it("GET /v1/crypto/chart usa fallback Binance quando CoinGecko falha", async () => {
+  let coinGeckoCalls = 0;
+  let binanceKlineCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("api.coingecko.com/api/v3/coins/bitcoin/market_chart")) {
+      coinGeckoCalls += 1;
+
+      return Promise.resolve(
+        new Response(JSON.stringify({ status: "rate_limited" }), {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 429,
+        }),
+      );
+    }
+
+    if (requestUrl.includes("api.binance.com/api/v3/klines") && requestUrl.includes("symbol=BTCUSDT")) {
+      binanceKlineCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify([
+            [1712000000000, "64100", "64230", "64020", "64180", "1200"],
+            [1712003600000, "64180", "64450", "64120", "64390", "1600"],
+            [1712007200000, "64390", "64620", "64300", "64580", "1840"],
+            [1712010800000, "64580", "64820", "64520", "64720", "1720"],
+            [1712014400000, "64720", "64990", "64680", "64920", "2100"],
+          ]),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/chart?assetId=bitcoin&currency=usd&range=24h",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.ok(coinGeckoCalls >= 1);
+  assert.equal(binanceKlineCalls, 1);
+
+  const body = response.json<{
+    data: {
+      mode: "delayed";
+      provider: "binance" | "coingecko";
+      points: Array<{
+        close: number;
+      }>;
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.mode, "delayed");
+  assert.equal(body.data.provider, "binance");
+  assert.equal(body.data.points.length, 5);
+  assert.equal(body.data.points[4]?.close, 64920);
+});
+
+void it("GET /v1/crypto/live-chart retorna snapshot ao vivo com Binance", async () => {
+  let klineCalls = 0;
+  let tickerCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("api.binance.com/api/v3/klines") && requestUrl.includes("symbol=BTCUSDT")) {
+      klineCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify([
+            [1712000000000, "65000", "65140", "64920", "65080", "1100"],
+            [1712000300000, "65080", "65190", "65010", "65120", "980"],
+            [1712000600000, "65120", "65230", "65080", "65190", "1030"],
+            [1712000900000, "65190", "65310", "65150", "65240", "1190"],
+            [1712001200000, "65240", "65380", "65200", "65310", "1240"],
+          ]),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.binance.com/api/v3/ticker/24hr") && requestUrl.includes("symbol=BTCUSDT")) {
+      tickerCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            lastPrice: "65312.45",
+            priceChangePercent: "1.73",
+            symbol: "BTCUSDT",
+            volume: "65234.11",
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/live-chart?assetId=bitcoin&range=24h",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(klineCalls, 1);
+  assert.equal(tickerCalls, 1);
+
+  const body = response.json<{
+    data: {
+      cache: {
+        stale: boolean;
+        state: string;
+      };
+      currency: string;
+      live: {
+        changePercent24h: number | null;
+        source: "binance";
+        symbol: string;
+        volume24h: number | null;
+      } | null;
+      mode: "live";
+      provider: "binance";
+      points: Array<{
+        close: number;
+      }>;
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.mode, "live");
+  assert.equal(body.data.provider, "binance");
+  assert.equal(body.data.currency, "usd");
+  assert.equal(body.data.cache.state, "refreshed");
+  assert.equal(body.data.cache.stale, false);
+  assert.equal(body.data.points.length, 5);
+  assert.equal(body.data.live?.source, "binance");
+  assert.equal(body.data.live?.symbol, "BTCUSDT");
 });

@@ -11,6 +11,7 @@ const recentHistoryElement = document.querySelector("#recent-history");
 const clearLocalHistoryButton = document.querySelector("#clear-local-history");
 const chartControlsForm = document.querySelector("#chart-controls");
 const chartAssetSelect = document.querySelector("#chart-asset");
+const chartModeSelect = document.querySelector("#chart-mode");
 const chartRangeSelect = document.querySelector("#chart-range");
 const chartRefreshButton = document.querySelector("#chart-refresh-button");
 const chartStatusElement = document.querySelector("#chart-status");
@@ -31,11 +32,17 @@ const CHART_RANGE_LABELS = {
   "7d": "7 dias",
   "90d": "90 dias",
 };
+const CHART_MODE_LABELS = {
+  delayed: "delay",
+  live: "ao vivo",
+};
 
 const messages = [];
 let isSending = false;
 let chatSessionId = getOrCreateSessionId();
 let currentChartSnapshot = null;
+let chartAutoRefreshTimer = null;
+let isChartLoading = false;
 
 function buildApiUrl(path) {
   return API_BASE_URL.length > 0 ? `${API_BASE_URL}${path}` : path;
@@ -284,6 +291,18 @@ function formatTrendLabel(trend) {
   return "Viés lateral";
 }
 
+function formatTradeActionLabel(action) {
+  if (action === "buy") {
+    return "Compra tatica";
+  }
+
+  if (action === "sell") {
+    return "Venda tatica";
+  }
+
+  return "Aguardar";
+}
+
 function setChartStatus(message, mode = "") {
   if (!chartStatusElement) {
     return;
@@ -324,8 +343,26 @@ function drawChart(snapshot) {
   }
 
   const points = Array.isArray(snapshot?.points) ? snapshot.points : [];
+  const normalizedPoints = points
+    .map((point) => {
+      const close =
+        typeof point?.close === "number"
+          ? point.close
+          : typeof point?.price === "number"
+            ? point.price
+            : Number.NaN;
 
-  if (points.length < 2) {
+      if (!Number.isFinite(close)) {
+        return null;
+      }
+
+      return {
+        close,
+      };
+    })
+    .filter((point) => point !== null);
+
+  if (normalizedPoints.length < 2) {
     clearChartCanvas();
     return;
   }
@@ -349,14 +386,14 @@ function drawChart(snapshot) {
   };
   const chartWidth = Math.max(1, width - padding.left - padding.right);
   const chartHeight = Math.max(1, height - padding.top - padding.bottom);
-  const prices = points.map((point) => point.price);
+  const prices = normalizedPoints.map((point) => point.close);
   const minPrice = Math.min(...prices);
   const maxPrice = Math.max(...prices);
   const priceRange = maxPrice - minPrice || 1;
 
-  const chartPoints = points.map((point, index) => {
-    const x = padding.left + (index / (points.length - 1)) * chartWidth;
-    const normalizedPrice = (point.price - minPrice) / priceRange;
+  const chartPoints = normalizedPoints.map((point, index) => {
+    const x = padding.left + (index / (normalizedPoints.length - 1)) * chartWidth;
+    const normalizedPrice = (point.close - minPrice) / priceRange;
     const y = padding.top + (1 - normalizedPrice) * chartHeight;
 
     return {
@@ -432,10 +469,22 @@ function renderChartMetrics(snapshot) {
     return;
   }
 
+  const rsi14Label =
+    typeof insights.rsi14 === "number" && !Number.isNaN(insights.rsi14)
+      ? insights.rsi14.toFixed(2)
+      : "n/d";
   const metrics = [
     {
       label: "Preço",
       value: formatPrice(insights.currentPrice, snapshot.currency),
+    },
+    {
+      label: "Ação",
+      value: formatTradeActionLabel(insights.tradeAction),
+    },
+    {
+      label: "Confianca",
+      value: `${Math.round(insights.confidenceScore)}%`,
     },
     {
       label: "Trend",
@@ -450,12 +499,52 @@ function renderChartMetrics(snapshot) {
       value: formatPercent(insights.volatilityPercent),
     },
     {
+      label: "ATR",
+      value: formatPercent(insights.atrPercent),
+    },
+    {
+      label: "RSI 14",
+      value: rsi14Label,
+    },
+    {
+      label: "MACD Hist",
+      value: formatPercent(insights.macdHistogram),
+    },
+    {
+      label: "EMA 9",
+      value: formatPrice(insights.emaFast, snapshot.currency),
+    },
+    {
+      label: "EMA 21",
+      value: formatPrice(insights.emaSlow, snapshot.currency),
+    },
+    {
       label: "Suporte",
       value: formatPrice(insights.supportLevel, snapshot.currency),
     },
     {
       label: "Resistência",
       value: formatPrice(insights.resistanceLevel, snapshot.currency),
+    },
+    {
+      label: "Entrada",
+      value: `${formatPrice(insights.tradeLevels.entryZoneLow, snapshot.currency)} - ${formatPrice(insights.tradeLevels.entryZoneHigh, snapshot.currency)}`,
+    },
+    {
+      label: "Stop",
+      value: formatPrice(insights.tradeLevels.stopLoss, snapshot.currency),
+    },
+    {
+      label: "TP1/TP2",
+      value: `${formatPrice(insights.tradeLevels.takeProfit1, snapshot.currency)} / ${formatPrice(insights.tradeLevels.takeProfit2, snapshot.currency)}`,
+    },
+    {
+      label: "Modo",
+      value: CHART_MODE_LABELS[snapshot.mode] ?? snapshot.mode,
+    },
+    {
+      label: "Provider",
+      value: String(snapshot.provider ?? "n/d").toUpperCase(),
     },
   ];
 
@@ -478,13 +567,15 @@ function renderChartMetrics(snapshot) {
   }
 }
 
-async function requestCryptoChart(assetId, range) {
-  const response = await fetch(
-    buildApiUrl(`/v1/crypto/chart?assetId=${encodeURIComponent(assetId)}&currency=usd&range=${encodeURIComponent(range)}`),
-    {
-      method: "GET",
-    },
-  );
+async function requestCryptoChart(assetId, range, mode) {
+  const isLiveMode = mode === "live";
+  const endpoint = isLiveMode ? "/v1/crypto/live-chart" : "/v1/crypto/chart";
+  const query = isLiveMode
+    ? `assetId=${encodeURIComponent(assetId)}&range=${encodeURIComponent(range)}`
+    : `assetId=${encodeURIComponent(assetId)}&currency=usd&range=${encodeURIComponent(range)}`;
+  const response = await fetch(buildApiUrl(`${endpoint}?${query}`), {
+    method: "GET",
+  });
 
   let payload = null;
 
@@ -507,18 +598,28 @@ async function loadChart(options = {}) {
     return;
   }
 
-  const assetId = options.assetId ?? chartAssetSelect.value;
-  const range = options.range ?? chartRangeSelect.value;
+  if (isChartLoading) {
+    return;
+  }
 
-  if (chartRefreshButton instanceof HTMLButtonElement) {
+  const assetId = options.assetId ?? chartAssetSelect.value;
+  const mode = options.mode ?? chartModeSelect?.value ?? "delayed";
+  const range = options.range ?? chartRangeSelect.value;
+  const silent = options.silent === true;
+
+  isChartLoading = true;
+
+  if (chartRefreshButton instanceof HTMLButtonElement && !silent) {
     chartRefreshButton.disabled = true;
     chartRefreshButton.textContent = "Atualizando...";
   }
 
-  setChartStatus("Atualizando dados de grafico...", "loading");
+  if (!silent) {
+    setChartStatus("Atualizando dados de grafico...", "loading");
+  }
 
   try {
-    const snapshot = await requestCryptoChart(assetId, range);
+    const snapshot = await requestCryptoChart(assetId, range, mode);
 
     if (!snapshot || !Array.isArray(snapshot.points)) {
       throw new Error("Resposta de grafico invalida");
@@ -530,7 +631,21 @@ async function loadChart(options = {}) {
 
     const cacheLabel = snapshot.cache?.state ? `cache ${snapshot.cache.state}` : "cache n/d";
     const rangeLabel = CHART_RANGE_LABELS[snapshot.range] ?? snapshot.range;
-    setChartStatus(`Grafico ${assetId.toUpperCase()} (${rangeLabel}) carregado • ${cacheLabel}`);
+    const modeLabel = CHART_MODE_LABELS[snapshot.mode] ?? snapshot.mode;
+    const providerLabel = String(snapshot.provider ?? "n/d").toUpperCase();
+    const liveLabel =
+      snapshot.mode === "live"
+        ? ` • 24h ${formatPercent(snapshot.live?.changePercent24h)} • vol ${formatPrice(snapshot.live?.volume24h, "usd")}`
+        : "";
+    const updatedAtLabel = new Date().toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+
+    setChartStatus(
+      `Grafico ${assetId.toUpperCase()} (${modeLabel}, ${rangeLabel}) • provider ${providerLabel} • ${cacheLabel}${liveLabel} • atualizado ${updatedAtLabel}`,
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro ao carregar grafico";
     setChartStatus(message, "error");
@@ -538,11 +653,34 @@ async function loadChart(options = {}) {
     renderChartMetrics(null);
     currentChartSnapshot = null;
   } finally {
-    if (chartRefreshButton instanceof HTMLButtonElement) {
+    if (chartRefreshButton instanceof HTMLButtonElement && !silent) {
       chartRefreshButton.disabled = false;
       chartRefreshButton.textContent = "Atualizar grafico";
     }
+
+    isChartLoading = false;
   }
+}
+
+function stopChartAutoRefresh() {
+  if (chartAutoRefreshTimer !== null) {
+    window.clearInterval(chartAutoRefreshTimer);
+    chartAutoRefreshTimer = null;
+  }
+}
+
+function configureChartAutoRefresh() {
+  stopChartAutoRefresh();
+
+  if (!chartModeSelect || chartModeSelect.value !== "live") {
+    return;
+  }
+
+  chartAutoRefreshTimer = window.setInterval(() => {
+    void loadChart({
+      silent: true,
+    });
+  }, 5000);
 }
 
 function renderMessages() {
@@ -806,6 +944,13 @@ function setupChartLab() {
     void loadChart();
   });
 
+  if (chartModeSelect) {
+    chartModeSelect.addEventListener("change", () => {
+      configureChartAutoRefresh();
+      void loadChart();
+    });
+  }
+
   if (chartAnalyzeButton) {
     chartAnalyzeButton.addEventListener("click", () => {
       if (!chatInput || !chartAssetSelect || !chartRangeSelect) {
@@ -814,12 +959,14 @@ function setupChartLab() {
 
       const assetId = chartAssetSelect.value;
       const range = chartRangeSelect.value;
+      const mode = chartModeSelect?.value ?? "delayed";
+      const modeLabel = CHART_MODE_LABELS[mode] ?? mode;
       const rangeLabel = CHART_RANGE_LABELS[range] ?? range;
       const trend = currentChartSnapshot?.insights?.trend
         ? formatTrendLabel(currentChartSnapshot.insights.trend).toLowerCase()
         : "viés indefinido";
 
-      chatInput.value = `Analise tecnicamente o grafico de ${assetId} em ${rangeLabel}, com tendencia, momentum, volatilidade, suporte e resistencia. Contexto atual: ${trend}.`;
+      chatInput.value = `Analise tecnicamente o grafico de ${assetId} em ${rangeLabel} no modo ${modeLabel}, com tendencia, momentum, volatilidade, RSI, MACD, ATR, suporte/resistencia e sinal tatico (buy/sell/wait) com confianca e niveis de entrada/stop/take-profit. Contexto atual: ${trend}.`;
       chatInput.focus();
 
       if (chatForm && !isSending) {
@@ -828,6 +975,7 @@ function setupChartLab() {
     });
   }
 
+  configureChartAutoRefresh();
   void loadChart();
 }
 
@@ -884,6 +1032,10 @@ if (chatInput) {
     }
   });
 }
+
+window.addEventListener("beforeunload", () => {
+  stopChartAutoRefresh();
+});
 
 setupQuickPrompts();
 setupLocalHistoryControls();

@@ -88,3 +88,9 @@ O sistema ja possuia tool calling read-only e protecao de resiliencia para CoinG
 16. Adicionado fallback por intencao para perguntas de grafico/tendencia quando o modelo retorna resposta limitante, mantendo resposta util e objetiva.
 17. Frontend evoluido com modulo "Chart Lab" (canvas, selecao de ativo/faixa e metricas tecnicas) integrado ao chat via acao "Pedir analise tecnica".
 18. Cobertura de testes ampliada para rota de grafico, fallback de analise tecnica e tool calling de insights de grafico.
+19. Integrado provider Binance para dados de grafico com klines e ticker 24h, com retry/backoff e mapeamento de simbolos.
+20. `CryptoChartService` evoluiu para suportar dois modos: `delayed` e `live`, com fallback CoinGecko -> Binance em `delayed` (USD).
+21. Introduzido endpoint `GET /v1/crypto/live-chart` para snapshot quase em tempo real com cache curto (`fresh=8s`, `stale=20s`).
+22. Indicadores tecnicos ampliados no backend: EMA (9/21), RSI14, MACD histogram, ATR, confianca e plano tatico (`buy|sell|wait`) com niveis operacionais (entrada, stop, TP1, TP2).
+23. Tool `get_crypto_chart_insights` passou a aceitar `mode` (`delayed|live`) e retornar resumo textual com acao tatica e confianca, mantendo carater informativo sem recomendacao de investimento.
+24. Frontend Chart Lab passou a oferecer modo `Ao vivo` com polling automatico, metricas tecnicas avancadas e fluxo de pergunta orientado a sinal tatico no chat.

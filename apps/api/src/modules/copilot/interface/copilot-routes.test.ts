@@ -630,7 +630,7 @@ void it("POST /v1/copilot/chat aplica fallback local para analise de grafico", a
   assert.equal(body.status, "success");
   assert.equal(body.data.responseId, "gen-chart-fallback-001");
   assert.match(body.data.answer, /Analise tecnica objetiva de Bitcoin/);
-  assert.match(body.data.answer, /suporte aproximado/);
+  assert.match(body.data.answer, /Faixa tecnica: suporte/);
   assert.match(body.data.answer, /resistencia/);
   assert.doesNotMatch(body.data.answer, /Nao posso fornecer recomendacoes/);
 });
@@ -771,6 +771,118 @@ void it("POST /v1/copilot/chat executa tool de insights de grafico", async () =>
   assert.deepEqual(body.data.toolCallsUsed, ["get_crypto_chart_insights"]);
   assert.equal(body.data.responseId, "gen-tool-chart-002");
   assert.equal(body.data.usage.totalTokens, 74);
+});
+
+void it("POST /v1/copilot/chat aplica fallback live para pergunta de comprar/vender", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let openRouterCalls = 0;
+  let klineCalls = 0;
+  let tickerCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    "Sou um copiloto financeiro focado em dados e operacao. Nao posso fornecer recomendacao de investimento.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-live-fallback-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 19,
+              prompt_tokens: 29,
+              total_tokens: 48,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.binance.com/api/v3/klines") && requestUrl.includes("symbol=BTCUSDT")) {
+      klineCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify([
+            [1712000000000, "65100", "65220", "65020", "65170", "1200"],
+            [1712000300000, "65170", "65300", "65120", "65240", "1250"],
+            [1712000600000, "65240", "65410", "65190", "65350", "1380"],
+            [1712000900000, "65350", "65520", "65300", "65460", "1410"],
+            [1712001200000, "65460", "65600", "65410", "65520", "1580"],
+          ]),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.binance.com/api/v3/ticker/24hr") && requestUrl.includes("symbol=BTCUSDT")) {
+      tickerCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            lastPrice: "65524.2",
+            priceChangePercent: "1.96",
+            symbol: "BTCUSDT",
+            volume: "70210.45",
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "No grafico ao vivo do bitcoin, vale comprar ou vender hoje?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 1);
+  assert.equal(klineCalls, 1);
+  assert.equal(tickerCalls, 1);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-live-fallback-001");
+  assert.match(body.data.answer, /Sinal tatico atual/);
+  assert.match(body.data.answer, /modo live/);
+  assert.match(body.data.answer, /entrada/);
+  assert.doesNotMatch(body.data.answer, /Nao posso fornecer recomendacao/);
 });
 
 void it("POST /v1/copilot/chat executa snapshot financeiro global com tool calling", async () => {

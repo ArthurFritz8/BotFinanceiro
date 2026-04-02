@@ -158,6 +158,12 @@ Tool calling read-only habilitado no Copiloto:
 6. `get_operational_health`
 7. `get_crypto_sync_policy`
 
+Observacao tecnica da tool de grafico:
+
+1. `get_crypto_chart_insights` aceita `mode`:
+- `delayed` (historico padrao com fallback CoinGecko -> Binance)
+- `live` (snapshot quase em tempo real via Binance)
+
 Quando o modelo usa ferramentas, a resposta inclui `toolCallsUsed` com a lista das tools executadas no fluxo.
 
 Cobertura de consultas apos esta evolucao:
@@ -169,6 +175,12 @@ Endpoint tecnico para grafico:
 
 ```bash
 curl "http://localhost:3000/v1/crypto/chart?assetId=bitcoin&currency=usd&range=7d"
+```
+
+Endpoint tecnico para grafico ao vivo:
+
+```bash
+curl "http://localhost:3000/v1/crypto/live-chart?assetId=bitcoin&range=24h"
 ```
 
 ## Interface web do Copiloto
@@ -197,7 +209,7 @@ VITE_DEV_API_PROXY_TARGET=http://localhost:3000 npm run dev:web
 
 5. O frontend usa `sessionId` persistido no navegador para carregar historico remoto em `GET /v1/copilot/history` e mantém fallback local.
 6. O card "Historico local" limpa mensagens da sessao atual e inicia uma nova sessao local/remota.
-7. O card "Chart Lab" permite visualizar preco historico (24h a 1 ano), sinais tecnicos e enviar analise automatica ao chat com um clique.
+7. O card "Chart Lab" permite alternar entre modo `Delay` e `Ao vivo`, visualizar preco e sinais tecnicos avancados (EMA, RSI, MACD, ATR, suporte/resistencia, acao tatica e niveis de risco) e enviar analise automatica ao chat com um clique.
 
 ## Frontend publico
 

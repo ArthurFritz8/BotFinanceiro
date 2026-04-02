@@ -27,6 +27,11 @@ const chartQuerySchema = z.object({
   range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("7d"),
 });
 
+const liveChartQuerySchema = z.object({
+  assetId: z.string().trim().min(1).default("bitcoin"),
+  range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("24h"),
+});
+
 const cryptoSyncPolicyService = new CryptoSyncPolicyService();
 const cryptoSpotPriceService = new CryptoSpotPriceService();
 const cryptoChartService = new CryptoChartService();
@@ -50,6 +55,13 @@ export async function getSpotPrice(request: FastifyRequest, reply: FastifyReply)
 export async function getChart(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const parsedQuery = chartQuerySchema.parse(request.query);
   const chart = await cryptoChartService.getChart(parsedQuery);
+
+  void reply.send(buildSuccessResponse(request.id, chart));
+}
+
+export async function getLiveChart(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const parsedQuery = liveChartQuerySchema.parse(request.query);
+  const chart = await cryptoChartService.getLiveChart(parsedQuery);
 
   void reply.send(buildSuccessResponse(request.id, chart));
 }

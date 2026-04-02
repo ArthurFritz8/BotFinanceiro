@@ -419,3 +419,50 @@ Objetivo do aditivo:
 1. Usuario consegue visualizar contexto tecnico sem sair da plataforma.
 2. Chat deixa de responder apenas com limitacao e passa a entregar leitura tecnica estruturada para perguntas de grafico.
 3. A experiencia combina analise qualitativa (IA) e quantitativa (indicadores), elevando maturidade profissional do produto.
+
+## Aditivo de grafico ao vivo, sinal tatico e integracao Binance (2026-04-02)
+
+### Objetivo
+
+1. Entregar experiencia real de grafico ao vivo no produto, com analise tecnica mais profunda e resposta operacional para perguntas "comprar ou vender" em formato informativo.
+
+### Correcao aplicada
+
+1. Novo adapter `BinanceMarketDataAdapter` com:
+- klines para historico
+- ticker 24h para mudanca/volume
+- retry com backoff e tratamento de erros `BINANCE_*`
+2. `CryptoChartService` reescrito para:
+- `mode=delayed` (CoinGecko com fallback para Binance em USD)
+- `mode=live` (Binance)
+- indicadores adicionais: EMA, RSI14, MACD histogram, ATR
+- sinal tatico `tradeAction` (`buy|sell|wait`) com `confidenceScore`
+- niveis operacionais: `entryZone`, `stopLoss`, `takeProfit1`, `takeProfit2`
+3. Novo endpoint:
+- `GET /v1/crypto/live-chart?assetId=bitcoin&range=24h`
+4. Copiloto evoluido:
+- tool `get_crypto_chart_insights` passou a aceitar `mode` (`delayed|live`)
+- fallback por intencao para grafico/compra-venda agora inclui sinal tatico, confianca e niveis
+5. Frontend Chart Lab evoluido:
+- seletor de modo `Delay`/`Ao vivo`
+- polling automatico em modo live
+- exibicao de metricas avancadas (EMA/RSI/MACD/ATR, acao, confianca e niveis)
+
+### Evidencias da correcao
+
+1. API tests atualizados e validados com novos cenarios:
+- fallback CoinGecko -> Binance em `GET /v1/crypto/chart`
+- novo endpoint `GET /v1/crypto/live-chart`
+- fallback do Copiloto para pergunta de comprar/vender em modo live
+2. Resultado da suite API apos atualizacao:
+- `tests: 44`
+- `pass: 44`
+- `fail: 0`
+3. `npm run check` concluido com sucesso (lint + typecheck).
+4. `npm run build -w @botfinanceiro/web` concluido com sucesso apos evolucao do Chart Lab.
+
+### Resultado esperado
+
+1. Melhor aderencia ao pedido de uso "ao vivo" com pipeline dedicado e resiliente.
+2. Respostas mais acionaveis no chat para perguntas de direcao de mercado, mantendo neutralidade e sem recomendacao financeira.
+3. Menor fragilidade em ativos sujeitos a indisponibilidade temporaria de provider unico.

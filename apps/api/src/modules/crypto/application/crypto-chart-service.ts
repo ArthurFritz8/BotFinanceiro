@@ -1,34 +1,84 @@
 import {
+  BinanceMarketDataAdapter,
+  type BinanceChartPoint,
+} from "../../../integrations/market_data/binance-market-data-adapter.js";
+import {
   CoinGeckoMarketChartAdapter,
   type CoinGeckoChartPoint,
 } from "../../../integrations/market_data/coingecko-market-chart-adapter.js";
 import { env } from "../../../shared/config/env.js";
+import { AppError } from "../../../shared/errors/app-error.js";
 import { memoryCache } from "../../../shared/cache/memory-cache.js";
 
 export type CryptoChartRange = "24h" | "7d" | "30d" | "90d" | "1y";
 export type CryptoTrend = "bearish" | "bullish" | "sideways";
+export type TradeAction = "buy" | "sell" | "wait";
 
 interface CachedChartPayload {
   assetId: string;
   currency: string;
   fetchedAt: string;
   insights: CryptoChartInsights;
-  points: CoinGeckoChartPoint[];
-  provider: "coingecko";
+  live: CryptoLiveSnapshot | null;
+  mode: "delayed" | "live";
+  points: CryptoChartPoint[];
+  provider: "binance" | "coingecko";
   range: CryptoChartRange;
 }
 
+interface NormalizedChartPayload {
+  assetId: string;
+  currency: string;
+  fetchedAt: string;
+  points: CryptoChartPoint[];
+  provider: "binance" | "coingecko";
+  range: CryptoChartRange;
+}
+
+export interface CryptoChartPoint {
+  close: number;
+  high: number;
+  low: number;
+  open: number;
+  timestamp: string;
+  volume: number | null;
+}
+
+export interface CryptoTradeLevels {
+  entryZoneHigh: number;
+  entryZoneLow: number;
+  stopLoss: number;
+  takeProfit1: number;
+  takeProfit2: number;
+}
+
 export interface CryptoChartInsights {
+  atrPercent: number;
   changePercent: number;
+  confidenceScore: number;
   currentPrice: number;
+  emaFast: number;
+  emaSlow: number;
   highPrice: number;
+  longMovingAverage: number;
   lowPrice: number;
+  macdHistogram: number;
   momentumPercent: number;
   resistanceLevel: number;
+  rsi14: number | null;
   shortMovingAverage: number;
   supportLevel: number;
+  tradeAction: TradeAction;
+  tradeLevels: CryptoTradeLevels;
   trend: CryptoTrend;
   volatilityPercent: number;
+}
+
+export interface CryptoLiveSnapshot {
+  changePercent24h: number | null;
+  source: "binance";
+  symbol: string;
+  volume24h: number | null;
 }
 
 export interface CryptoChartResponse {
@@ -40,13 +90,23 @@ export interface CryptoChartResponse {
   currency: string;
   fetchedAt: string;
   insights: CryptoChartInsights;
-  points: CoinGeckoChartPoint[];
-  provider: "coingecko";
+  live: CryptoLiveSnapshot | null;
+  mode: "delayed" | "live";
+  points: CryptoChartPoint[];
+  provider: "binance" | "coingecko";
   range: CryptoChartRange;
 }
 
-function buildCacheKey(assetId: string, currency: string, range: CryptoChartRange): string {
-  return `crypto:chart:${assetId}:${currency}:${range}`;
+const liveChartFreshTtlSeconds = 8;
+const liveChartStaleSeconds = 20;
+
+function buildCacheKey(
+  mode: "delayed" | "live",
+  assetId: string,
+  currency: string,
+  range: CryptoChartRange,
+): string {
+  return `crypto:chart:${mode}:${assetId}:${currency}:${range}`;
 }
 
 function normalizeInput(input: {
@@ -132,23 +192,240 @@ function percentile(sortedValues: number[], ratio: number): number {
   }
 
   const safeRatio = Math.min(1, Math.max(0, ratio));
-  const index = Math.min(sortedValues.length - 1, Math.max(0, Math.floor((sortedValues.length - 1) * safeRatio)));
+  const index = Math.min(
+    sortedValues.length - 1,
+    Math.max(0, Math.floor((sortedValues.length - 1) * safeRatio)),
+  );
 
   return sortedValues[index] ?? sortedValues[0] ?? 0;
 }
 
-function computeInsights(points: CoinGeckoChartPoint[]): CryptoChartInsights {
-  const prices = points.map((point) => point.price);
+function computeEma(prices: number[], period: number): number {
+  if (prices.length === 0) {
+    return 0;
+  }
+
+  const smoothing = 2 / (period + 1);
+  let ema = prices[0] ?? 0;
+
+  for (let index = 1; index < prices.length; index += 1) {
+    const price = prices[index] ?? ema;
+    ema = price * smoothing + ema * (1 - smoothing);
+  }
+
+  return ema;
+}
+
+function computeEmaSeries(values: number[], period: number): number[] {
+  if (values.length === 0) {
+    return [];
+  }
+
+  const smoothing = 2 / (period + 1);
+  const series: number[] = [];
+  let ema = values[0] ?? 0;
+  series.push(ema);
+
+  for (let index = 1; index < values.length; index += 1) {
+    const value = values[index] ?? ema;
+    ema = value * smoothing + ema * (1 - smoothing);
+    series.push(ema);
+  }
+
+  return series;
+}
+
+function computeRsi(prices: number[], period = 14): number | null {
+  if (prices.length < period + 1) {
+    return null;
+  }
+
+  let gains = 0;
+  let losses = 0;
+
+  for (let index = prices.length - period; index < prices.length; index += 1) {
+    const currentPrice = prices[index] ?? 0;
+    const previousPrice = prices[index - 1] ?? currentPrice;
+    const delta = currentPrice - previousPrice;
+
+    if (delta > 0) {
+      gains += delta;
+    } else {
+      losses += Math.abs(delta);
+    }
+  }
+
+  if (losses === 0) {
+    return 100;
+  }
+
+  const relativeStrength = gains / losses;
+  const rsi = 100 - 100 / (1 + relativeStrength);
+
+  return Number.isFinite(rsi) ? roundPercent(rsi) : null;
+}
+
+function computeAtrPercent(points: CryptoChartPoint[], period = 14): number {
+  if (points.length < 2) {
+    return 0;
+  }
+
+  const recentPoints = points.slice(-(period + 1));
+  const trueRanges: number[] = [];
+
+  for (let index = 1; index < recentPoints.length; index += 1) {
+    const currentPoint = recentPoints[index];
+    const previousPoint = recentPoints[index - 1];
+
+    if (!currentPoint || !previousPoint) {
+      continue;
+    }
+
+    const highLow = currentPoint.high - currentPoint.low;
+    const highClose = Math.abs(currentPoint.high - previousPoint.close);
+    const lowClose = Math.abs(currentPoint.low - previousPoint.close);
+
+    trueRanges.push(Math.max(highLow, highClose, lowClose));
+  }
+
+  const atr = computeAverage(trueRanges);
+  const lastPoint = recentPoints[recentPoints.length - 1];
+
+  if (!lastPoint || lastPoint.close <= 0) {
+    return 0;
+  }
+
+  return roundPercent((atr / lastPoint.close) * 100);
+}
+
+function computeTradePlan(
+  currentPrice: number,
+  supportLevel: number,
+  resistanceLevel: number,
+  trend: CryptoTrend,
+  rsi14: number | null,
+  macdHistogram: number,
+  volatilityPercent: number,
+  atrPercent: number,
+  emaFast: number,
+  emaSlow: number,
+): {
+  confidenceScore: number;
+  tradeAction: TradeAction;
+  tradeLevels: CryptoTradeLevels;
+} {
+  let score = 0;
+
+  if (trend === "bullish") {
+    score += 2;
+  } else if (trend === "bearish") {
+    score -= 2;
+  }
+
+  if (rsi14 !== null) {
+    if (rsi14 <= 38) {
+      score += 1;
+    }
+
+    if (rsi14 >= 62) {
+      score -= 1;
+    }
+  }
+
+  if (macdHistogram > 0) {
+    score += 1;
+  } else if (macdHistogram < 0) {
+    score -= 1;
+  }
+
+  if (emaFast > emaSlow) {
+    score += 1;
+  } else if (emaFast < emaSlow) {
+    score -= 1;
+  }
+
+  if (volatilityPercent >= 4.5 || atrPercent >= 4) {
+    score -= 1;
+  }
+
+  let tradeAction: TradeAction = "wait";
+
+  if (score >= 2) {
+    tradeAction = "buy";
+  } else if (score <= -2) {
+    tradeAction = "sell";
+  }
+
+  const rawConfidence = 52 + Math.abs(score) * 11;
+  const confidenceScore = Math.min(92, Math.max(42, rawConfidence));
+  const riskBandPercent = Math.max(
+    0.8,
+    Math.min(8, atrPercent > 0 ? atrPercent * 1.25 : volatilityPercent * 0.9),
+  );
+  const directionalBandPercent = riskBandPercent / 100;
+  const entryZoneLow =
+    tradeAction === "buy"
+      ? currentPrice * (1 - directionalBandPercent * 0.3)
+      : currentPrice * (1 - directionalBandPercent * 0.15);
+  const entryZoneHigh =
+    tradeAction === "sell"
+      ? currentPrice * (1 + directionalBandPercent * 0.3)
+      : currentPrice * (1 + directionalBandPercent * 0.15);
+  const stopLoss =
+    tradeAction === "buy"
+      ? Math.min(supportLevel, currentPrice * (1 - directionalBandPercent))
+      : tradeAction === "sell"
+        ? Math.max(resistanceLevel, currentPrice * (1 + directionalBandPercent))
+        : currentPrice * (1 - directionalBandPercent * 0.9);
+  const takeProfit1 =
+    tradeAction === "buy"
+      ? Math.max(resistanceLevel, currentPrice * (1 + directionalBandPercent * 1.35))
+      : tradeAction === "sell"
+        ? Math.min(supportLevel, currentPrice * (1 - directionalBandPercent * 1.35))
+        : currentPrice * (1 + directionalBandPercent * 0.8);
+  const takeProfit2 =
+    tradeAction === "buy"
+      ? currentPrice * (1 + directionalBandPercent * 2.2)
+      : tradeAction === "sell"
+        ? currentPrice * (1 - directionalBandPercent * 2.2)
+        : currentPrice * (1 + directionalBandPercent * 1.2);
+
+  return {
+    confidenceScore,
+    tradeAction,
+    tradeLevels: {
+      entryZoneHigh: roundPrice(entryZoneHigh),
+      entryZoneLow: roundPrice(entryZoneLow),
+      stopLoss: roundPrice(stopLoss),
+      takeProfit1: roundPrice(takeProfit1),
+      takeProfit2: roundPrice(takeProfit2),
+    },
+  };
+}
+
+function computeInsights(points: CryptoChartPoint[]): CryptoChartInsights {
+  const prices = points.map((point) => point.close);
   const firstPrice = prices[0] ?? 0;
   const lastPrice = prices[prices.length - 1] ?? 0;
-  const highPrice = Math.max(...prices);
-  const lowPrice = Math.min(...prices);
+  const highs = points.map((point) => point.high);
+  const lows = points.map((point) => point.low);
+  const highPrice = Math.max(...highs);
+  const lowPrice = Math.min(...lows);
   const shortWindowSize = Math.max(5, Math.floor(prices.length * 0.12));
   const longWindowSize = Math.max(shortWindowSize + 3, Math.floor(prices.length * 0.28));
   const shortMovingAverage = computeAverage(prices.slice(-shortWindowSize));
   const longMovingAverage = computeAverage(prices.slice(-longWindowSize));
+  const emaFast = computeEma(prices, 9);
+  const emaSlow = computeEma(prices, 21);
+  const ema12Series = computeEmaSeries(prices, 12);
+  const ema26Series = computeEmaSeries(prices, 26);
+  const macdSeries = ema12Series.map((ema12, index) => ema12 - (ema26Series[index] ?? ema12));
+  const signalSeries = computeEmaSeries(macdSeries, 9);
+  const macdHistogramRaw =
+    (macdSeries[macdSeries.length - 1] ?? 0) - (signalSeries[signalSeries.length - 1] ?? 0);
   const returns = computeReturns(prices);
   const volatilityPercent = computeStandardDeviation(returns) * 100;
+  const atrPercent = computeAtrPercent(points);
   const momentumBaseIndex = Math.max(0, prices.length - 4);
   const momentumBase = prices[momentumBaseIndex] ?? firstPrice;
   const momentumPercent = computePercentVariation(lastPrice, momentumBase);
@@ -165,17 +442,62 @@ function computeInsights(points: CoinGeckoChartPoint[]): CryptoChartInsights {
     trend = "bearish";
   }
 
+  const rsi14 = computeRsi(prices, 14);
+  const tradePlan = computeTradePlan(
+    lastPrice,
+    supportLevel,
+    resistanceLevel,
+    trend,
+    rsi14,
+    macdHistogramRaw,
+    volatilityPercent,
+    atrPercent,
+    emaFast,
+    emaSlow,
+  );
+
   return {
+    atrPercent: roundPercent(atrPercent),
     changePercent: roundPercent(computePercentVariation(lastPrice, firstPrice)),
+    confidenceScore: tradePlan.confidenceScore,
     currentPrice: roundPrice(lastPrice),
+    emaFast: roundPrice(emaFast),
+    emaSlow: roundPrice(emaSlow),
     highPrice: roundPrice(highPrice),
+    longMovingAverage: roundPrice(longMovingAverage),
     lowPrice: roundPrice(lowPrice),
+    macdHistogram: roundPercent(macdHistogramRaw),
     momentumPercent: roundPercent(momentumPercent),
     resistanceLevel: roundPrice(resistanceLevel),
+    rsi14,
     shortMovingAverage: roundPrice(shortMovingAverage),
     supportLevel: roundPrice(supportLevel),
+    tradeAction: tradePlan.tradeAction,
+    tradeLevels: tradePlan.tradeLevels,
     trend,
     volatilityPercent: roundPercent(volatilityPercent),
+  };
+}
+
+function normalizeCoinGeckoPoint(point: CoinGeckoChartPoint): CryptoChartPoint {
+  return {
+    close: point.price,
+    high: point.price,
+    low: point.price,
+    open: point.price,
+    timestamp: point.timestamp,
+    volume: null,
+  };
+}
+
+function normalizeBinancePoint(point: BinanceChartPoint): CryptoChartPoint {
+  return {
+    close: point.close,
+    high: point.high,
+    low: point.low,
+    open: point.open,
+    timestamp: point.timestamp,
+    volume: point.volume,
   };
 }
 
@@ -193,6 +515,8 @@ function toResponse(
     currency: payload.currency,
     fetchedAt: payload.fetchedAt,
     insights: payload.insights,
+    live: payload.live,
+    mode: payload.mode,
     points: payload.points,
     provider: payload.provider,
     range: payload.range,
@@ -200,7 +524,8 @@ function toResponse(
 }
 
 export class CryptoChartService {
-  private readonly marketChartAdapter = new CoinGeckoMarketChartAdapter();
+  private readonly coinGeckoAdapter = new CoinGeckoMarketChartAdapter();
+  private readonly binanceAdapter = new BinanceMarketDataAdapter();
 
   public async refreshChart(input: {
     assetId: string;
@@ -208,17 +533,24 @@ export class CryptoChartService {
     range: CryptoChartRange;
   }): Promise<CryptoChartResponse> {
     const normalizedInput = normalizeInput(input);
-    const chartPayload = await this.marketChartAdapter.getMarketChart(normalizedInput);
+    const chartPayload = await this.fetchDelayedChartWithFallback(normalizedInput);
     const payload: CachedChartPayload = {
       assetId: chartPayload.assetId,
       currency: chartPayload.currency,
       fetchedAt: chartPayload.fetchedAt,
       insights: computeInsights(chartPayload.points),
+      live: null,
+      mode: "delayed",
       points: chartPayload.points,
       provider: chartPayload.provider,
       range: chartPayload.range,
     };
-    const cacheKey = buildCacheKey(payload.assetId, payload.currency, payload.range);
+    const cacheKey = buildCacheKey(
+      payload.mode,
+      payload.assetId,
+      payload.currency,
+      payload.range,
+    );
 
     memoryCache.set(cacheKey, payload, env.CACHE_DEFAULT_TTL_SECONDS, env.CACHE_STALE_SECONDS);
 
@@ -232,6 +564,7 @@ export class CryptoChartService {
   }): Promise<CryptoChartResponse> {
     const normalizedInput = normalizeInput(input);
     const cacheKey = buildCacheKey(
+      "delayed",
       normalizedInput.assetId,
       normalizedInput.currency,
       normalizedInput.range,
@@ -250,19 +583,129 @@ export class CryptoChartService {
       }
     }
 
-    const chartPayload = await this.marketChartAdapter.getMarketChart(normalizedInput);
-    const payload: CachedChartPayload = {
+    return this.refreshChart(normalizedInput);
+  }
+
+  public async getLiveChart(input: {
+    assetId: string;
+    range: CryptoChartRange;
+  }): Promise<CryptoChartResponse> {
+    const normalizedInput = {
+      assetId: input.assetId.toLowerCase(),
+      currency: "usd",
+      range: input.range,
+    };
+    const cacheKey = buildCacheKey(
+      "live",
+      normalizedInput.assetId,
+      normalizedInput.currency,
+      normalizedInput.range,
+    );
+    const cachedPayload = memoryCache.get<CachedChartPayload>(cacheKey);
+
+    if (cachedPayload.state === "fresh") {
+      return toResponse(cachedPayload.value, "fresh", false);
+    }
+
+    if (cachedPayload.state === "stale") {
+      try {
+        return await this.refreshLiveChart(normalizedInput);
+      } catch {
+        return toResponse(cachedPayload.value, "stale", true);
+      }
+    }
+
+    return this.refreshLiveChart(normalizedInput);
+  }
+
+  private async refreshLiveChart(input: {
+    assetId: string;
+    currency: string;
+    range: CryptoChartRange;
+  }): Promise<CryptoChartResponse> {
+    const [chartPayload, tickerSnapshot] = await Promise.all([
+      this.binanceAdapter.getMarketChart({
+        assetId: input.assetId,
+        range: input.range,
+      }),
+      this.binanceAdapter.getTickerSnapshot({
+        assetId: input.assetId,
+      }),
+    ]);
+    const normalizedPayload: CachedChartPayload = {
       assetId: chartPayload.assetId,
-      currency: chartPayload.currency,
+      currency: "usd",
       fetchedAt: chartPayload.fetchedAt,
-      insights: computeInsights(chartPayload.points),
-      points: chartPayload.points,
-      provider: chartPayload.provider,
+      insights: computeInsights(chartPayload.points.map((point) => normalizeBinancePoint(point))),
+      live: {
+        changePercent24h: tickerSnapshot.changePercent24h,
+        source: "binance",
+        symbol: tickerSnapshot.symbol,
+        volume24h: tickerSnapshot.volume24h,
+      },
+      mode: "live",
+      points: chartPayload.points.map((point) => normalizeBinancePoint(point)),
+      provider: "binance",
       range: chartPayload.range,
     };
+    const cacheKey = buildCacheKey(
+      normalizedPayload.mode,
+      normalizedPayload.assetId,
+      normalizedPayload.currency,
+      normalizedPayload.range,
+    );
 
-    memoryCache.set(cacheKey, payload, env.CACHE_DEFAULT_TTL_SECONDS, env.CACHE_STALE_SECONDS);
+    memoryCache.set(cacheKey, normalizedPayload, liveChartFreshTtlSeconds, liveChartStaleSeconds);
 
-    return toResponse(payload, "miss", false);
+    return toResponse(normalizedPayload, "refreshed", false);
+  }
+
+  private async fetchDelayedChartWithFallback(input: {
+    assetId: string;
+    currency: string;
+    range: CryptoChartRange;
+  }): Promise<NormalizedChartPayload> {
+    try {
+      const chartPayload = await this.coinGeckoAdapter.getMarketChart(input);
+
+      return {
+        assetId: chartPayload.assetId,
+        currency: chartPayload.currency,
+        fetchedAt: chartPayload.fetchedAt,
+        points: chartPayload.points.map((point) => normalizeCoinGeckoPoint(point)),
+        provider: "coingecko",
+        range: chartPayload.range,
+      };
+    } catch (error) {
+      if (!this.shouldFallbackToBinance(error, input.currency)) {
+        throw error;
+      }
+
+      const binanceChart = await this.binanceAdapter.getMarketChart({
+        assetId: input.assetId,
+        range: input.range,
+      });
+
+      return {
+        assetId: binanceChart.assetId,
+        currency: "usd",
+        fetchedAt: binanceChart.fetchedAt,
+        points: binanceChart.points.map((point) => normalizeBinancePoint(point)),
+        provider: "binance",
+        range: binanceChart.range,
+      };
+    }
+  }
+
+  private shouldFallbackToBinance(error: unknown, currency: string): boolean {
+    if (currency !== "usd") {
+      return false;
+    }
+
+    if (!(error instanceof AppError)) {
+      return true;
+    }
+
+    return error.code.startsWith("COINGECKO_");
   }
 }

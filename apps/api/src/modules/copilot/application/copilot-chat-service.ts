@@ -22,6 +22,7 @@ import {
   CryptoChartService,
   type CryptoChartRange,
   type CryptoTrend,
+  type TradeAction,
 } from "../../crypto/application/crypto-chart-service.js";
 import {
   CryptoSpotPriceService,
@@ -54,6 +55,7 @@ const copilotDefaultSystemPrompt = [
   "Quando a pergunta envolver resumo, panorama ou contexto do mercado cripto, priorize a tool get_crypto_market_overview.",
   "Quando a pergunta envolver preco ou comparacao entre ativos, use get_crypto_spot_price ou get_crypto_multi_spot_price.",
   "Quando a pergunta envolver grafico, tendencia, suporte/resistencia ou analise tecnica de cripto, use get_crypto_chart_insights.",
+  "Quando a pergunta pedir comprar/vender, responda com sinal tatico informativo (buy/sell/wait), confianca e niveis de risco, sem tratar como recomendacao de investimento.",
   "Quando a pergunta envolver indices, acoes, cambio, juros ou commodities, use get_financial_market_snapshot.",
   "Quando a pergunta envolver risco de curto prazo, entregue analise por fatores (volatilidade, liquidez, macro e operacao), sem recomendacao de investimento.",
   "Nao recuse genericamente se houver dados disponiveis nas tools; entregue resposta concisa com numeros e contexto.",
@@ -82,6 +84,7 @@ const copilotMarketOverviewToolInputSchema = z.object({
 const copilotCryptoChartToolInputSchema = z.object({
   assetId: z.string().trim().min(1).default("bitcoin"),
   currency: z.string().trim().min(2).max(10).default("usd"),
+  mode: z.enum(["delayed", "live"]).default("delayed"),
   range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("7d"),
 });
 
@@ -261,7 +264,14 @@ function hasChartAnalysisIntent(message: string): boolean {
     normalizedMessage.includes("vai subir") ||
     normalizedMessage.includes("vai cair") ||
     normalizedMessage.includes("subir ou cair") ||
-    normalizedMessage.includes("alta ou baixa");
+    normalizedMessage.includes("alta ou baixa") ||
+    normalizedMessage.includes("comprar") ||
+    normalizedMessage.includes("vender") ||
+    normalizedMessage.includes("buy") ||
+    normalizedMessage.includes("sell") ||
+    normalizedMessage.includes("entrada") ||
+    normalizedMessage.includes("stop") ||
+    normalizedMessage.includes("take profit");
   const mentionsAsset = riskAssetAliases.some((assetAlias) =>
     assetAlias.aliases.some((alias) => hasExactAlias(normalizedMessage, alias)),
   );
@@ -343,6 +353,22 @@ function resolveChartRangeFromMessage(message: string): CryptoChartRange {
   }
 
   return "7d";
+}
+
+function resolveChartModeFromMessage(message: string): "delayed" | "live" {
+  const normalizedMessage = normalizeText(message);
+
+  if (
+    normalizedMessage.includes("ao vivo") ||
+    normalizedMessage.includes("tempo real") ||
+    normalizedMessage.includes("real time") ||
+    normalizedMessage.includes("realtime") ||
+    normalizedMessage.includes("intraday")
+  ) {
+    return "live";
+  }
+
+  return "delayed";
 }
 
 function hasGenericLimitationAnswer(answer: string): boolean {
@@ -453,6 +479,22 @@ function formatTrendLabel(trend: CryptoTrend): string {
   }
 
   return "viés lateral";
+}
+
+function formatTradeActionLabel(tradeAction: TradeAction): string {
+  if (tradeAction === "buy") {
+    return "compra tatica";
+  }
+
+  if (tradeAction === "sell") {
+    return "venda tatica";
+  }
+
+  return "espera tatica";
+}
+
+function formatConfidenceScore(value: number): string {
+  return `${Math.round(value)}%`;
 }
 
 function formatRangeLabel(range: CryptoChartRange): string {
@@ -720,7 +762,7 @@ const copilotTools: OpenRouterToolDefinition[] = [
   },
   {
     description:
-      "Retorna dados de grafico de cripto (historico + insights tecnicos) para analise de tendencia, momentum, suporte e resistencia sem recomendacao de investimento.",
+      "Retorna dados de grafico de cripto (historico + insights tecnicos) para analise de tendencia, momentum, suporte/resistencia e sinal tatico informativo (sem recomendacao de investimento).",
     inputSchema: copilotCryptoChartToolInputSchema,
     name: "get_crypto_chart_insights",
     parameters: {
@@ -736,6 +778,12 @@ const copilotTools: OpenRouterToolDefinition[] = [
           description: "Moeda de referencia do grafico, exemplo: usd, brl",
           type: "string",
         },
+        mode: {
+          default: "delayed",
+          description: "Modo de consulta: delayed (historico padrao) ou live (snapshot quase em tempo real via Binance)",
+          enum: ["delayed", "live"],
+          type: "string",
+        },
         range: {
           default: "7d",
           description: "Janela temporal do grafico: 24h, 7d, 30d, 90d ou 1y",
@@ -746,7 +794,17 @@ const copilotTools: OpenRouterToolDefinition[] = [
       type: "object",
     },
     run: async (input: z.infer<typeof copilotCryptoChartToolInputSchema>) => {
-      const chart = await cryptoChartService.getChart(input);
+      const chart =
+        input.mode === "live"
+          ? await cryptoChartService.getLiveChart({
+              assetId: input.assetId,
+              range: input.range,
+            })
+          : await cryptoChartService.getChart({
+              assetId: input.assetId,
+              currency: input.currency,
+              range: input.range,
+            });
 
       return {
         assetId: chart.assetId,
@@ -754,10 +812,12 @@ const copilotTools: OpenRouterToolDefinition[] = [
         currency: chart.currency,
         fetchedAt: chart.fetchedAt,
         insights: chart.insights,
+        live: chart.live,
+        mode: chart.mode,
         points: chart.points.slice(-160),
         provider: chart.provider,
         range: chart.range,
-        textualSummary: `Faixa ${formatRangeLabel(chart.range)} | ${formatTrendLabel(chart.insights.trend)} | variacao ${chart.insights.changePercent}% | volatilidade ${chart.insights.volatilityPercent}%`,
+        textualSummary: `Modo ${chart.mode} | Faixa ${formatRangeLabel(chart.range)} | ${formatTrendLabel(chart.insights.trend)} | acao ${formatTradeActionLabel(chart.insights.tradeAction)} | confianca ${formatConfidenceScore(chart.insights.confidenceScore)} | variacao ${chart.insights.changePercent}% | volatilidade ${chart.insights.volatilityPercent}%`,
       };
     },
   },
@@ -1174,20 +1234,34 @@ export class CopilotChatService {
   private async buildChartAnalysisFallback(message: string): Promise<string> {
     const assetId = resolvePrimaryAssetIdForChart(message);
     const range = resolveChartRangeFromMessage(message);
-    const chart = await cryptoChartService.getChart({
-      assetId,
-      currency: "usd",
-      range,
-    });
+    const mode = resolveChartModeFromMessage(message);
+    const chart =
+      mode === "live"
+        ? await cryptoChartService.getLiveChart({
+            assetId,
+            range,
+          })
+        : await cryptoChartService.getChart({
+            assetId,
+            currency: "usd",
+            range,
+          });
     const trendLabel = formatTrendLabel(chart.insights.trend);
+    const tradeActionLabel = formatTradeActionLabel(chart.insights.tradeAction);
+    const rsi14Label = chart.insights.rsi14 === null ? "n/d" : `${chart.insights.rsi14.toFixed(2)}`;
+    const liveSummary =
+      chart.mode === "live"
+        ? ` | live 24h: ${formatPercent(chart.live?.changePercent24h ?? null)} | volume 24h: ${formatCompactUsd(chart.live?.volume24h ?? null)}`
+        : "";
 
     return [
-      `Analise tecnica objetiva de ${capitalizeAssetId(chart.assetId)} (${formatRangeLabel(chart.range)}).`,
+      `Analise tecnica objetiva de ${capitalizeAssetId(chart.assetId)} (${formatRangeLabel(chart.range)}, modo ${chart.mode}).`,
       `Preco atual: ${formatSpotPrice(chart.insights.currentPrice, chart.currency)} | variacao no periodo: ${chart.insights.changePercent}% | ${trendLabel}.`,
-      `Momentum curto: ${chart.insights.momentumPercent}% | volatilidade estimada: ${chart.insights.volatilityPercent}%.`,
-      `Faixa tecnica: suporte aproximado em ${formatSpotPrice(chart.insights.supportLevel, chart.currency)} e resistencia em ${formatSpotPrice(chart.insights.resistanceLevel, chart.currency)}.`,
-      `Media curta (aprox.): ${formatSpotPrice(chart.insights.shortMovingAverage, chart.currency)} | cache ${chart.cache.state}${chart.cache.stale ? " (stale)" : ""}.`,
-      "Leitura profissional: use estes sinais como apoio de contexto e combine com gestao de risco e confirmacao de volume antes de qualquer decisao.",
+      `Sinal tatico atual: ${tradeActionLabel} com confianca ${formatConfidenceScore(chart.insights.confidenceScore)} (informativo, nao e recomendacao).`,
+      `Momentum: ${chart.insights.momentumPercent}% | volatilidade: ${chart.insights.volatilityPercent}% | RSI14: ${rsi14Label} | MACD hist: ${chart.insights.macdHistogram}% | ATR: ${chart.insights.atrPercent}%.`,
+      `Faixa tecnica: suporte ${formatSpotPrice(chart.insights.supportLevel, chart.currency)} | resistencia ${formatSpotPrice(chart.insights.resistanceLevel, chart.currency)} | entrada ${formatSpotPrice(chart.insights.tradeLevels.entryZoneLow, chart.currency)} - ${formatSpotPrice(chart.insights.tradeLevels.entryZoneHigh, chart.currency)} | stop ${formatSpotPrice(chart.insights.tradeLevels.stopLoss, chart.currency)} | TP1 ${formatSpotPrice(chart.insights.tradeLevels.takeProfit1, chart.currency)} | TP2 ${formatSpotPrice(chart.insights.tradeLevels.takeProfit2, chart.currency)}.`,
+      `EMA rapida: ${formatSpotPrice(chart.insights.emaFast, chart.currency)} | EMA lenta: ${formatSpotPrice(chart.insights.emaSlow, chart.currency)} | provider ${chart.provider}${liveSummary} | cache ${chart.cache.state}${chart.cache.stale ? " (stale)" : ""}.`,
+      "Leitura profissional: combine sinais tecnicos com gestao de risco, tamanho de posicao e confirmacao de liquidez antes de qualquer execucao.",
     ].join("\n");
   }
 
