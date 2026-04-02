@@ -22,6 +22,31 @@ export interface SpotPriceResponse {
   provider: "coingecko" | "coincap";
 }
 
+export interface SpotPriceBatchError {
+  code: string;
+  message: string;
+}
+
+export interface SpotPriceBatchItem {
+  assetId: string;
+  error: SpotPriceBatchError | null;
+  quote: SpotPriceResponse | null;
+  status: "error" | "ok";
+}
+
+export interface SpotPriceBatchResponse {
+  currency: string;
+  fetchedAt: string;
+  quotes: SpotPriceBatchItem[];
+  requestedAssets: string[];
+  summary: {
+    failed: number;
+    ok: number;
+    successRatePercent: number;
+    total: number;
+  };
+}
+
 interface CoinCapSpotPriceData {
   assetId: string;
   currency: string;
@@ -70,6 +95,14 @@ function normalizeInput(input: { assetId: string; currency: string }): {
     assetId: input.assetId.toLowerCase(),
     currency: input.currency.toLowerCase(),
   };
+}
+
+function normalizeAssetIds(assetIds: string[]): string[] {
+  const normalizedAssetIds = assetIds
+    .map((assetId) => assetId.trim().toLowerCase())
+    .filter((assetId) => assetId.length > 0);
+
+  return [...new Set(normalizedAssetIds)];
 }
 
 function toResponse(
@@ -136,6 +169,54 @@ export class CryptoSpotPriceService {
     const livePrice = await this.fetchSpotPriceWithFallback(normalizedInput);
     memoryCache.set(cacheKey, livePrice, env.CACHE_DEFAULT_TTL_SECONDS, env.CACHE_STALE_SECONDS);
     return toResponse(livePrice, "miss", false);
+  }
+
+  public async getSpotPriceBatch(input: {
+    assetIds: string[];
+    currency: string;
+  }): Promise<SpotPriceBatchResponse> {
+    const normalizedCurrency = input.currency.trim().toLowerCase();
+    const requestedAssets = normalizeAssetIds(input.assetIds);
+    const quotes = await Promise.all(
+      requestedAssets.map(async (assetId) => {
+        try {
+          const quote = await this.getSpotPrice({
+            assetId,
+            currency: normalizedCurrency,
+          });
+
+          return {
+            assetId,
+            error: null,
+            quote,
+            status: "ok" as const,
+          };
+        } catch (error) {
+          return {
+            assetId,
+            error: this.toBatchError(error),
+            quote: null,
+            status: "error" as const,
+          };
+        }
+      }),
+    );
+    const ok = quotes.filter((item) => item.status === "ok").length;
+    const failed = quotes.length - ok;
+    const total = quotes.length;
+
+    return {
+      currency: normalizedCurrency,
+      fetchedAt: new Date().toISOString(),
+      quotes,
+      requestedAssets,
+      summary: {
+        failed,
+        ok,
+        successRatePercent: total === 0 ? 0 : Number(((ok / total) * 100).toFixed(1)),
+        total,
+      },
+    };
   }
 
   private async fetchSpotPriceWithFallback(input: {
@@ -214,5 +295,26 @@ export class CryptoSpotPriceService {
     }
 
     return false;
+  }
+
+  private toBatchError(error: unknown): SpotPriceBatchError {
+    if (error instanceof AppError) {
+      return {
+        code: error.code,
+        message: error.message,
+      };
+    }
+
+    if (error instanceof Error) {
+      return {
+        code: "SPOT_PRICE_ERROR",
+        message: error.message,
+      };
+    }
+
+    return {
+      code: "SPOT_PRICE_ERROR",
+      message: "Failed to load spot price",
+    };
   }
 }

@@ -107,3 +107,10 @@ O sistema ja possuia tool calling read-only e protecao de resiliencia para CoinG
 35. Operacao do terminal ganhou atalhos de produtividade (Ctrl+K, Alt+1..6, Alt+V, Alt+R, Alt+F) para reduzir friccao em fluxo profissional.
 36. Auto-refresh da watchlist foi desacoplado e calibrado com intervalo minimo para evitar burst de requisicoes, mantendo responsividade sem degradar estabilidade.
 37. Interface da watchlist foi refinada com status de sincronizacao, indicador de fonte (live/fallback) e variacao visual por direcao de mercado.
+38. Adicionado endpoint batch de corretora `GET /v1/brokers/live-quote/batch` com resposta por ativo (`ok|error|unavailable`) e resumo agregado, evitando falha total em cenarios parciais.
+39. Adicionado endpoint batch de spot `GET /v1/crypto/spot-price/batch` com contrato resiliente por ativo e metrica de taxa de sucesso para consumo de UI e observabilidade operacional.
+40. Adicionado endpoint `GET /v1/crypto/market-overview` com sintese de mercado (advancers/decliners, media 24h, strongest/weakest, market cap e volume agregados).
+41. Frontend da watchlist migrou de chamadas unitarias para pipeline batch-first (broker batch + fallback spot batch), reduzindo fan-out de requisicoes e latencia percebida em sincronizacao.
+42. UI da watchlist ganhou estado operacional adicional `config/unavailable`, diferenciando indisponibilidade estrutural de erro transitorio para melhorar triagem em producao.
+43. Cobertura de testes ampliada para novos endpoints batch e overview, incluindo validacao de payload e cenario de sucesso parcial.
+44. Build, lint/typecheck e suite completa da API foram revalidados apos a mudanca, mantendo baseline de estabilidade para release.

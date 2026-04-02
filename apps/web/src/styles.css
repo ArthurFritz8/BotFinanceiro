@@ -726,6 +726,11 @@ body {
   opacity: 0.7;
 }
 
+.watch-item.is-unavailable {
+  border-color: rgba(255, 205, 120, 0.6);
+  border-style: dotted;
+}
+
 .chart-metrics {
   display: grid;
   gap: 0.5rem;

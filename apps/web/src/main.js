@@ -792,6 +792,10 @@ function renderWatchlist() {
       button.classList.add("is-error");
     }
 
+    if (marketSnapshot?.status === "unavailable") {
+      button.classList.add("is-unavailable");
+    }
+
     button.dataset.assetId = item.assetId;
     button.dataset.exchange = item.exchange;
     button.dataset.symbol = item.symbol;
@@ -829,6 +833,8 @@ function renderWatchlist() {
 
     if (marketSnapshot?.status === "fallback") {
       sourceElement.textContent = "spot fallback";
+    } else if (marketSnapshot?.status === "unavailable") {
+      sourceElement.textContent = "config";
     } else if (marketSnapshot?.status === "error") {
       sourceElement.textContent = "indisponivel";
     } else if (marketSnapshot?.status === "ok") {
@@ -853,10 +859,36 @@ function setWatchlistLoadingState(isLoading) {
   watchlistRefreshButton.textContent = isLoading ? "Sync..." : "Sync";
 }
 
-async function requestBrokerLiveQuote(assetId) {
+function normalizeAssetIds(assetIds) {
+  if (!Array.isArray(assetIds)) {
+    return [];
+  }
+
+  const normalized = assetIds
+    .map((assetId) => (typeof assetId === "string" ? assetId.trim().toLowerCase() : ""))
+    .filter((assetId) => assetId.length > 0);
+
+  return [...new Set(normalized)];
+}
+
+async function requestBrokerLiveQuoteBatch(assetIds) {
+  const normalizedAssetIds = normalizeAssetIds(assetIds);
+
+  if (normalizedAssetIds.length === 0) {
+    return {
+      quotes: [],
+      summary: {
+        failed: 0,
+        ok: 0,
+        total: 0,
+        unavailable: 0,
+      },
+    };
+  }
+
   const response = await fetch(
     buildApiUrl(
-      `/v1/brokers/live-quote?broker=binance&assetId=${encodeURIComponent(assetId)}`,
+      `/v1/brokers/live-quote/batch?broker=binance&assetIds=${encodeURIComponent(normalizedAssetIds.join(","))}`,
     ),
     {
       method: "GET",
@@ -873,23 +905,30 @@ async function requestBrokerLiveQuote(assetId) {
 
   if (!response.ok) {
     const message = payload?.error?.message;
-    throw new Error(typeof message === "string" ? message : "Falha ao consultar broker");
+    throw new Error(typeof message === "string" ? message : "Falha ao consultar batch do broker");
   }
 
-  const market = payload?.data?.market;
-
-  return {
-    changePercent24h:
-      typeof market?.changePercent24h === "number" ? market.changePercent24h : Number.NaN,
-    fetchedAt: typeof payload?.data?.fetchedAt === "string" ? payload.data.fetchedAt : "",
-    price: typeof market?.price === "number" ? market.price : Number.NaN,
-    status: "ok",
-  };
+  return payload?.data ?? null;
 }
 
-async function requestSpotPriceFallback(assetId) {
+async function requestSpotPriceBatch(assetIds) {
+  const normalizedAssetIds = normalizeAssetIds(assetIds);
+
+  if (normalizedAssetIds.length === 0) {
+    return {
+      quotes: [],
+      summary: {
+        failed: 0,
+        ok: 0,
+        total: 0,
+      },
+    };
+  }
+
   const response = await fetch(
-    buildApiUrl(`/v1/crypto/spot-price?assetId=${encodeURIComponent(assetId)}&currency=usd`),
+    buildApiUrl(
+      `/v1/crypto/spot-price/batch?assetIds=${encodeURIComponent(normalizedAssetIds.join(","))}&currency=usd`,
+    ),
     {
       method: "GET",
     },
@@ -905,15 +944,10 @@ async function requestSpotPriceFallback(assetId) {
 
   if (!response.ok) {
     const message = payload?.error?.message;
-    throw new Error(typeof message === "string" ? message : "Falha ao consultar spot fallback");
+    throw new Error(typeof message === "string" ? message : "Falha ao consultar batch spot fallback");
   }
 
-  return {
-    changePercent24h: Number.NaN,
-    fetchedAt: typeof payload?.data?.fetchedAt === "string" ? payload.data.fetchedAt : "",
-    price: typeof payload?.data?.price === "number" ? payload.data.price : Number.NaN,
-    status: "fallback",
-  };
+  return payload?.data ?? null;
 }
 
 async function refreshWatchlistMarket(options = {}) {
@@ -928,45 +962,103 @@ async function refreshWatchlistMarket(options = {}) {
   const nextMarketByAsset = new Map();
   let successCount = 0;
   let fallbackCount = 0;
+  let errorCount = 0;
+  let unavailableCount = 0;
 
   try {
-    const batchSize = 5;
+    const requestedAssetIds = TERMINAL_WATCHLIST.map((item) => item.assetId);
+    const brokerBatch = await requestBrokerLiveQuoteBatch(requestedAssetIds);
+    const brokerQuotes = Array.isArray(brokerBatch?.quotes) ? brokerBatch.quotes : [];
+    const brokerQuoteByAsset = new Map(
+      brokerQuotes
+        .map((quoteItem) => {
+          const assetId = typeof quoteItem?.assetId === "string" ? quoteItem.assetId.toLowerCase() : "";
 
-    for (let index = 0; index < TERMINAL_WATCHLIST.length; index += batchSize) {
-      const batch = TERMINAL_WATCHLIST.slice(index, index + batchSize);
-      const batchResults = await Promise.all(
-        batch.map(async (item) => {
-          try {
-            const snapshot = await requestBrokerLiveQuote(item.assetId);
-            return [item.assetId, snapshot];
-          } catch {
-            try {
-              const fallbackSnapshot = await requestSpotPriceFallback(item.assetId);
-              return [item.assetId, fallbackSnapshot];
-            } catch {
-              return [
-                item.assetId,
-                {
-                  changePercent24h: Number.NaN,
-                  fetchedAt: "",
-                  price: Number.NaN,
-                  status: "error",
-                },
-              ];
-            }
+          return [assetId, quoteItem];
+        })
+        .filter(([assetId]) => assetId.length > 0),
+    );
+    const fallbackAssetIds = [];
+
+    for (const watchItem of TERMINAL_WATCHLIST) {
+      const quoteItem = brokerQuoteByAsset.get(watchItem.assetId.toLowerCase()) ?? null;
+      const quoteStatus = typeof quoteItem?.status === "string" ? quoteItem.status : "error";
+      const quotePrice = quoteItem?.quote?.market?.price;
+
+      if (quoteStatus === "ok" && typeof quotePrice === "number" && Number.isFinite(quotePrice)) {
+        nextMarketByAsset.set(watchItem.assetId, {
+          changePercent24h:
+            typeof quoteItem?.quote?.market?.changePercent24h === "number"
+              ? quoteItem.quote.market.changePercent24h
+              : Number.NaN,
+          fetchedAt: typeof quoteItem?.quote?.fetchedAt === "string" ? quoteItem.quote.fetchedAt : "",
+          price: quotePrice,
+          status: "ok",
+        });
+        successCount += 1;
+        continue;
+      }
+
+      if (quoteStatus === "unavailable") {
+        nextMarketByAsset.set(watchItem.assetId, {
+          changePercent24h: Number.NaN,
+          fetchedAt: "",
+          price: Number.NaN,
+          status: "unavailable",
+        });
+        unavailableCount += 1;
+        continue;
+      }
+
+      fallbackAssetIds.push(watchItem.assetId);
+    }
+
+    if (fallbackAssetIds.length > 0) {
+      try {
+        const spotBatch = await requestSpotPriceBatch(fallbackAssetIds);
+        const spotQuotes = Array.isArray(spotBatch?.quotes) ? spotBatch.quotes : [];
+        const spotQuoteByAsset = new Map(
+          spotQuotes
+            .map((quoteItem) => {
+              const assetId = typeof quoteItem?.assetId === "string" ? quoteItem.assetId.toLowerCase() : "";
+
+              return [assetId, quoteItem];
+            })
+            .filter(([assetId]) => assetId.length > 0),
+        );
+
+        for (const assetId of fallbackAssetIds) {
+          const quoteItem = spotQuoteByAsset.get(assetId.toLowerCase()) ?? null;
+          const spotPrice = quoteItem?.quote?.price;
+
+          if (quoteItem?.status === "ok" && typeof spotPrice === "number" && Number.isFinite(spotPrice)) {
+            nextMarketByAsset.set(assetId, {
+              changePercent24h: Number.NaN,
+              fetchedAt: typeof quoteItem.quote?.fetchedAt === "string" ? quoteItem.quote.fetchedAt : "",
+              price: spotPrice,
+              status: "fallback",
+            });
+            fallbackCount += 1;
+            continue;
           }
-        }),
-      );
 
-      for (const [assetId, snapshot] of batchResults) {
-        nextMarketByAsset.set(assetId, snapshot);
-
-        if (snapshot.status === "ok") {
-          successCount += 1;
+          nextMarketByAsset.set(assetId, {
+            changePercent24h: Number.NaN,
+            fetchedAt: "",
+            price: Number.NaN,
+            status: "error",
+          });
+          errorCount += 1;
         }
-
-        if (snapshot.status === "fallback") {
-          fallbackCount += 1;
+      } catch {
+        for (const assetId of fallbackAssetIds) {
+          nextMarketByAsset.set(assetId, {
+            changePercent24h: Number.NaN,
+            fetchedAt: "",
+            price: Number.NaN,
+            status: "error",
+          });
+          errorCount += 1;
         }
       }
     }
@@ -975,7 +1067,7 @@ async function refreshWatchlistMarket(options = {}) {
     watchlistLastUpdatedAt = new Date().toISOString();
     renderWatchlist();
 
-    const statusLabel = `${successCount}/${TERMINAL_WATCHLIST.length} live • fb ${fallbackCount} • ${formatShortTime(watchlistLastUpdatedAt)}`;
+    const statusLabel = `${successCount}/${TERMINAL_WATCHLIST.length} live • fb ${fallbackCount} • cfg ${unavailableCount} • err ${errorCount} • ${formatShortTime(watchlistLastUpdatedAt)}`;
     setWatchlistStatus(statusLabel);
 
     if (!silent) {

@@ -574,3 +574,237 @@ void it("GET /v1/crypto/chart nao usa fallback Binance para moeda nao-USD", asyn
   assert.equal(body.error.code, "COINGECKO_BAD_STATUS");
   assert.equal(body.error.message, "CoinGecko returned a non-success status");
 });
+
+void it("GET /v1/crypto/spot-price/batch retorna sucesso parcial por ativo", async () => {
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("api.coingecko.com/api/v3/simple/price") && requestUrl.includes("ids=bitcoin")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            bitcoin: {
+              brl: 355001.45,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.coingecko.com/api/v3/simple/price") && requestUrl.includes("ids=inexistente")) {
+      return Promise.resolve(
+        new Response(JSON.stringify({}), {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 200,
+        }),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/spot-price/batch?assetIds=bitcoin,inexistente&currency=brl",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<{
+    data: {
+      currency: string;
+      quotes: Array<{
+        assetId: string;
+        error: {
+          code: string;
+          message: string;
+        } | null;
+        quote: {
+          price: number;
+          provider: "coingecko" | "coincap";
+        } | null;
+        status: "error" | "ok";
+      }>;
+      summary: {
+        failed: number;
+        ok: number;
+        successRatePercent: number;
+        total: number;
+      };
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.currency, "brl");
+  assert.equal(body.data.summary.total, 2);
+  assert.equal(body.data.summary.ok, 1);
+  assert.equal(body.data.summary.failed, 1);
+  assert.equal(body.data.summary.successRatePercent, 50);
+
+  const bitcoinQuote = body.data.quotes.find((item) => item.assetId === "bitcoin");
+  const missingQuote = body.data.quotes.find((item) => item.assetId === "inexistente");
+
+  assert.equal(bitcoinQuote?.status, "ok");
+  assert.equal(bitcoinQuote?.quote?.provider, "coingecko");
+  assert.equal(typeof bitcoinQuote?.quote?.price, "number");
+
+  assert.equal(missingQuote?.status, "error");
+  assert.equal(missingQuote?.quote, null);
+  assert.equal(missingQuote?.error?.code, "COINGECKO_PRICE_NOT_FOUND");
+});
+
+void it("GET /v1/crypto/market-overview retorna resumo agregado do mercado", async () => {
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("api.coincap.io/v2/assets?limit=5")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                changePercent24Hr: "2.5",
+                id: "bitcoin",
+                marketCapUsd: "1200000000000",
+                name: "Bitcoin",
+                priceUsd: "66450.11",
+                rank: "1",
+                symbol: "BTC",
+                volumeUsd24Hr: "45200000000",
+              },
+              {
+                changePercent24Hr: "-1.2",
+                id: "ethereum",
+                marketCapUsd: "450000000000",
+                name: "Ethereum",
+                priceUsd: "3220.55",
+                rank: "2",
+                symbol: "ETH",
+                volumeUsd24Hr: "21200000000",
+              },
+              {
+                changePercent24Hr: "5.0",
+                id: "solana",
+                marketCapUsd: "72000000000",
+                name: "Solana",
+                priceUsd: "168.20",
+                rank: "5",
+                symbol: "SOL",
+                volumeUsd24Hr: "5300000000",
+              },
+              {
+                changePercent24Hr: "0",
+                id: "xrp",
+                marketCapUsd: "34000000000",
+                name: "XRP",
+                priceUsd: "0.58",
+                rank: "6",
+                symbol: "XRP",
+                volumeUsd24Hr: "1900000000",
+              },
+              {
+                id: "cardano",
+                marketCapUsd: "24000000000",
+                name: "Cardano",
+                priceUsd: "0.47",
+                rank: "8",
+                symbol: "ADA",
+                volumeUsd24Hr: "1200000000",
+              },
+            ],
+            timestamp: Date.now(),
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/market-overview?limit=5",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<{
+    data: {
+      assets: Array<{
+        assetId: string;
+      }>;
+      limit: number;
+      provider: "coincap";
+      summary: {
+        advancers24h: number;
+        assetsTracked: number;
+        averageChangePercent24h: number | null;
+        decliners24h: number;
+        strongest24h: {
+          assetId: string;
+          changePercent24h: number;
+          symbol: string;
+        } | null;
+        topMarketCapUsd: number;
+        topVolumeUsd24h: number;
+        unchanged24h: number;
+        weakest24h: {
+          assetId: string;
+          changePercent24h: number;
+          symbol: string;
+        } | null;
+      };
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.provider, "coincap");
+  assert.equal(body.data.limit, 5);
+  assert.equal(body.data.assets.length, 5);
+  assert.equal(body.data.summary.assetsTracked, 5);
+  assert.equal(body.data.summary.advancers24h, 2);
+  assert.equal(body.data.summary.decliners24h, 1);
+  assert.equal(body.data.summary.unchanged24h, 1);
+  assert.equal(body.data.summary.averageChangePercent24h, 1.57);
+  assert.equal(body.data.summary.strongest24h?.assetId, "solana");
+  assert.equal(body.data.summary.weakest24h?.assetId, "ethereum");
+  assert.ok(body.data.summary.topMarketCapUsd > 1_700_000_000_000);
+  assert.ok(body.data.summary.topVolumeUsd24h > 70_000_000_000);
+});
+
+void it("GET /v1/crypto/market-overview valida limite maximo", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/market-overview?limit=40",
+  });
+
+  assert.equal(response.statusCode, 400);
+
+  const body = response.json<{
+    error: {
+      code: string;
+      message: string;
+    };
+    status: "error";
+  }>();
+
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "VALIDATION_ERROR");
+  assert.equal(body.error.message, "Invalid payload");
+});

@@ -208,3 +208,122 @@ void it("GET /v1/brokers/live-quote valida broker invalido", async () => {
   assert.equal(body.error.code, "VALIDATION_ERROR");
   assert.equal(body.error.message, "Invalid payload");
 });
+
+void it("GET /v1/brokers/live-quote/batch retorna sucesso parcial por ativo", async () => {
+  let btcTickerCalls = 0;
+  let ethTickerCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("api.binance.com/api/v3/ticker/24hr") && requestUrl.includes("symbol=BTCUSDT")) {
+      btcTickerCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            lastPrice: "66123.42",
+            priceChangePercent: "1.02",
+            symbol: "BTCUSDT",
+            volume: "54001.10",
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.binance.com/api/v3/ticker/24hr") && requestUrl.includes("symbol=ETHUSDT")) {
+      ethTickerCalls += 1;
+
+      return Promise.resolve(
+        new Response(JSON.stringify({ code: -1001, msg: "Internal error" }), {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 503,
+        }),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/brokers/live-quote/batch?broker=binance&assetIds=bitcoin,ethereum",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(btcTickerCalls, 1);
+  assert.ok(ethTickerCalls >= 1);
+
+  const body = response.json<{
+    data: {
+      broker: "binance";
+      quotes: Array<{
+        assetId: string;
+        error: {
+          code: string;
+          message: string;
+        } | null;
+        quote: {
+          market: {
+            symbol: string | null;
+          };
+        } | null;
+        status: "error" | "ok" | "unavailable";
+      }>;
+      summary: {
+        failed: number;
+        ok: number;
+        successRatePercent: number;
+        total: number;
+      };
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.broker, "binance");
+  assert.equal(body.data.summary.total, 2);
+  assert.equal(body.data.summary.ok, 1);
+  assert.equal(body.data.summary.failed, 1);
+  assert.equal(body.data.summary.successRatePercent, 50);
+
+  const bitcoinQuote = body.data.quotes.find((item) => item.assetId === "bitcoin");
+  const ethereumQuote = body.data.quotes.find((item) => item.assetId === "ethereum");
+
+  assert.equal(bitcoinQuote?.status, "ok");
+  assert.equal(bitcoinQuote?.quote?.market.symbol, "BTCUSDT");
+  assert.equal(bitcoinQuote?.error, null);
+
+  assert.equal(ethereumQuote?.status, "error");
+  assert.equal(ethereumQuote?.quote, null);
+  assert.equal(ethereumQuote?.error?.code, "BINANCE_BAD_STATUS");
+});
+
+void it("GET /v1/brokers/live-quote/batch valida assetIds obrigatorio", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/brokers/live-quote/batch?broker=binance",
+  });
+
+  assert.equal(response.statusCode, 400);
+
+  const body = response.json<{
+    error: {
+      code: string;
+      message: string;
+    };
+    status: "error";
+  }>();
+
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "VALIDATION_ERROR");
+  assert.equal(body.error.message, "Invalid payload");
+});
