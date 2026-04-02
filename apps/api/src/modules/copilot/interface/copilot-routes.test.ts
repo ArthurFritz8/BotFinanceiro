@@ -8,6 +8,7 @@ process.env.INTERNAL_API_TOKEN ??= "test_internal_token_12345";
 
 const { buildApp } = await import("../../../main/app.js");
 const { env } = await import("../../../shared/config/env.js");
+const { memoryCache } = await import("../../../shared/cache/memory-cache.js");
 
 const app = buildApp();
 await app.ready();
@@ -81,6 +82,7 @@ void beforeEach(() => {
   mutableEnv.OPENROUTER_MODEL = "google/gemini-1.5-flash";
   mutableEnv.OPENROUTER_TIMEOUT_MS = 15_000;
   globalThis.fetch = originalFetch;
+  memoryCache.clear();
 });
 
 void after(async () => {
@@ -172,6 +174,114 @@ void it("POST /v1/copilot/chat retorna resposta da IA quando OpenRouter esta con
   assert.equal(body.data.responseId, "gen-test-001");
   assert.deepEqual(body.data.toolCallsUsed, []);
   assert.equal(body.data.usage.totalTokens, 32);
+});
+
+void it("POST /v1/copilot/chat aplica fallback local para resumo de mercado quando IA recusa", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "Sinto muito, nao tenho a capacidade de fornecer um resumo do mercado cripto.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-fallback-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 17,
+              prompt_tokens: 26,
+              total_tokens: 43,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.coincap.io/v2/assets?limit=8")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                changePercent24Hr: "1.25",
+                id: "bitcoin",
+                marketCapUsd: "1290000000000",
+                name: "Bitcoin",
+                priceUsd: "64200",
+                rank: "1",
+                symbol: "BTC",
+                volumeUsd24Hr: "28000000000",
+              },
+              {
+                changePercent24Hr: "0.42",
+                id: "ethereum",
+                marketCapUsd: "420000000000",
+                name: "Ethereum",
+                priceUsd: "3250",
+                rank: "2",
+                symbol: "ETH",
+                volumeUsd24Hr: "15000000000",
+              },
+              {
+                changePercent24Hr: "3.10",
+                id: "solana",
+                marketCapUsd: "70000000000",
+                name: "Solana",
+                priceUsd: "148",
+                rank: "5",
+                symbol: "SOL",
+                volumeUsd24Hr: "3500000000",
+              },
+            ],
+            timestamp: Date.now(),
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Resuma o mercado cripto de hoje em 5 linhas",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-fallback-001");
+  assert.deepEqual(body.data.toolCallsUsed, []);
+  assert.match(body.data.answer, /Resumo rapido do mercado cripto/);
+  assert.match(body.data.answer, /CoinCap/);
+  assert.match(body.data.answer, /Melhor 24h:/);
+  assert.doesNotMatch(body.data.answer, /nao tenho a capacidade/);
 });
 
 void it("POST /v1/copilot/chat executa fluxo de tool calling read-only", async () => {

@@ -1,3 +1,5 @@
+import "./styles.css";
+
 const chatForm = document.querySelector("#chat-form");
 const chatInput = document.querySelector("#chat-input");
 const sendButton = document.querySelector("#send-button");

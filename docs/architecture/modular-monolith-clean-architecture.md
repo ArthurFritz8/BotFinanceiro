@@ -47,3 +47,6 @@
 2. Erros centralizados.
 3. Sem segredo hardcoded.
 4. ADR/O.C.S.P. atualizado.
+5. Runbook/README atualizados para mudancas operacionais ou de uso.
+6. Evidencias de validacao registradas (`check`, testes e build aplicavel).
+7. Checklist de mudanca preenchido quando a entrega envolver multiplos arquivos.

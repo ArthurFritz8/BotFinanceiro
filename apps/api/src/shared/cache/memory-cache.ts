@@ -27,6 +27,10 @@ export type MemoryCacheResult<TValue> = FreshCacheHit<TValue> | StaleCacheHit<TV
 export class MemoryCache {
   private readonly entries = new Map<string, CacheEntry<unknown>>();
 
+  public clear(): void {
+    this.entries.clear();
+  }
+
   public get<TValue>(key: string): MemoryCacheResult<TValue> {
     const existingEntry = this.entries.get(key);
 

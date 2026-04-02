@@ -2,6 +2,8 @@ import {
   CoinGeckoSpotPriceAdapter,
   type SpotPriceData,
 } from "../../../integrations/market_data/coingecko-spot-price-adapter.js";
+import { CoinCapMarketDataAdapter } from "../../../integrations/market_data/coincap-market-data-adapter.js";
+import { AppError } from "../../../shared/errors/app-error.js";
 import { env } from "../../../shared/config/env.js";
 import { logger } from "../../../shared/logger/logger.js";
 import { memoryCache } from "../../../shared/cache/memory-cache.js";
@@ -17,8 +19,18 @@ export interface SpotPriceResponse {
   currency: string;
   fetchedAt: string;
   price: number;
-  provider: "coingecko";
+  provider: "coingecko" | "coincap";
 }
+
+interface CoinCapSpotPriceData {
+  assetId: string;
+  currency: string;
+  fetchedAt: string;
+  price: number;
+  provider: "coincap";
+}
+
+type UnifiedSpotPriceData = SpotPriceData | CoinCapSpotPriceData;
 
 function buildCacheKey(assetId: string, currency: string): string {
   return `crypto:spot-price:${assetId}:${currency}`;
@@ -35,7 +47,7 @@ function normalizeInput(input: { assetId: string; currency: string }): {
 }
 
 function toResponse(
-  payload: SpotPriceData,
+  payload: UnifiedSpotPriceData,
   cacheState: SpotPriceCacheState,
   stale: boolean,
 ): SpotPriceResponse {
@@ -54,6 +66,7 @@ function toResponse(
 
 export class CryptoSpotPriceService {
   private readonly adapter = new CoinGeckoSpotPriceAdapter();
+  private readonly coinCapAdapter = new CoinCapMarketDataAdapter();
 
   public async refreshSpotPrice(input: {
     assetId: string;
@@ -61,7 +74,7 @@ export class CryptoSpotPriceService {
   }): Promise<SpotPriceResponse> {
     const normalizedInput = normalizeInput(input);
     const cacheKey = buildCacheKey(normalizedInput.assetId, normalizedInput.currency);
-    const livePrice = await this.adapter.getSpotPrice(normalizedInput);
+    const livePrice = await this.fetchSpotPriceWithFallback(normalizedInput);
 
     memoryCache.set(cacheKey, livePrice, env.CACHE_DEFAULT_TTL_SECONDS, env.CACHE_STALE_SECONDS);
     return toResponse(livePrice, "refreshed", false);
@@ -94,8 +107,54 @@ export class CryptoSpotPriceService {
       }
     }
 
-    const livePrice = await this.adapter.getSpotPrice(normalizedInput);
+    const livePrice = await this.fetchSpotPriceWithFallback(normalizedInput);
     memoryCache.set(cacheKey, livePrice, env.CACHE_DEFAULT_TTL_SECONDS, env.CACHE_STALE_SECONDS);
     return toResponse(livePrice, "miss", false);
+  }
+
+  private async fetchSpotPriceWithFallback(input: {
+    assetId: string;
+    currency: string;
+  }): Promise<UnifiedSpotPriceData> {
+    try {
+      return await this.adapter.getSpotPrice(input);
+    } catch (error) {
+      if (!this.shouldFallbackToCoinCap(error, input.currency)) {
+        throw error;
+      }
+
+      logger.warn(
+        {
+          assetId: input.assetId,
+          currency: input.currency,
+          err: error,
+        },
+        "CoinGecko failed, attempting CoinCap fallback",
+      );
+
+      const coinCapSpot = await this.coinCapAdapter.getSpotPriceUsd({
+        assetId: input.assetId,
+      });
+
+      return {
+        assetId: input.assetId,
+        currency: "usd",
+        fetchedAt: coinCapSpot.fetchedAt,
+        price: coinCapSpot.price,
+        provider: "coincap",
+      };
+    }
+  }
+
+  private shouldFallbackToCoinCap(error: unknown, currency: string): boolean {
+    if (currency !== "usd") {
+      return false;
+    }
+
+    if (!(error instanceof AppError)) {
+      return true;
+    }
+
+    return error.code.startsWith("COINGECKO_");
   }
 }

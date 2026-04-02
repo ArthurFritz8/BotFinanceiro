@@ -18,6 +18,16 @@ Monorepo TypeScript para um ecossistema de mercado financeiro global e cripto.
 1. Lint: `npm run lint`
 2. Typecheck: `npm run typecheck`
 3. Check completo: `npm run check`
+4. Guard de documentacao: `npm run guard:docs`
+
+## Padrao obrigatorio de documentacao
+
+1. Regra oficial de documentacao e verificacao:
+- `docs/runbooks/padrao-obrigatorio-documentacao-e-verificacao.md`
+2. Template de apoio para registrar entrega:
+- `docs/templates/checklist-mudanca.md`
+3. Template de PR com checklist obrigatorio:
+- `.github/pull_request_template.md`
 
 ## Monitoramento smoke
 
@@ -74,6 +84,11 @@ Politica de retencao:
 
 1. ADR 001: `docs/ADR/ADR-001-politica-degradacao-rate-limit.md`
 2. ADR 002: `docs/ADR/ADR-002-fundacao-tecnica-monorepo-typescript.md`
+3. ADR 031: `docs/ADR/ADR-031-resiliencia-mercado-coincap-e-copiloto.md`
+
+## Relatorio completo desta entrega
+
+1. `docs/runbooks/relatorio-completo-publicacao-e-resiliencia-2026-04-01.md`
 
 ## Exemplos de chamadas internas
 
@@ -137,8 +152,9 @@ Tool calling read-only habilitado no Copiloto:
 
 1. `get_crypto_spot_price`
 2. `get_crypto_multi_spot_price`
-3. `get_operational_health`
-4. `get_crypto_sync_policy`
+3. `get_crypto_market_overview`
+4. `get_operational_health`
+5. `get_crypto_sync_policy`
 
 Quando o modelo usa ferramentas, a resposta inclui `toolCallsUsed` com a lista das tools executadas no fluxo.
 

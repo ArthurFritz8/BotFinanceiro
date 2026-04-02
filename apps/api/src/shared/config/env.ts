@@ -53,6 +53,8 @@ const environmentSchema = z
     COINGECKO_CIRCUIT_COOLDOWN_MS: z.coerce.number().int().positive().default(60000),
     COINGECKO_CIRCUIT_ALERT_OPEN_CYCLES: z.coerce.number().int().min(1).max(100).default(3),
     COINGECKO_CIRCUIT_ALERT_COOLDOWN_MS: z.coerce.number().int().positive().default(300000),
+    COINCAP_API_BASE_URL: z.string().url().default("https://api.coincap.io/v2"),
+    COINCAP_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
     OPS_HEALTH_WARNING_BUDGET_PERCENT: z.coerce.number().min(0).max(100).default(20),
     OPS_HEALTH_CRITICAL_BUDGET_PERCENT: z.coerce.number().min(0).max(100).default(5),
     OPS_HEALTH_WARNING_SCOPE_FAILURE_RATE_PERCENT: z.coerce.number().min(0).max(100).default(50),

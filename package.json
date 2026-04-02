@@ -17,6 +17,7 @@
     "dev:api": "npm run dev -w @botfinanceiro/api",
     "dev:web": "npm run dev -w @botfinanceiro/web",
     "format": "prettier --write .",
+    "guard:docs": "node ./scripts/guard-documentation.mjs",
     "lint": "eslint apps/api/src --ext .ts --max-warnings=0",
     "monitor:smoke": "node ./scripts/monitoring-smoke.mjs",
     "test": "npm run test -ws --if-present",
