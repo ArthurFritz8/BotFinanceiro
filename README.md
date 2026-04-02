@@ -153,10 +153,16 @@ Tool calling read-only habilitado no Copiloto:
 1. `get_crypto_spot_price`
 2. `get_crypto_multi_spot_price`
 3. `get_crypto_market_overview`
-4. `get_operational_health`
-5. `get_crypto_sync_policy`
+4. `get_financial_market_snapshot`
+5. `get_operational_health`
+6. `get_crypto_sync_policy`
 
 Quando o modelo usa ferramentas, a resposta inclui `toolCallsUsed` com a lista das tools executadas no fluxo.
+
+Cobertura de consultas apos esta evolucao:
+
+1. cripto (preco, comparativo, resumo, risco de curto prazo por fatores)
+2. mercado global (indices, cambio, juros, commodities e simbolos customizaveis via Yahoo)
 
 ## Interface web do Copiloto
 

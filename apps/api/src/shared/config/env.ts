@@ -130,6 +130,7 @@ const environmentSchema = z
       .min(1)
       .default(".runtime/copilot-chat-audit.json"),
     YAHOO_FINANCE_API_BASE_URL: z.string().url(),
+    YAHOO_FINANCE_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
     DATABASE_PROVIDER: z.enum(["auto", "file", "postgres"]).default("auto"),
     DATABASE_AUTO_MIGRATE: booleanFromString.default("true"),
     DATABASE_URL: z.union([z.string().url(), z.literal("")]).default(""),

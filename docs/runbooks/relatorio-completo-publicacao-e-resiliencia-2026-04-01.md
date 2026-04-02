@@ -346,3 +346,37 @@ Objetivo do aditivo:
 
 1. Menos alertas falsos em observabilidade de producao para falhas transientes de provider.
 2. Preservacao da telemetria util para troubleshooting com menor ruido visual em operacao diaria.
+
+## Aditivo de cobertura de mercado global e fallback de risco (2026-04-02)
+
+### Contexto observado em uso real
+
+1. Perguntas de risco de curto prazo (ex.: Bitcoin/Ethereum) ainda podiam receber resposta limitante do tipo "nao posso fornecer analise de risco".
+2. A capacidade do Copiloto estava concentrada em cripto, com baixa cobertura para mercado tradicional (indices, cambio, juros e commodities).
+
+### Correcao aplicada
+
+1. Novo adapter `YahooMarketDataAdapter` com retry/backoff para snapshot de mercado global.
+2. Nova tool `get_financial_market_snapshot` para consultas de:
+- indices globais e locais
+- cambio
+- juros
+- commodities
+- simbolos customizados do Yahoo Finance
+3. Prompt padrao do Copiloto evoluido para priorizar a nova tool em perguntas macro e de mercado tradicional.
+4. Fallback por intencao para analise de risco de curto prazo:
+- aciona quando o modelo retorna resposta limitante
+- produz resposta objetiva por fatores (volatilidade, liquidez, sinais macro e saude operacional)
+5. Ambiente atualizado com timeout dedicado para Yahoo (`YAHOO_FINANCE_TIMEOUT_MS`).
+
+### Evidencias da correcao
+
+1. Teste de fallback de risco adicionado e validado em `POST /v1/copilot/chat`.
+2. Teste de tool calling para snapshot financeiro global adicionado e validado em `POST /v1/copilot/chat`.
+3. Validacao final executada com sucesso: testes da API, check (lint/typecheck) e guard de documentacao.
+
+### Resultado esperado
+
+1. Reducao significativa de respostas "nao pode" em perguntas analiticas de risco.
+2. Cobertura mais ampla de mercado financeiro (alem de cripto) no fluxo normal do Copiloto.
+3. Maior utilidade pratica para tomada de decisao informada, mantendo neutralidade e sem recomendacao de investimento.

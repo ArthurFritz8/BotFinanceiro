@@ -374,6 +374,343 @@ void it("POST /v1/copilot/chat aplica fallback local para plano de monitoramento
   assert.doesNotMatch(body.data.answer, /falha ao obter o panorama/);
 });
 
+void it("POST /v1/copilot/chat aplica fallback local para analise de risco de curto prazo", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    "Sou um copiloto financeiro focado em dados e operacao. Nao posso fornecer analise de risco ou recomendacao de investimento.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-risk-fallback-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 20,
+              prompt_tokens: 31,
+              total_tokens: 51,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.coincap.io/v2/assets?limit=15")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                changePercent24Hr: "3.10",
+                id: "bitcoin",
+                marketCapUsd: "1300000000000",
+                name: "Bitcoin",
+                priceUsd: "65000",
+                rank: "1",
+                symbol: "BTC",
+                volumeUsd24Hr: "32000000000",
+              },
+              {
+                changePercent24Hr: "2.20",
+                id: "ethereum",
+                marketCapUsd: "430000000000",
+                name: "Ethereum",
+                priceUsd: "3300",
+                rank: "2",
+                symbol: "ETH",
+                volumeUsd24Hr: "17000000000",
+              },
+            ],
+            timestamp: Date.now(),
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("query1.finance.yahoo.com/v7/finance/quote")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            quoteResponse: {
+              error: null,
+              result: [
+                {
+                  currency: "USD",
+                  longName: "CBOE Volatility Index",
+                  marketState: "REGULAR",
+                  regularMarketChangePercent: 1.8,
+                  regularMarketPrice: 17.4,
+                  symbol: "^VIX",
+                },
+                {
+                  currency: "USD",
+                  longName: "Treasury Yield 10 Years",
+                  marketState: "REGULAR",
+                  regularMarketChangePercent: 0.45,
+                  regularMarketPrice: 4.2,
+                  symbol: "^TNX",
+                },
+                {
+                  currency: "USD",
+                  longName: "Gold",
+                  marketState: "REGULAR",
+                  regularMarketChangePercent: -0.22,
+                  regularMarketPrice: 2265,
+                  symbol: "GC=F",
+                },
+                {
+                  currency: "USD",
+                  longName: "Crude Oil",
+                  marketState: "REGULAR",
+                  regularMarketChangePercent: 0.82,
+                  regularMarketPrice: 81.2,
+                  symbol: "CL=F",
+                },
+              ],
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("/simple/price")) {
+      const parsedUrl = new URL(requestUrl);
+      const assetId = parsedUrl.searchParams.get("ids") ?? "";
+      const currency = parsedUrl.searchParams.get("vs_currencies") ?? "usd";
+
+      const pricesByAsset: Record<string, number> = {
+        bitcoin: 65000,
+        ethereum: 3300,
+      };
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            [assetId]: {
+              [currency]: pricesByAsset[assetId] ?? 0,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Quais os principais riscos de curto prazo para Bitcoin e Ethereum?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-risk-fallback-001");
+  assert.match(body.data.answer, /Analise objetiva de risco de curto prazo/);
+  assert.match(body.data.answer, /Bitcoin/);
+  assert.match(body.data.answer, /Ethereum/);
+  assert.match(body.data.answer, /Sinais macro/);
+  assert.doesNotMatch(body.data.answer, /Nao posso fornecer analise de risco/);
+});
+
+void it("POST /v1/copilot/chat executa snapshot financeiro global com tool calling", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let openRouterCalls = 0;
+  let yahooCalls = 0;
+  const capturedOpenRouterBodies: string[] = [];
+
+  globalThis.fetch = ((input, init) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+      capturedOpenRouterBodies.push(typeof init?.body === "string" ? init.body : "");
+
+      if (openRouterCalls === 1) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content: null,
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        function: {
+                          arguments: '{"preset":"global"}',
+                          name: "get_financial_market_snapshot",
+                        },
+                        id: "call_financial_snapshot_1",
+                        type: "function",
+                      },
+                    ],
+                  },
+                },
+              ],
+              id: "gen-tool-financial-001",
+              model: "google/gemini-1.5-flash",
+              usage: {
+                completion_tokens: 20,
+                prompt_tokens: 30,
+                total_tokens: 50,
+              },
+            }),
+            {
+              headers: {
+                "content-type": "application/json",
+              },
+              status: 200,
+            },
+          ),
+        );
+      }
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    "Panorama global: bolsas em alta moderada, juros estaveis e commodities mistas no intraday.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-tool-financial-002",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 23,
+              prompt_tokens: 46,
+              total_tokens: 69,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("query1.finance.yahoo.com/v7/finance/quote")) {
+      yahooCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            quoteResponse: {
+              error: null,
+              result: [
+                {
+                  currency: "USD",
+                  longName: "S&P 500",
+                  marketState: "REGULAR",
+                  regularMarketChangePercent: 0.9,
+                  regularMarketPrice: 5210,
+                  symbol: "^GSPC",
+                },
+                {
+                  currency: "USD",
+                  longName: "NASDAQ Composite",
+                  marketState: "REGULAR",
+                  regularMarketChangePercent: 1.2,
+                  regularMarketPrice: 16520,
+                  symbol: "^IXIC",
+                },
+                {
+                  currency: "USD",
+                  longName: "Crude Oil",
+                  marketState: "REGULAR",
+                  regularMarketChangePercent: -0.4,
+                  regularMarketPrice: 80.4,
+                  symbol: "CL=F",
+                },
+              ],
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Me traga um panorama global com indices, cambio e commodities.",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 2);
+  assert.equal(yahooCalls, 1);
+  assert.match(capturedOpenRouterBodies[0] ?? "", /"name":"get_financial_market_snapshot"/);
+  assert.match(capturedOpenRouterBodies[1] ?? "", /"name":"get_financial_market_snapshot"/);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(
+    body.data.answer,
+    "Panorama global: bolsas em alta moderada, juros estaveis e commodities mistas no intraday.",
+  );
+  assert.deepEqual(body.data.toolCallsUsed, ["get_financial_market_snapshot"]);
+  assert.equal(body.data.responseId, "gen-tool-financial-002");
+  assert.equal(body.data.usage.totalTokens, 69);
+});
+
 void it("POST /v1/copilot/chat executa fluxo de tool calling read-only", async () => {
   mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
 

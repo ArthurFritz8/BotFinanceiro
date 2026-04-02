@@ -78,3 +78,8 @@ O sistema ja possuia tool calling read-only e protecao de resiliencia para CoinG
 6. Ajustada politica de logging do fallback CoinGecko -> CoinCap para classificar como `info` eventos retryable (ex.: `429`, circuito aberto), reduzindo ruido de logs em producao.
 7. Ajustado scheduler para classificar falhas retryable de provider como `info`, mantendo `warn` para falhas nao transientes.
 8. Fortalecida tipagem do guard de erro retryable no scheduler para manter conformidade com lint estrito sem alterar comportamento funcional.
+9. Integrado provider Yahoo Finance no backend para snapshot de mercado global (indices, cambio, juros, commodities e simbolos customizados).
+10. Adicionada tool `get_financial_market_snapshot` no Copiloto para perguntas de contexto macro e mercado tradicional.
+11. Evoluido prompt padrao para orientar uso de tools alem de cripto e evitar recusa generica em analise de risco de curto prazo.
+12. Adicionado fallback por intencao para perguntas de risco (ex.: BTC/ETH curto prazo), com resposta por fatores: volatilidade, liquidez, sinais macro e saude operacional.
+13. Cobertura de testes ampliada para novo fallback de risco e para fluxo de tool calling do snapshot financeiro global.
