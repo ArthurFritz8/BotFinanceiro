@@ -114,3 +114,13 @@ O sistema ja possuia tool calling read-only e protecao de resiliencia para CoinG
 42. UI da watchlist ganhou estado operacional adicional `config/unavailable`, diferenciando indisponibilidade estrutural de erro transitorio para melhorar triagem em producao.
 43. Cobertura de testes ampliada para novos endpoints batch e overview, incluindo validacao de payload e cenario de sucesso parcial.
 44. Build, lint/typecheck e suite completa da API foram revalidados apos a mudanca, mantendo baseline de estabilidade para release.
+45. Corrigida indisponibilidade do Terminal PRO no frontend por substituicao de inicializacao JS fragil por embed estavel, eliminando erro runtime recorrente (`this.create is not a function`) em cenarios de refresh/troca rapida de contexto.
+46. Trading Workspace passou a aplicar simbolo por corretora (ex.: conversao USDT->USD em exchanges selecionadas), tornando a troca de corretora funcional no terminal e na watchlist.
+47. Catalogo de brokers foi expandido para `bybit`, `coinbase`, `kraken` e `okx`, com contrato unificado e modo `proxy` resiliente para cotacao publica quando feed nativo nao estiver disponivel.
+48. Endpoint de corretora (`live-quote` e `live-quote/batch`) passou a suportar as novas corretoras e resposta resiliente por ativo, reduzindo indisponibilidade total em regioes com bloqueio de provider.
+49. Chart Lab passou a tratar modo `live` por capacidade de exchange: quando live nativo nao for suportado, aplica fallback delayed automatico com mensagem operacional clara.
+50. Auto-refresh de watchlist e grafico foi desacoplado da dependencia estrita de `live`, evitando percepcao de congelamento quando a sessao opera em delayed resiliente.
+51. Visual do grafico interativo foi corrigido para estilos `bars` e `heikin` com renderizacao real (incluindo transformacao Heikin-Ashi), removendo inconsistencias de modo/visual.
+52. Fluxo de erro do grafico ganhou contingencia: em falha de historico, o frontend preserva ultimo snapshot valido e/ou exibe snapshot de contingencia baseado em spot para nao deixar tela vazia.
+53. Copiloto recebeu guarda de qualidade para intencao de grafico: quando resposta vier desalinhada (ex.: risco generico sem leitura tecnica), o fallback tecnico estruturado e forçado automaticamente.
+54. Prompt de acao "Pedir analise tecnica" foi reforcado com contexto de corretora, exigencia de fallback explicito e foco em sinais tecnicos completos (RSI, MACD, ATR, suporte/resistencia e plano tatico).

@@ -1,10 +1,14 @@
 import { z } from "zod";
 
 import { BinanceMarketDataAdapter } from "../../../integrations/market_data/binance-market-data-adapter.js";
+import {
+  CoinCapMarketDataAdapter,
+  type CoinCapMarketAsset,
+} from "../../../integrations/market_data/coincap-market-data-adapter.js";
 import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 
-const brokerNameSchema = z.enum(["binance", "iqoption"]);
+const brokerNameSchema = z.enum(["binance", "bybit", "coinbase", "kraken", "okx", "iqoption"]);
 
 const liveQuoteInputSchema = z.object({
   assetId: z.string().trim().min(1).default("bitcoin"),
@@ -25,7 +29,7 @@ export interface BrokerCatalogItem {
     liveQuote: boolean;
     orderExecution: boolean;
   };
-  mode: "public" | "unavailable";
+  mode: "proxy" | "public" | "unavailable";
   notes: string;
   status: "active" | "requires_configuration";
 }
@@ -109,6 +113,35 @@ function toBatchError(error: unknown): BrokerLiveQuoteBatchError {
   };
 }
 
+function normalizeToken(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function formatProxySymbol(symbol: string): string {
+  return `${symbol.toUpperCase()}USD`;
+}
+
+function isProxyBroker(broker: BrokerName): broker is "bybit" | "coinbase" | "kraken" | "okx" {
+  return broker === "bybit" || broker === "coinbase" || broker === "kraken" || broker === "okx";
+}
+
+function buildProxyCatalogItem(
+  broker: "bybit" | "coinbase" | "kraken" | "okx",
+): BrokerCatalogItem {
+  return {
+    broker,
+    capabilities: {
+      accountBalance: false,
+      liveQuote: true,
+      orderExecution: false,
+    },
+    mode: "proxy",
+    notes:
+      "Cotacao via feed publico resiliente (proxy multi-provider), sem execucao de ordem nesta build.",
+    status: "active",
+  };
+}
+
 function buildBinanceCatalogItem(): BrokerCatalogItem {
   return {
     broker: "binance",
@@ -155,10 +188,18 @@ function buildIqOptionCatalogItem(): BrokerCatalogItem {
 
 export class BrokerMarketService {
   private readonly binanceAdapter = new BinanceMarketDataAdapter();
+  private readonly coinCapAdapter = new CoinCapMarketDataAdapter();
 
   public getBrokerCatalog(): BrokerCatalogResponse {
     return {
-      brokers: [buildBinanceCatalogItem(), buildIqOptionCatalogItem()],
+      brokers: [
+        buildBinanceCatalogItem(),
+        buildProxyCatalogItem("bybit"),
+        buildProxyCatalogItem("coinbase"),
+        buildProxyCatalogItem("kraken"),
+        buildProxyCatalogItem("okx"),
+        buildIqOptionCatalogItem(),
+      ],
       fetchedAt: new Date().toISOString(),
     };
   }
@@ -168,6 +209,10 @@ export class BrokerMarketService {
     broker: BrokerName;
   }): Promise<BrokerLiveQuoteResponse> {
     const parsedInput = liveQuoteInputSchema.parse(input);
+
+    if (isProxyBroker(parsedInput.broker)) {
+      return this.getProxyLiveQuote(parsedInput.assetId, parsedInput.broker);
+    }
 
     if (parsedInput.broker === "binance") {
       const tickerSnapshot = await this.binanceAdapter.getTickerSnapshot({
@@ -237,6 +282,11 @@ export class BrokerMarketService {
       };
     }
 
+    if (isProxyBroker(parsedInput.broker)) {
+      const quotes = await this.getProxyBatchQuotes(parsedInput.broker, requestedAssets);
+      return this.buildBatchResponse(parsedInput.broker, requestedAssets, quotes);
+    }
+
     if (parsedInput.broker === "iqoption") {
       const quotes = await Promise.all(
         requestedAssets.map(async (assetId) => {
@@ -263,12 +313,12 @@ export class BrokerMarketService {
         try {
           const quote = await this.getLiveQuote({
             assetId,
-            broker: "binance",
+            broker: parsedInput.broker,
           });
 
           return {
             assetId,
-            broker: "binance" as const,
+            broker: parsedInput.broker,
             error: null,
             quote,
             status: "ok" as const,
@@ -276,7 +326,7 @@ export class BrokerMarketService {
         } catch (error) {
           return {
             assetId,
-            broker: "binance" as const,
+            broker: parsedInput.broker,
             error: toBatchError(error),
             quote: null,
             status: "error" as const,
@@ -286,6 +336,133 @@ export class BrokerMarketService {
     );
 
     return this.buildBatchResponse(parsedInput.broker, requestedAssets, quotes);
+  }
+
+  private async getProxyBatchQuotes(
+    broker: "bybit" | "coinbase" | "kraken" | "okx",
+    requestedAssets: string[],
+  ): Promise<BrokerLiveQuoteBatchItem[]> {
+    let marketOverviewAssets: CoinCapMarketAsset[] = [];
+
+    try {
+      const marketOverview = await this.coinCapAdapter.getMarketOverview({
+        limit: 25,
+      });
+      marketOverviewAssets = marketOverview.assets;
+    } catch {
+      marketOverviewAssets = [];
+    }
+
+    return Promise.all(
+      requestedAssets.map(async (assetId) => {
+        try {
+          const quote = await this.buildProxyQuoteFromCoinCap(assetId, broker, marketOverviewAssets);
+
+          return {
+            assetId,
+            broker,
+            error: null,
+            quote,
+            status: "ok" as const,
+          };
+        } catch (error) {
+          return {
+            assetId,
+            broker,
+            error: toBatchError(error),
+            quote: null,
+            status: "error" as const,
+          };
+        }
+      }),
+    );
+  }
+
+  private async getProxyLiveQuote(
+    assetId: string,
+    broker: "bybit" | "coinbase" | "kraken" | "okx",
+  ): Promise<BrokerLiveQuoteResponse> {
+    let marketOverviewAssets: CoinCapMarketAsset[] = [];
+
+    try {
+      const marketOverview = await this.coinCapAdapter.getMarketOverview({
+        limit: 25,
+      });
+      marketOverviewAssets = marketOverview.assets;
+    } catch {
+      marketOverviewAssets = [];
+    }
+
+    const quote = await this.buildProxyQuoteFromCoinCap(assetId, broker, marketOverviewAssets);
+    return quote;
+  }
+
+  private async buildProxyQuoteFromCoinCap(
+    rawAssetId: string,
+    broker: "bybit" | "coinbase" | "kraken" | "okx",
+    marketOverviewAssets?: CoinCapMarketAsset[],
+  ): Promise<BrokerLiveQuoteResponse> {
+    const assetId = rawAssetId.toLowerCase();
+    const catalog = buildProxyCatalogItem(broker);
+    const marketAsset = this.findAssetInOverview(assetId, marketOverviewAssets ?? []);
+
+    if (marketAsset) {
+      return {
+        assetId,
+        broker,
+        capabilities: catalog.capabilities,
+        currency: "usd",
+        fetchedAt: new Date().toISOString(),
+        market: {
+          changePercent24h: marketAsset.changePercent24h,
+          price: marketAsset.priceUsd,
+          symbol: formatProxySymbol(marketAsset.symbol),
+          volume24h: marketAsset.volumeUsd24h,
+        },
+        mode: catalog.mode,
+        notes: catalog.notes,
+        status: catalog.status,
+      };
+    }
+
+    const spotQuote = await this.coinCapAdapter.getSpotPriceUsd({
+      assetId,
+    });
+
+    return {
+      assetId,
+      broker,
+      capabilities: catalog.capabilities,
+      currency: "usd",
+      fetchedAt: spotQuote.fetchedAt,
+      market: {
+        changePercent24h: null,
+        price: spotQuote.price,
+        symbol: formatProxySymbol(spotQuote.symbol),
+        volume24h: null,
+      },
+      mode: catalog.mode,
+      notes: `${catalog.notes} Variacao/volume podem ficar n/d para ativos fora do top overview.`,
+      status: catalog.status,
+    };
+  }
+
+  private findAssetInOverview(assetId: string, assets: CoinCapMarketAsset[]): CoinCapMarketAsset | null {
+    const normalizedAssetId = normalizeToken(assetId);
+
+    const directMatch = assets.find((asset) => normalizeToken(asset.assetId) === normalizedAssetId);
+
+    if (directMatch) {
+      return directMatch;
+    }
+
+    const bySymbol = assets.find((asset) => normalizeToken(asset.symbol) === normalizedAssetId);
+
+    if (bySymbol) {
+      return bySymbol;
+    }
+
+    return null;
   }
 
   private buildBatchResponse(

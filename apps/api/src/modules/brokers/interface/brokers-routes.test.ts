@@ -33,8 +33,8 @@ void it("GET /v1/brokers/catalog retorna status de conectores", async () => {
   const body = response.json<{
     data: {
       brokers: Array<{
-        broker: "binance" | "iqoption";
-        mode: "public" | "unavailable";
+        broker: "binance" | "bybit" | "coinbase" | "kraken" | "okx" | "iqoption";
+        mode: "proxy" | "public" | "unavailable";
         notes: string;
         status: "active" | "requires_configuration";
       }>;
@@ -45,15 +45,88 @@ void it("GET /v1/brokers/catalog retorna status de conectores", async () => {
 
   assert.equal(body.status, "success");
   assert.equal(Array.isArray(body.data.brokers), true);
-  assert.equal(body.data.brokers.length, 2);
+  assert.equal(body.data.brokers.length, 6);
 
   const binanceBroker = body.data.brokers.find((item) => item.broker === "binance");
+  const bybitBroker = body.data.brokers.find((item) => item.broker === "bybit");
   const iqOptionBroker = body.data.brokers.find((item) => item.broker === "iqoption");
 
   assert.equal(binanceBroker?.status, "active");
   assert.equal(binanceBroker?.mode, "public");
+  assert.equal(bybitBroker?.status, "active");
+  assert.equal(bybitBroker?.mode, "proxy");
   assert.equal(iqOptionBroker?.status, "requires_configuration");
   assert.equal(iqOptionBroker?.mode, "unavailable");
+});
+
+void it("GET /v1/brokers/live-quote retorna cotacao proxy para OKX", async () => {
+  let coinCapCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("api.coincap.io/v2/assets?limit=25")) {
+      coinCapCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                changePercent24Hr: "2.1",
+                id: "ethereum",
+                marketCapUsd: "450000000000",
+                name: "Ethereum",
+                priceUsd: "3200.10",
+                rank: "2",
+                symbol: "ETH",
+                volumeUsd24Hr: "22000000000",
+              },
+            ],
+            timestamp: Date.now(),
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/brokers/live-quote?broker=okx&assetId=ethereum",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(coinCapCalls, 1);
+
+  const body = response.json<{
+    data: {
+      broker: "okx";
+      market: {
+        changePercent24h: number | null;
+        price: number | null;
+        symbol: string | null;
+      };
+      mode: "proxy";
+      status: "active";
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.broker, "okx");
+  assert.equal(body.data.mode, "proxy");
+  assert.equal(body.data.status, "active");
+  assert.equal(body.data.market.symbol, "ETHUSD");
+  assert.equal(body.data.market.price, 3200.1);
+  assert.equal(body.data.market.changePercent24h, 2.1);
 });
 
 void it("GET /v1/brokers/live-quote retorna cotacao live da Binance", async () => {
@@ -191,7 +264,7 @@ void it("GET /v1/brokers/live-quote retorna erro quando Binance esta indisponive
 void it("GET /v1/brokers/live-quote valida broker invalido", async () => {
   const response = await app.inject({
     method: "GET",
-    url: "/v1/brokers/live-quote?broker=kraken&assetId=bitcoin",
+    url: "/v1/brokers/live-quote?broker=bitstamp&assetId=bitcoin",
   });
 
   assert.equal(response.statusCode, 400);

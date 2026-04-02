@@ -20,12 +20,12 @@ const assetIdsCsvSchema = z
 
 const liveQuoteQuerySchema = z.object({
   assetId: z.string().trim().min(1).default("bitcoin"),
-  broker: z.enum(["binance", "iqoption"]).default("binance"),
+  broker: z.enum(["binance", "bybit", "coinbase", "kraken", "okx", "iqoption"]).default("binance"),
 });
 
 const liveQuoteBatchQuerySchema = z.object({
   assetIds: assetIdsCsvSchema,
-  broker: z.enum(["binance", "iqoption"]).default("binance"),
+  broker: z.enum(["binance", "bybit", "coinbase", "kraken", "okx", "iqoption"]).default("binance"),
 });
 
 const brokerMarketService = new BrokerMarketService();

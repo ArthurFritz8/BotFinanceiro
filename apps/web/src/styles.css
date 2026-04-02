@@ -59,8 +59,15 @@ body {
 }
 
 .app-shell {
+  align-items: start;
+  display: grid;
+  gap: 1rem;
+  grid-template-areas:
+    "hero hero"
+    "chart side";
+  grid-template-columns: minmax(0, 1.45fr) minmax(380px, 0.95fr);
   margin: 0 auto;
-  max-width: 1180px;
+  max-width: 1620px;
   padding: 2.2rem 1.1rem 2rem;
   position: relative;
   z-index: 1;
@@ -75,6 +82,7 @@ body {
 }
 
 .hero {
+  grid-area: hero;
   margin-bottom: 1.3rem;
 }
 
@@ -122,7 +130,16 @@ body {
 .layout-grid {
   display: grid;
   gap: 1rem;
-  grid-template-columns: 340px 1fr;
+  grid-area: side;
+  grid-template-columns: 1fr;
+}
+
+.layout-grid .chat-panel {
+  order: 1;
+}
+
+.layout-grid .insights-card {
+  order: 2;
 }
 
 .insights-card,
@@ -259,7 +276,8 @@ body {
   border-radius: 20px;
   box-shadow: 0 16px 44px rgba(7, 17, 30, 0.44);
   color: #e6f0ff;
-  margin-bottom: 1rem;
+  grid-area: chart;
+  margin-bottom: 0;
   overflow: hidden;
   padding: 0.95rem;
   position: relative;
@@ -570,6 +588,13 @@ body {
   width: 100%;
 }
 
+.tv-widget-frame {
+  border: 0;
+  height: 100%;
+  min-height: 440px;
+  width: 100%;
+}
+
 .chart-stage {
   background: rgba(5, 14, 25, 0.82);
   border: 1px solid rgba(117, 166, 224, 0.42);
@@ -785,7 +810,7 @@ body {
 .chat-panel {
   display: flex;
   flex-direction: column;
-  min-height: 630px;
+  min-height: 700px;
 }
 
 .chat-header {
@@ -972,6 +997,26 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@media (max-width: 1320px) {
+  .app-shell {
+    display: block;
+    max-width: 1180px;
+  }
+
+  .layout-grid {
+    grid-template-columns: 340px 1fr;
+  }
+
+  .layout-grid .chat-panel,
+  .layout-grid .insights-card {
+    order: initial;
+  }
+
+  .chart-desk {
+    margin-bottom: 1rem;
   }
 }
 

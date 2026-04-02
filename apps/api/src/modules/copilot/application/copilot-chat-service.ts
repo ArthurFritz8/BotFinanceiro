@@ -60,7 +60,7 @@ const copilotDefaultSystemPrompt = [
   "Quando a pergunta envolver resumo, panorama ou contexto do mercado cripto, priorize a tool get_crypto_market_overview.",
   "Quando a pergunta envolver preco ou comparacao entre ativos, use get_crypto_spot_price ou get_crypto_multi_spot_price.",
   "Quando a pergunta envolver grafico, tendencia, suporte/resistencia ou analise tecnica de cripto, use get_crypto_chart_insights.",
-  "Quando a pergunta envolver corretoras (Binance/IQ Option), use get_broker_live_quote para informar disponibilidade e cotacao ao vivo quando possivel.",
+  "Quando a pergunta envolver corretoras (Binance, Bybit, Coinbase, Kraken, OKX, IQ Option), use get_broker_live_quote para informar disponibilidade e cotacao ao vivo quando possivel.",
   "Quando a pergunta pedir comprar/vender, responda com sinal tatico informativo (buy/sell/wait), confianca e niveis de risco, sem tratar como recomendacao de investimento.",
   "Quando a pergunta envolver indices, acoes, cambio, juros ou commodities, use get_financial_market_snapshot.",
   "Quando a pergunta envolver risco de curto prazo, entregue analise por fatores (volatilidade, liquidez, macro e operacao), sem recomendacao de investimento.",
@@ -111,7 +111,7 @@ const copilotFinancialMarketSnapshotToolInputSchema = z.object({
 
 const copilotBrokerLiveQuoteToolInputSchema = z.object({
   assetId: z.string().trim().min(1).default("bitcoin"),
-  broker: z.enum(["binance", "iqoption"]).default("binance"),
+  broker: z.enum(["binance", "bybit", "coinbase", "kraken", "okx", "iqoption"]).default("binance"),
 });
 
 type FinancialMarketPreset = z.infer<typeof copilotFinancialMarketSnapshotToolInputSchema>["preset"];
@@ -270,7 +270,10 @@ function hasChartAnalysisIntent(message: string): boolean {
     normalizedMessage.includes("resistencia") ||
     normalizedMessage.includes("tendencia") ||
     normalizedMessage.includes("setup") ||
-    normalizedMessage.includes("rompimento");
+    normalizedMessage.includes("rompimento") ||
+    normalizedMessage.includes("analise tecnica") ||
+    normalizedMessage.includes("analise tecnic") ||
+    normalizedMessage.includes("tecnicamente");
   const asksDirection =
     normalizedMessage.includes("vai subir") ||
     normalizedMessage.includes("vai cair") ||
@@ -405,6 +408,22 @@ function resolveChartModeFromMessage(message: string): "delayed" | "live" {
 function resolveBrokerFromMessage(message: string): BrokerName {
   const normalizedMessage = normalizeText(message);
 
+  if (normalizedMessage.includes("bybit")) {
+    return "bybit";
+  }
+
+  if (normalizedMessage.includes("coinbase")) {
+    return "coinbase";
+  }
+
+  if (normalizedMessage.includes("kraken")) {
+    return "kraken";
+  }
+
+  if (normalizedMessage.includes("okx")) {
+    return "okx";
+  }
+
   if (normalizedMessage.includes("iq option") || normalizedMessage.includes("iqoption")) {
     return "iqoption";
   }
@@ -429,6 +448,33 @@ function hasGenericLimitationAnswer(answer: string): boolean {
     normalizedAnswer.includes("dados do coincap") ||
     normalizedAnswer.includes("tente novamente mais tarde")
   );
+}
+
+function shouldForceChartFallback(message: string, completion: OpenRouterChatCompletion): boolean {
+  if (!hasChartAnalysisIntent(message)) {
+    return false;
+  }
+
+  const usedChartTool = completion.toolCallsUsed.includes("get_crypto_chart_insights");
+  const normalizedAnswer = normalizeText(completion.answer);
+  const hasTechnicalMarkers =
+    normalizedAnswer.includes("suporte") ||
+    normalizedAnswer.includes("resistencia") ||
+    normalizedAnswer.includes("rsi") ||
+    normalizedAnswer.includes("macd") ||
+    normalizedAnswer.includes("atr") ||
+    normalizedAnswer.includes("trend") ||
+    normalizedAnswer.includes("tendencia") ||
+    normalizedAnswer.includes("take profit") ||
+    normalizedAnswer.includes("stop") ||
+    normalizedAnswer.includes("confianca");
+
+  const isRiskOnlyAnswer =
+    normalizedAnswer.includes("risco de curto prazo") &&
+    !normalizedAnswer.includes("suporte") &&
+    !normalizedAnswer.includes("resistencia");
+
+  return !usedChartTool || !hasTechnicalMarkers || isRiskOnlyAnswer;
 }
 
 function formatSpotPrice(price: number, currency: string): string {
@@ -864,7 +910,7 @@ const copilotTools: OpenRouterToolDefinition[] = [
   },
   {
     description:
-      "Consulta status de integracao e cotacao ao vivo por corretora (Binance/IQ Option). Use para perguntas sobre corretoras, conectividade e preco em broker.",
+      "Consulta status de integracao e cotacao ao vivo por corretora (Binance, Bybit, Coinbase, Kraken, OKX, IQ Option). Use para perguntas sobre corretoras, conectividade e preco em broker.",
     inputSchema: copilotBrokerLiveQuoteToolInputSchema,
     name: "get_broker_live_quote",
     parameters: {
@@ -877,8 +923,8 @@ const copilotTools: OpenRouterToolDefinition[] = [
         },
         broker: {
           default: "binance",
-          description: "Corretora alvo para cotacao: binance ou iqoption",
-          enum: ["binance", "iqoption"],
+          description: "Corretora alvo para cotacao: binance, bybit, coinbase, kraken, okx ou iqoption",
+          enum: ["binance", "bybit", "coinbase", "kraken", "okx", "iqoption"],
           type: "string",
         },
       },
@@ -1042,6 +1088,24 @@ export class CopilotChatService {
     input: CopilotChatInput,
     completion: OpenRouterChatCompletion,
   ): Promise<OpenRouterChatCompletion> {
+    if (shouldForceChartFallback(input.message, completion)) {
+      try {
+        const fallbackAnswer = await this.buildChartAnalysisFallback(input.message);
+
+        return {
+          ...completion,
+          answer: fallbackAnswer,
+        };
+      } catch (error) {
+        logger.warn(
+          {
+            err: error,
+          },
+          "Failed to force chart analysis fallback",
+        );
+      }
+    }
+
     if (!hasGenericLimitationAnswer(completion.answer)) {
       return completion;
     }

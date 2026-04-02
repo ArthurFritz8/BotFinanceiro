@@ -1,5 +1,6 @@
 import {
   AreaSeries,
+  BarSeries,
   CandlestickSeries,
   ColorType,
   createChart,
@@ -85,7 +86,15 @@ const TERMINAL_STYLE_TO_TV = {
   heikin: "8",
   line: "2",
 };
-const TRADINGVIEW_SCRIPT_URL = "https://s3.tradingview.com/tv.js";
+const TRADINGVIEW_EMBED_BASE_URL = "https://s.tradingview.com/widgetembed/";
+const EXCHANGE_TO_BROKER = {
+  BINANCE: "binance",
+  BYBIT: "bybit",
+  COINBASE: "coinbase",
+  KRAKEN: "kraken",
+  OKX: "okx",
+};
+const EXCHANGES_WITH_NATIVE_LIVE = new Set(["BINANCE"]);
 const TERMINAL_WATCHLIST = [
   {
     assetId: "bitcoin",
@@ -199,13 +208,41 @@ let chartLatestCandles = [];
 let chartCandleByTime = new Map();
 let chartHasInitialFit = false;
 let chartViewMode = "tv";
-let tvScriptLoadingPromise = null;
 let tvMountIdCounter = 0;
 let terminalRefreshTimer = null;
 let watchlistAutoRefreshTimer = null;
 let watchlistMarketByAsset = new Map();
 let watchlistLastUpdatedAt = "";
 let isWatchlistLoading = false;
+
+function mapSymbolToExchange(symbol, exchange) {
+  const normalizedSymbol = sanitizeTerminalSymbol(symbol);
+  const normalizedExchange = typeof exchange === "string" ? exchange.toUpperCase() : "BINANCE";
+
+  if (normalizedSymbol.length < 5) {
+    return normalizedSymbol;
+  }
+
+  if ((normalizedExchange === "COINBASE" || normalizedExchange === "KRAKEN") && normalizedSymbol.endsWith("USDT")) {
+    return `${normalizedSymbol.slice(0, -4)}USD`;
+  }
+
+  if (normalizedExchange === "BINANCE" && normalizedSymbol.endsWith("USD") && !normalizedSymbol.endsWith("USDT")) {
+    return `${normalizedSymbol.slice(0, -3)}USDT`;
+  }
+
+  return normalizedSymbol;
+}
+
+function getSelectedBroker() {
+  const exchange = getSelectedTerminalExchange();
+  return EXCHANGE_TO_BROKER[exchange] ?? "binance";
+}
+
+function isNativeLiveModeSupported() {
+  const exchange = getSelectedTerminalExchange();
+  return EXCHANGES_WITH_NATIVE_LIVE.has(exchange);
+}
 
 function buildApiUrl(path) {
   return API_BASE_URL.length > 0 ? `${API_BASE_URL}${path}` : path;
@@ -679,18 +716,20 @@ function setWatchlistStatus(message, mode = "") {
 }
 
 function getSelectedTerminalSymbol() {
+  const selectedExchange = getSelectedTerminalExchange();
   const symbolFromInput = sanitizeTerminalSymbol(
     chartSymbolInput instanceof HTMLInputElement ? chartSymbolInput.value : "",
   );
 
   if (symbolFromInput.length >= 5) {
-    return symbolFromInput;
+    return mapSymbolToExchange(symbolFromInput, selectedExchange);
   }
 
   const selectedAsset = chartAssetSelect instanceof HTMLSelectElement
     ? chartAssetSelect.value
     : "bitcoin";
-  return ASSET_TO_TERMINAL_SYMBOL[selectedAsset] ?? "BTCUSDT";
+  const defaultSymbol = ASSET_TO_TERMINAL_SYMBOL[selectedAsset] ?? "BTCUSDT";
+  return mapSymbolToExchange(defaultSymbol, selectedExchange);
 }
 
 function getSelectedTerminalExchange() {
@@ -761,7 +800,11 @@ function syncTerminalSymbolWithAsset() {
     return;
   }
 
-  chartSymbolInput.value = mappedSymbol;
+  chartSymbolInput.value = mapSymbolToExchange(mappedSymbol, getSelectedTerminalExchange());
+}
+
+function getWatchlistSymbol(item) {
+  return mapSymbolToExchange(item.symbol, getSelectedTerminalExchange());
 }
 
 function renderWatchlist() {
@@ -773,10 +816,11 @@ function renderWatchlist() {
   watchlistGrid.innerHTML = "";
 
   for (const item of TERMINAL_WATCHLIST) {
+    const itemSymbol = getWatchlistSymbol(item);
     const marketSnapshot = watchlistMarketByAsset.get(item.assetId) ?? null;
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `watch-item${item.symbol === activeSymbol ? " is-active" : ""}`;
+    button.className = `watch-item${itemSymbol === activeSymbol ? " is-active" : ""}`;
 
     if (marketSnapshot?.changePercent24h > 0) {
       button.classList.add("is-up");
@@ -797,14 +841,14 @@ function renderWatchlist() {
     }
 
     button.dataset.assetId = item.assetId;
-    button.dataset.exchange = item.exchange;
-    button.dataset.symbol = item.symbol;
+    button.dataset.exchange = getSelectedTerminalExchange();
+    button.dataset.symbol = itemSymbol;
 
     const identityElement = document.createElement("div");
     identityElement.className = "watch-identity";
 
     const symbolElement = document.createElement("strong");
-    symbolElement.textContent = item.symbol;
+    symbolElement.textContent = itemSymbol;
 
     const labelElement = document.createElement("span");
     labelElement.textContent = item.label;
@@ -871,8 +915,9 @@ function normalizeAssetIds(assetIds) {
   return [...new Set(normalized)];
 }
 
-async function requestBrokerLiveQuoteBatch(assetIds) {
+async function requestBrokerLiveQuoteBatch(assetIds, broker) {
   const normalizedAssetIds = normalizeAssetIds(assetIds);
+  const normalizedBroker = typeof broker === "string" && broker.length > 0 ? broker : "binance";
 
   if (normalizedAssetIds.length === 0) {
     return {
@@ -888,7 +933,7 @@ async function requestBrokerLiveQuoteBatch(assetIds) {
 
   const response = await fetch(
     buildApiUrl(
-      `/v1/brokers/live-quote/batch?broker=binance&assetIds=${encodeURIComponent(normalizedAssetIds.join(","))}`,
+      `/v1/brokers/live-quote/batch?broker=${encodeURIComponent(normalizedBroker)}&assetIds=${encodeURIComponent(normalizedAssetIds.join(","))}`,
     ),
     {
       method: "GET",
@@ -967,7 +1012,8 @@ async function refreshWatchlistMarket(options = {}) {
 
   try {
     const requestedAssetIds = TERMINAL_WATCHLIST.map((item) => item.assetId);
-    const brokerBatch = await requestBrokerLiveQuoteBatch(requestedAssetIds);
+    const selectedBroker = getSelectedBroker();
+    const brokerBatch = await requestBrokerLiveQuoteBatch(requestedAssetIds, selectedBroker);
     const brokerQuotes = Array.isArray(brokerBatch?.quotes) ? brokerBatch.quotes : [];
     const brokerQuoteByAsset = new Map(
       brokerQuotes
@@ -1067,7 +1113,7 @@ async function refreshWatchlistMarket(options = {}) {
     watchlistLastUpdatedAt = new Date().toISOString();
     renderWatchlist();
 
-    const statusLabel = `${successCount}/${TERMINAL_WATCHLIST.length} live • fb ${fallbackCount} • cfg ${unavailableCount} • err ${errorCount} • ${formatShortTime(watchlistLastUpdatedAt)}`;
+    const statusLabel = `${successCount}/${TERMINAL_WATCHLIST.length} live • fb ${fallbackCount} • cfg ${unavailableCount} • err ${errorCount} • broker ${getSelectedBroker()} • ${formatShortTime(watchlistLastUpdatedAt)}`;
     setWatchlistStatus(statusLabel);
 
     if (!silent) {
@@ -1096,11 +1142,12 @@ function stopWatchlistAutoRefresh() {
 function configureWatchlistAutoRefresh() {
   stopWatchlistAutoRefresh();
 
-  if (!(chartModeSelect instanceof HTMLSelectElement) || chartModeSelect.value !== "live") {
+  const baseInterval = resolveAutoRefreshIntervalMs();
+
+  if (baseInterval <= 0) {
     return;
   }
 
-  const baseInterval = resolveAutoRefreshIntervalMs();
   const refreshIntervalMs = baseInterval > 0
     ? Math.max(WATCHLIST_REFRESH_MIN_INTERVAL_MS, baseInterval * 2)
     : WATCHLIST_REFRESH_MIN_INTERVAL_MS;
@@ -1153,37 +1200,39 @@ function setChartViewMode(nextMode) {
   saveChartPreferences();
 }
 
-function loadTradingViewScript() {
-  if (window.TradingView?.widget) {
-    return Promise.resolve();
-  }
-
-  if (tvScriptLoadingPromise) {
-    return tvScriptLoadingPromise;
-  }
-
-  tvScriptLoadingPromise = new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = TRADINGVIEW_SCRIPT_URL;
-    script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Falha ao carregar biblioteca TradingView"));
-    document.head.append(script);
-  }).catch((error) => {
-    tvScriptLoadingPromise = null;
-    throw error;
-  });
-
-  return tvScriptLoadingPromise;
-}
-
 function createTradingViewMountId() {
   tvMountIdCounter += 1;
   return `tv-widget-mount-${tvMountIdCounter}`;
 }
 
 function buildTradingViewWatchlist() {
-  return TERMINAL_WATCHLIST.map((entry) => `${entry.exchange}:${entry.symbol}`);
+  const exchange = getSelectedTerminalExchange();
+
+  return TERMINAL_WATCHLIST.map((entry) => `${exchange}:${getWatchlistSymbol(entry)}`);
+}
+
+function buildTradingViewEmbedUrl(input) {
+  const query = new URLSearchParams({
+    allow_symbol_change: "1",
+    calendar: "1",
+    details: "1",
+    hide_side_toolbar: "0",
+    hide_top_toolbar: "0",
+    hotlist: "1",
+    interval: input.interval,
+    locale: "br",
+    save_image: "1",
+    studies: JSON.stringify(["Volume@tv-basicstudies", "RSI@tv-basicstudies", "MACD@tv-basicstudies"]),
+    style: input.style,
+    symbol: input.symbol,
+    theme: "dark",
+    timezone: "Etc/UTC",
+    toolbarbg: "#0f2138",
+    watchlist: JSON.stringify(buildTradingViewWatchlist()),
+    withdateranges: "1",
+  });
+
+  return `${TRADINGVIEW_EMBED_BASE_URL}?${query.toString()}`;
 }
 
 async function mountTradingViewWidget() {
@@ -1193,43 +1242,27 @@ async function mountTradingViewWidget() {
 
   try {
     setChartStatus("Carregando terminal profissional...", "loading");
-    await loadTradingViewScript();
-
     const mountId = createTradingViewMountId();
-    tvWidgetContainer.innerHTML = `<div id="${mountId}" class="tv-widget-mount"></div>`;
+    tvWidgetContainer.innerHTML = "";
 
     const symbol = buildTradingViewSymbol();
     const interval = getSelectedTerminalInterval();
     const selectedStyle = getSelectedTerminalStyle();
     const style = TERMINAL_STYLE_TO_TV[selectedStyle] ?? "1";
-
-    if (typeof window.TradingView?.widget !== "function") {
-      throw new Error("API TradingView indisponivel neste momento");
-    }
-
-    // TradingView global é carregado dinamicamente pelo script oficial.
-    window.TradingView.widget({
-      allow_symbol_change: true,
-      autosize: true,
-      calendar: true,
-      container_id: mountId,
-      details: true,
-      enable_publishing: false,
-      hide_side_toolbar: false,
-      hide_top_toolbar: false,
-      hotlist: true,
+    const iframe = document.createElement("iframe");
+    iframe.id = mountId;
+    iframe.className = "tv-widget-frame";
+    iframe.loading = "lazy";
+    iframe.referrerPolicy = "origin";
+    iframe.src = buildTradingViewEmbedUrl({
       interval,
-      locale: "br",
-      save_image: true,
       style,
-      studies: ["Volume@tv-basicstudies", "RSI@tv-basicstudies", "MACD@tv-basicstudies"],
       symbol,
-      theme: "dark",
-      timezone: "Etc/UTC",
-      toolbar_bg: "#0f2138",
-      watchlist: buildTradingViewWatchlist(),
-      withdateranges: true,
     });
+    iframe.title = `Terminal PRO ${symbol}`;
+    iframe.allowFullscreen = true;
+
+    tvWidgetContainer.append(iframe);
 
     setChartStatus(
       `Terminal ${symbol} (${interval}) pronto • desenho liberado na barra lateral`,
@@ -1367,10 +1400,44 @@ function computeEmaSeries(candles, period) {
   });
 }
 
+function computeHeikinAshiCandles(candles) {
+  if (!Array.isArray(candles) || candles.length === 0) {
+    return [];
+  }
+
+  const result = [];
+  let previousHaOpen = candles[0].open;
+  let previousHaClose = candles[0].close;
+
+  for (let index = 0; index < candles.length; index += 1) {
+    const candle = candles[index];
+    const haClose = (candle.open + candle.high + candle.low + candle.close) / 4;
+    const haOpen = index === 0
+      ? (candle.open + candle.close) / 2
+      : (previousHaOpen + previousHaClose) / 2;
+    const haHigh = Math.max(candle.high, haOpen, haClose);
+    const haLow = Math.min(candle.low, haOpen, haClose);
+
+    result.push({
+      close: Number(haClose.toFixed(6)),
+      high: Number(haHigh.toFixed(6)),
+      low: Number(haLow.toFixed(6)),
+      open: Number(haOpen.toFixed(6)),
+      time: candle.time,
+      volume: candle.volume,
+    });
+
+    previousHaOpen = haOpen;
+    previousHaClose = haClose;
+  }
+
+  return result;
+}
+
 function resolveChartStyle() {
   const style = chartStyleSelect instanceof HTMLSelectElement ? chartStyleSelect.value : "candles";
 
-  if (style === "line" || style === "area") {
+  if (style === "line" || style === "area" || style === "bars" || style === "heikin") {
     return style;
   }
 
@@ -1459,6 +1526,15 @@ function createBaseSeries(style) {
       lineWidth: 2.1,
       priceLineVisible: false,
       topColor: "rgba(54, 191, 250, 0.34)",
+    });
+  }
+
+  if (style === "bars") {
+    return chartApi.addSeries(BarSeries, {
+      downColor: "#ff6b80",
+      priceLineVisible: false,
+      thinBars: false,
+      upColor: "#33d9b2",
     });
   }
 
@@ -1720,6 +1796,7 @@ function renderInteractiveChart(snapshot) {
   }
 
   const style = resolveChartStyle();
+  const renderedCandles = style === "heikin" ? computeHeikinAshiCandles(candles) : candles;
   ensureBaseSeries(style);
   ensureChartOverlaySeries();
 
@@ -1727,15 +1804,16 @@ function renderInteractiveChart(snapshot) {
     return;
   }
 
-  const baseData = style === "candles"
-    ? candles.map((candle) => ({
+  const usesOhlcSeries = style === "candles" || style === "bars" || style === "heikin";
+  const baseData = usesOhlcSeries
+    ? renderedCandles.map((candle) => ({
       close: candle.close,
       high: candle.high,
       low: candle.low,
       open: candle.open,
       time: candle.time,
     }))
-    : candles.map((candle) => ({
+    : renderedCandles.map((candle) => ({
       time: candle.time,
       value: candle.close,
     }));
@@ -1746,8 +1824,8 @@ function renderInteractiveChart(snapshot) {
     || chartOverlayEmaToggle.checked;
 
   if (showEma) {
-    chartEmaFastSeries?.setData(computeEmaSeries(candles, 9));
-    chartEmaSlowSeries?.setData(computeEmaSeries(candles, 21));
+    chartEmaFastSeries?.setData(computeEmaSeries(renderedCandles, 9));
+    chartEmaSlowSeries?.setData(computeEmaSeries(renderedCandles, 21));
   } else {
     chartEmaFastSeries?.setData([]);
     chartEmaSlowSeries?.setData([]);
@@ -1757,9 +1835,9 @@ function renderInteractiveChart(snapshot) {
     || chartOverlayLevelsToggle.checked;
   applyChartLevels(snapshot, showLevels);
 
-  chartLatestCandles = candles;
-  chartCandleByTime = new Map(candles.map((candle) => [candle.time, candle]));
-  updateChartLegendFromCandle(candles[candles.length - 1], snapshot);
+  chartLatestCandles = renderedCandles;
+  chartCandleByTime = new Map(renderedCandles.map((candle) => [candle.time, candle]));
+  updateChartLegendFromCandle(renderedCandles[renderedCandles.length - 1], snapshot);
 
   if (!chartHasInitialFit) {
     fitChartContent();
@@ -1925,6 +2003,64 @@ async function requestCryptoChart(assetId, range, mode) {
   }
 }
 
+function buildContingencyChartSnapshot(input) {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const points = Array.from({ length: 36 }, (_, index) => {
+    const time = nowSeconds - (35 - index) * 300;
+
+    return {
+      close: input.price,
+      high: input.price,
+      low: input.price,
+      open: input.price,
+      timestamp: new Date(time * 1000).toISOString(),
+      volume: null,
+    };
+  });
+
+  return {
+    assetId: input.assetId,
+    cache: {
+      stale: false,
+      state: "miss",
+    },
+    currency: "usd",
+    fetchedAt: new Date().toISOString(),
+    insights: {
+      atrPercent: 0,
+      changePercent: 0,
+      confidenceScore: 48,
+      currentPrice: input.price,
+      emaFast: input.price,
+      emaSlow: input.price,
+      highPrice: input.price,
+      longMovingAverage: input.price,
+      lowPrice: input.price,
+      macdHistogram: 0,
+      momentumPercent: 0,
+      resistanceLevel: input.price,
+      rsi14: null,
+      shortMovingAverage: input.price,
+      supportLevel: input.price,
+      tradeAction: "wait",
+      tradeLevels: {
+        entryZoneHigh: input.price,
+        entryZoneLow: input.price,
+        stopLoss: input.price,
+        takeProfit1: input.price,
+        takeProfit2: input.price,
+      },
+      trend: "sideways",
+      volatilityPercent: 0,
+    },
+    live: null,
+    mode: "delayed",
+    points,
+    provider: input.provider ?? "coincap",
+    range: input.range,
+  };
+}
+
 async function loadChart(options = {}) {
   if (!chartAssetSelect || !chartRangeSelect) {
     return;
@@ -1935,7 +2071,14 @@ async function loadChart(options = {}) {
   }
 
   const assetId = options.assetId ?? chartAssetSelect.value;
-  const mode = options.mode ?? chartModeSelect?.value ?? "delayed";
+  const requestedMode = options.mode ?? chartModeSelect?.value ?? "delayed";
+  const selectedExchange = getSelectedTerminalExchange();
+  const mode = requestedMode === "live" && !isNativeLiveModeSupported()
+    ? "delayed"
+    : requestedMode;
+  const forcedModeReason = requestedMode === "live" && mode !== "live"
+    ? `Live nativo ainda em rollout para ${selectedExchange}; exibindo delayed resiliente`
+    : "";
   const range = options.range ?? chartRangeSelect.value;
   const silent = options.silent === true;
 
@@ -1952,6 +2095,7 @@ async function loadChart(options = {}) {
 
   try {
     const { fallbackReason, snapshot } = await requestCryptoChart(assetId, range, mode);
+    const combinedFallbackReason = [forcedModeReason, fallbackReason].filter((item) => item.length > 0).join(" | ");
 
     if (!snapshot || !Array.isArray(snapshot.points)) {
       throw new Error("Resposta de grafico invalida");
@@ -1983,7 +2127,7 @@ async function loadChart(options = {}) {
       snapshot.mode === "live"
         ? ` • 24h ${formatPercent(snapshot.live?.changePercent24h)} • vol ${formatPrice(snapshot.live?.volume24h, "usd")}`
         : "";
-    const fallbackLabel = fallbackReason.length > 0
+    const fallbackLabel = combinedFallbackReason.length > 0
       ? " • live indisponivel, usando delayed"
       : "";
     const updatedAtLabel = new Date().toLocaleTimeString("pt-BR", {
@@ -1993,23 +2137,59 @@ async function loadChart(options = {}) {
     });
 
     setChartStatus(
-      `Grafico ${assetId.toUpperCase()} (${modeLabel}, ${rangeLabel}, ${styleLabel}) • provider ${providerLabel} • ${cacheLabel}${refreshLabel}${liveLabel}${fallbackLabel} • atualizado ${updatedAtLabel}`,
+      `Grafico ${assetId.toUpperCase()} (${modeLabel}, ${rangeLabel}, ${styleLabel}) • exchange ${selectedExchange} • provider ${providerLabel} • ${cacheLabel}${refreshLabel}${liveLabel}${fallbackLabel} • atualizado ${updatedAtLabel}`,
     );
 
     if (chartViewMode === "tv") {
       setChartLegend(
         `Terminal ${buildTradingViewSymbol()} ativo • intervalo ${getSelectedTerminalInterval()} • estilo ${styleLabel}`,
       );
-    } else if (fallbackReason.length > 0) {
-      setChartLegend(`Fallback ativo: ${fallbackReason}. Exibindo delayed temporariamente.`, "error");
+    } else if (combinedFallbackReason.length > 0) {
+      setChartLegend(`Fallback ativo: ${combinedFallbackReason}. Exibindo delayed temporariamente.`, "error");
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Erro ao carregar grafico";
-    setChartStatus(message, "error");
-    clearChartSurface();
-    setChartLegend("Falha ao carregar o grafico. Tente atualizar.", "error");
-    renderChartMetrics(null);
-    currentChartSnapshot = null;
+    const errorMessage = error instanceof Error ? error.message : "Erro ao carregar grafico";
+    let spotQuote = null;
+
+    try {
+      const spotBatch = await requestSpotPriceBatch([assetId]);
+      spotQuote = Array.isArray(spotBatch?.quotes)
+        ? spotBatch.quotes.find((item) => item.assetId === assetId && item.status === "ok")
+        : null;
+    } catch {
+      spotQuote = null;
+    }
+
+    if (spotQuote?.quote?.price && Number.isFinite(spotQuote.quote.price)) {
+      const contingencySnapshot = buildContingencyChartSnapshot({
+        assetId,
+        price: spotQuote.quote.price,
+        provider: spotQuote.quote.provider,
+        range,
+      });
+
+      currentChartSnapshot = contingencySnapshot;
+
+      if (chartViewMode === "copilot") {
+        renderInteractiveChart(contingencySnapshot);
+      }
+
+      renderChartMetrics(contingencySnapshot);
+      setChartStatus(`Modo contingencia ativo: ${errorMessage}`, "error");
+      setChartLegend("Sem historico no momento. Exibindo preco de contingencia para manter acompanhamento operacional.", "error");
+    } else {
+      setChartStatus(errorMessage, "error");
+
+      if (currentChartSnapshot && chartViewMode === "copilot") {
+        renderInteractiveChart(currentChartSnapshot);
+        setChartLegend("Falha na atualizacao. Mantendo ultimo snapshot valido.", "error");
+      } else {
+        clearChartSurface();
+        setChartLegend("Falha ao carregar o grafico. Tente atualizar.", "error");
+        renderChartMetrics(null);
+        currentChartSnapshot = null;
+      }
+    }
   } finally {
     if (chartRefreshButton instanceof HTMLButtonElement && !silent) {
       chartRefreshButton.disabled = false;
@@ -2030,7 +2210,7 @@ function stopChartAutoRefresh() {
 function configureChartAutoRefresh() {
   stopChartAutoRefresh();
 
-  if (!chartModeSelect || chartModeSelect.value !== "live") {
+  if (!chartModeSelect) {
     return;
   }
 
@@ -2392,6 +2572,8 @@ function setupChartLab() {
     && sanitizeTerminalSymbol(chartSymbolInput.value).length < 5
   ) {
     syncTerminalSymbolWithAsset();
+  } else if (chartSymbolInput instanceof HTMLInputElement) {
+    chartSymbolInput.value = mapSymbolToExchange(chartSymbolInput.value, getSelectedTerminalExchange());
   }
 
   setActiveTerminalInterval(getSelectedTerminalInterval());
@@ -2444,6 +2626,11 @@ function setupChartLab() {
   if (chartModeSelect) {
     chartModeSelect.addEventListener("change", () => {
       chartHasInitialFit = false;
+
+      if (chartModeSelect.value === "live" && !isNativeLiveModeSupported()) {
+        setChartLegend("Modo live nativo disponivel para Binance. Aplicando fallback delayed com refresh continuo.", "error");
+      }
+
       configureChartAutoRefresh();
       configureWatchlistAutoRefresh();
       void loadChart();
@@ -2477,7 +2664,23 @@ function setupChartLab() {
 
   if (chartExchangeSelect) {
     chartExchangeSelect.addEventListener("change", () => {
+      if (chartSymbolInput instanceof HTMLInputElement) {
+        chartSymbolInput.value = mapSymbolToExchange(chartSymbolInput.value, getSelectedTerminalExchange());
+      }
+
+      if (chartModeSelect instanceof HTMLSelectElement && chartModeSelect.value === "live" && !isNativeLiveModeSupported()) {
+        setChartLegend("Live nativo disponivel apenas para Binance nesta versao. Aplicando modo delayed resiliente.", "error");
+      }
+
       renderWatchlist();
+      configureChartAutoRefresh();
+      configureWatchlistAutoRefresh();
+      void loadChart({
+        silent: true,
+      });
+      void refreshWatchlistMarket({
+        silent: true,
+      });
       scheduleTradingViewRefresh();
       saveChartPreferences();
     });
@@ -2485,7 +2688,10 @@ function setupChartLab() {
 
   if (chartSymbolInput) {
     chartSymbolInput.addEventListener("input", () => {
-      chartSymbolInput.value = sanitizeTerminalSymbol(chartSymbolInput.value);
+      chartSymbolInput.value = mapSymbolToExchange(
+        sanitizeTerminalSymbol(chartSymbolInput.value),
+        getSelectedTerminalExchange(),
+      );
       renderWatchlist();
       scheduleTradingViewRefresh();
       saveChartPreferences();
@@ -2653,13 +2859,14 @@ function setupChartLab() {
       const assetId = chartAssetSelect.value;
       const range = chartRangeSelect.value;
       const mode = chartModeSelect?.value ?? "delayed";
+      const exchange = getSelectedTerminalExchange();
       const modeLabel = CHART_MODE_LABELS[mode] ?? mode;
       const rangeLabel = CHART_RANGE_LABELS[range] ?? range;
       const trend = currentChartSnapshot?.insights?.trend
         ? formatTrendLabel(currentChartSnapshot.insights.trend).toLowerCase()
         : "viés indefinido";
 
-      chatInput.value = `Analise tecnicamente o grafico de ${assetId} em ${rangeLabel} no modo ${modeLabel}, com tendencia, momentum, volatilidade, RSI, MACD, ATR, suporte/resistencia e sinal tatico (buy/sell/wait) com confianca e niveis de entrada/stop/take-profit. Contexto atual: ${trend}.`;
+      chatInput.value = `Analise tecnicamente o grafico de ${assetId} em ${rangeLabel}, corretora ${exchange}, modo ${modeLabel}. Quero leitura completa de tendencia, momentum, volatilidade, RSI, MACD, ATR, suporte/resistencia e plano tatico (buy/sell/wait) com confianca e niveis de entrada/stop/take-profit. Se algum dado estiver indisponivel, use fallback tecnico com o que houver e deixe claro o grau de confianca. Contexto atual: ${trend}.`;
       chatInput.focus();
 
       if (chatForm && !isSending) {
