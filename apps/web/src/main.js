@@ -9,6 +9,14 @@ const quickPromptsContainer = document.querySelector("#quick-prompts");
 const activeModelElement = document.querySelector("#active-model");
 const recentHistoryElement = document.querySelector("#recent-history");
 const clearLocalHistoryButton = document.querySelector("#clear-local-history");
+const chartControlsForm = document.querySelector("#chart-controls");
+const chartAssetSelect = document.querySelector("#chart-asset");
+const chartRangeSelect = document.querySelector("#chart-range");
+const chartRefreshButton = document.querySelector("#chart-refresh-button");
+const chartStatusElement = document.querySelector("#chart-status");
+const chartCanvas = document.querySelector("#chart-canvas");
+const chartMetricsElement = document.querySelector("#chart-metrics");
+const chartAnalyzeButton = document.querySelector("#chart-analyze-button");
 
 const CHAT_HISTORY_STORAGE_KEY = "botfinanceiro.copilot.history.v1";
 const CHAT_SESSION_STORAGE_KEY = "botfinanceiro.copilot.session.v1";
@@ -16,10 +24,18 @@ const MAX_STORED_MESSAGES = 60;
 const MAX_RECENT_HISTORY_ITEMS = 8;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").trim().replace(/\/$/, "");
+const CHART_RANGE_LABELS = {
+  "1y": "1 ano",
+  "24h": "24h",
+  "30d": "30 dias",
+  "7d": "7 dias",
+  "90d": "90 dias",
+};
 
 const messages = [];
 let isSending = false;
 let chatSessionId = getOrCreateSessionId();
+let currentChartSnapshot = null;
 
 function buildApiUrl(path) {
   return API_BASE_URL.length > 0 ? `${API_BASE_URL}${path}` : path;
@@ -233,6 +249,300 @@ function formatMeta(meta) {
   }
 
   return chunks.join(" • ");
+}
+
+function formatPrice(value, currency = "usd") {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "n/d";
+  }
+
+  const maximumFractionDigits = value >= 1000 ? 2 : value >= 1 ? 4 : 6;
+
+  return `${value.toLocaleString("pt-BR", {
+    maximumFractionDigits,
+  })} ${String(currency).toUpperCase()}`;
+}
+
+function formatPercent(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "n/d";
+  }
+
+  const signal = value > 0 ? "+" : "";
+  return `${signal}${value.toFixed(2)}%`;
+}
+
+function formatTrendLabel(trend) {
+  if (trend === "bullish") {
+    return "Viés de alta";
+  }
+
+  if (trend === "bearish") {
+    return "Viés de baixa";
+  }
+
+  return "Viés lateral";
+}
+
+function setChartStatus(message, mode = "") {
+  if (!chartStatusElement) {
+    return;
+  }
+
+  chartStatusElement.textContent = message;
+
+  if (mode) {
+    chartStatusElement.setAttribute("data-mode", mode);
+  } else {
+    chartStatusElement.removeAttribute("data-mode");
+  }
+}
+
+function clearChartCanvas() {
+  if (!(chartCanvas instanceof HTMLCanvasElement)) {
+    return;
+  }
+
+  const context = chartCanvas.getContext("2d");
+
+  if (!context) {
+    return;
+  }
+
+  context.clearRect(0, 0, chartCanvas.width, chartCanvas.height);
+}
+
+function drawChart(snapshot) {
+  if (!(chartCanvas instanceof HTMLCanvasElement)) {
+    return;
+  }
+
+  const context = chartCanvas.getContext("2d");
+
+  if (!context) {
+    return;
+  }
+
+  const points = Array.isArray(snapshot?.points) ? snapshot.points : [];
+
+  if (points.length < 2) {
+    clearChartCanvas();
+    return;
+  }
+
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = chartCanvas.clientWidth || chartCanvas.width;
+  const cssHeight = chartCanvas.clientHeight || chartCanvas.height;
+  chartCanvas.width = Math.max(300, Math.floor(cssWidth * dpr));
+  chartCanvas.height = Math.max(180, Math.floor(cssHeight * dpr));
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const width = cssWidth;
+  const height = cssHeight;
+  context.clearRect(0, 0, width, height);
+
+  const padding = {
+    bottom: 22,
+    left: 12,
+    right: 12,
+    top: 12,
+  };
+  const chartWidth = Math.max(1, width - padding.left - padding.right);
+  const chartHeight = Math.max(1, height - padding.top - padding.bottom);
+  const prices = points.map((point) => point.price);
+  const minPrice = Math.min(...prices);
+  const maxPrice = Math.max(...prices);
+  const priceRange = maxPrice - minPrice || 1;
+
+  const chartPoints = points.map((point, index) => {
+    const x = padding.left + (index / (points.length - 1)) * chartWidth;
+    const normalizedPrice = (point.price - minPrice) / priceRange;
+    const y = padding.top + (1 - normalizedPrice) * chartHeight;
+
+    return {
+      x,
+      y,
+    };
+  });
+
+  context.strokeStyle = "rgba(14, 143, 126, 0.28)";
+  context.lineWidth = 1;
+  context.beginPath();
+  context.moveTo(padding.left, padding.top + chartHeight / 2);
+  context.lineTo(width - padding.right, padding.top + chartHeight / 2);
+  context.stroke();
+
+  const areaGradient = context.createLinearGradient(0, padding.top, 0, padding.top + chartHeight);
+  areaGradient.addColorStop(0, "rgba(14, 143, 126, 0.25)");
+  areaGradient.addColorStop(1, "rgba(14, 143, 126, 0.01)");
+
+  context.fillStyle = areaGradient;
+  context.beginPath();
+  context.moveTo(chartPoints[0]?.x ?? padding.left, padding.top + chartHeight);
+
+  for (const point of chartPoints) {
+    context.lineTo(point.x, point.y);
+  }
+
+  context.lineTo(chartPoints[chartPoints.length - 1]?.x ?? padding.left, padding.top + chartHeight);
+  context.closePath();
+  context.fill();
+
+  context.strokeStyle = "#0e8f7e";
+  context.lineWidth = 2;
+  context.beginPath();
+
+  chartPoints.forEach((point, index) => {
+    if (index === 0) {
+      context.moveTo(point.x, point.y);
+      return;
+    }
+
+    context.lineTo(point.x, point.y);
+  });
+
+  context.stroke();
+
+  const lastPoint = chartPoints[chartPoints.length - 1];
+
+  if (lastPoint) {
+    context.fillStyle = "#18334f";
+    context.beginPath();
+    context.arc(lastPoint.x, lastPoint.y, 3.3, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  context.fillStyle = "#607180";
+  context.font = "12px Sora";
+  context.textAlign = "left";
+  context.fillText(formatPrice(minPrice, snapshot.currency), padding.left, height - 6);
+  context.textAlign = "right";
+  context.fillText(formatPrice(maxPrice, snapshot.currency), width - padding.right, height - 6);
+}
+
+function renderChartMetrics(snapshot) {
+  if (!chartMetricsElement) {
+    return;
+  }
+
+  const insights = snapshot?.insights;
+
+  if (!insights) {
+    chartMetricsElement.innerHTML = "";
+    return;
+  }
+
+  const metrics = [
+    {
+      label: "Preço",
+      value: formatPrice(insights.currentPrice, snapshot.currency),
+    },
+    {
+      label: "Trend",
+      value: formatTrendLabel(insights.trend),
+    },
+    {
+      label: "Variação",
+      value: formatPercent(insights.changePercent),
+    },
+    {
+      label: "Volatilidade",
+      value: formatPercent(insights.volatilityPercent),
+    },
+    {
+      label: "Suporte",
+      value: formatPrice(insights.supportLevel, snapshot.currency),
+    },
+    {
+      label: "Resistência",
+      value: formatPrice(insights.resistanceLevel, snapshot.currency),
+    },
+  ];
+
+  chartMetricsElement.innerHTML = "";
+
+  for (const metric of metrics) {
+    const metricElement = document.createElement("article");
+    metricElement.className = "chart-metric";
+
+    const labelElement = document.createElement("div");
+    labelElement.className = "chart-metric-label";
+    labelElement.textContent = metric.label;
+
+    const valueElement = document.createElement("div");
+    valueElement.className = "chart-metric-value";
+    valueElement.textContent = metric.value;
+
+    metricElement.append(labelElement, valueElement);
+    chartMetricsElement.append(metricElement);
+  }
+}
+
+async function requestCryptoChart(assetId, range) {
+  const response = await fetch(
+    buildApiUrl(`/v1/crypto/chart?assetId=${encodeURIComponent(assetId)}&currency=usd&range=${encodeURIComponent(range)}`),
+    {
+      method: "GET",
+    },
+  );
+
+  let payload = null;
+
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const errorMessage = payload?.error?.message;
+    throw new Error(typeof errorMessage === "string" ? errorMessage : "Nao foi possivel carregar o grafico");
+  }
+
+  return payload?.data ?? null;
+}
+
+async function loadChart(options = {}) {
+  if (!chartAssetSelect || !chartRangeSelect) {
+    return;
+  }
+
+  const assetId = options.assetId ?? chartAssetSelect.value;
+  const range = options.range ?? chartRangeSelect.value;
+
+  if (chartRefreshButton instanceof HTMLButtonElement) {
+    chartRefreshButton.disabled = true;
+    chartRefreshButton.textContent = "Atualizando...";
+  }
+
+  setChartStatus("Atualizando dados de grafico...", "loading");
+
+  try {
+    const snapshot = await requestCryptoChart(assetId, range);
+
+    if (!snapshot || !Array.isArray(snapshot.points)) {
+      throw new Error("Resposta de grafico invalida");
+    }
+
+    currentChartSnapshot = snapshot;
+    drawChart(snapshot);
+    renderChartMetrics(snapshot);
+
+    const cacheLabel = snapshot.cache?.state ? `cache ${snapshot.cache.state}` : "cache n/d";
+    const rangeLabel = CHART_RANGE_LABELS[snapshot.range] ?? snapshot.range;
+    setChartStatus(`Grafico ${assetId.toUpperCase()} (${rangeLabel}) carregado • ${cacheLabel}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Erro ao carregar grafico";
+    setChartStatus(message, "error");
+    clearChartCanvas();
+    renderChartMetrics(null);
+    currentChartSnapshot = null;
+  } finally {
+    if (chartRefreshButton instanceof HTMLButtonElement) {
+      chartRefreshButton.disabled = false;
+      chartRefreshButton.textContent = "Atualizar grafico";
+    }
+  }
 }
 
 function renderMessages() {
@@ -478,6 +788,49 @@ function setupLocalHistoryControls() {
   });
 }
 
+function setupChartLab() {
+  if (!chartControlsForm || !chartAssetSelect || !chartRangeSelect) {
+    return;
+  }
+
+  chartControlsForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void loadChart();
+  });
+
+  chartAssetSelect.addEventListener("change", () => {
+    void loadChart();
+  });
+
+  chartRangeSelect.addEventListener("change", () => {
+    void loadChart();
+  });
+
+  if (chartAnalyzeButton) {
+    chartAnalyzeButton.addEventListener("click", () => {
+      if (!chatInput || !chartAssetSelect || !chartRangeSelect) {
+        return;
+      }
+
+      const assetId = chartAssetSelect.value;
+      const range = chartRangeSelect.value;
+      const rangeLabel = CHART_RANGE_LABELS[range] ?? range;
+      const trend = currentChartSnapshot?.insights?.trend
+        ? formatTrendLabel(currentChartSnapshot.insights.trend).toLowerCase()
+        : "viés indefinido";
+
+      chatInput.value = `Analise tecnicamente o grafico de ${assetId} em ${rangeLabel}, com tendencia, momentum, volatilidade, suporte e resistencia. Contexto atual: ${trend}.`;
+      chatInput.focus();
+
+      if (chatForm && !isSending) {
+        chatForm.requestSubmit();
+      }
+    });
+  }
+
+  void loadChart();
+}
+
 async function initializeChatHistory() {
   setStatus("loading", "Sincronizando");
 
@@ -502,7 +855,7 @@ async function initializeChatHistory() {
 
   pushMessage(
     "assistant",
-    "Pronto para ajudar. Peça um resumo de mercado, riscos de curto prazo ou um plano de monitoramento para hoje.",
+    "Pronto para ajudar. Peça um resumo de mercado, riscos de curto prazo, panorama macro ou analise tecnica de grafico.",
     {
       meta: {
         model: "google/gemini-2.0-flash-001",
@@ -534,4 +887,5 @@ if (chatInput) {
 
 setupQuickPrompts();
 setupLocalHistoryControls();
+setupChartLab();
 void initializeChatHistory();

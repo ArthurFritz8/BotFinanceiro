@@ -19,6 +19,11 @@ import {
   type CopilotChatSessionHistory,
 } from "../../../shared/observability/copilot-chat-audit-store.js";
 import {
+  CryptoChartService,
+  type CryptoChartRange,
+  type CryptoTrend,
+} from "../../crypto/application/crypto-chart-service.js";
+import {
   CryptoSpotPriceService,
   type SpotPriceResponse,
 } from "../../crypto/application/crypto-spot-price-service.js";
@@ -39,6 +44,7 @@ export interface CopilotChatInput {
 const openRouterChatAdapter = new OpenRouterChatAdapter();
 const coinCapMarketDataAdapter = new CoinCapMarketDataAdapter();
 const yahooMarketDataAdapter = new YahooMarketDataAdapter();
+const cryptoChartService = new CryptoChartService();
 const cryptoSpotPriceService = new CryptoSpotPriceService();
 const cryptoSyncPolicyService = new CryptoSyncPolicyService();
 const systemStatusService = new SystemStatusService();
@@ -47,6 +53,7 @@ const copilotDefaultSystemPrompt = [
   "Voce e um copiloto financeiro focado em dados objetivos de mercado e operacao.",
   "Quando a pergunta envolver resumo, panorama ou contexto do mercado cripto, priorize a tool get_crypto_market_overview.",
   "Quando a pergunta envolver preco ou comparacao entre ativos, use get_crypto_spot_price ou get_crypto_multi_spot_price.",
+  "Quando a pergunta envolver grafico, tendencia, suporte/resistencia ou analise tecnica de cripto, use get_crypto_chart_insights.",
   "Quando a pergunta envolver indices, acoes, cambio, juros ou commodities, use get_financial_market_snapshot.",
   "Quando a pergunta envolver risco de curto prazo, entregue analise por fatores (volatilidade, liquidez, macro e operacao), sem recomendacao de investimento.",
   "Nao recuse genericamente se houver dados disponiveis nas tools; entregue resposta concisa com numeros e contexto.",
@@ -70,6 +77,12 @@ const copilotMultiSpotPriceToolInputSchema = z.object({
 
 const copilotMarketOverviewToolInputSchema = z.object({
   limit: z.number().int().min(3).max(15).default(8),
+});
+
+const copilotCryptoChartToolInputSchema = z.object({
+  assetId: z.string().trim().min(1).default("bitcoin"),
+  currency: z.string().trim().min(2).max(10).default("usd"),
+  range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("7d"),
 });
 
 const copilotSyncPolicyToolInputSchema = z.object({
@@ -147,6 +160,18 @@ const riskAssetAliases: Array<{ aliases: string[]; assetId: string }> = [
     assetId: "bnb",
   },
   {
+    aliases: ["dogecoin", "doge"],
+    assetId: "dogecoin",
+  },
+  {
+    aliases: ["cardano", "ada"],
+    assetId: "cardano",
+  },
+  {
+    aliases: ["chainlink", "link"],
+    assetId: "chainlink",
+  },
+  {
     aliases: ["pi network", "pi-network", "pi"],
     assetId: "pi-network",
   },
@@ -219,6 +244,31 @@ function hasRiskAnalysisIntent(message: string): boolean {
   return asksForRisk && (mentionsMarketContext || mentionsShortHorizon);
 }
 
+function hasChartAnalysisIntent(message: string): boolean {
+  const normalizedMessage = normalizeText(message);
+  const asksForChart =
+    normalizedMessage.includes("grafico") ||
+    normalizedMessage.includes("grafic") ||
+    normalizedMessage.includes("chart") ||
+    normalizedMessage.includes("candles") ||
+    normalizedMessage.includes("candle") ||
+    normalizedMessage.includes("suporte") ||
+    normalizedMessage.includes("resistencia") ||
+    normalizedMessage.includes("tendencia") ||
+    normalizedMessage.includes("setup") ||
+    normalizedMessage.includes("rompimento");
+  const asksDirection =
+    normalizedMessage.includes("vai subir") ||
+    normalizedMessage.includes("vai cair") ||
+    normalizedMessage.includes("subir ou cair") ||
+    normalizedMessage.includes("alta ou baixa");
+  const mentionsAsset = riskAssetAliases.some((assetAlias) =>
+    assetAlias.aliases.some((alias) => hasExactAlias(normalizedMessage, alias)),
+  );
+
+  return (asksForChart || asksDirection) && mentionsAsset;
+}
+
 function hasExactAlias(normalizedMessage: string, alias: string): boolean {
   const normalizedAlias = normalizeText(alias);
 
@@ -241,6 +291,58 @@ function resolveRiskAssetIds(message: string): string[] {
   }
 
   return [...new Set(selectedAssets)].slice(0, 4);
+}
+
+function resolvePrimaryAssetIdForChart(message: string): string {
+  const resolvedAssetIds = resolveRiskAssetIds(message);
+  return resolvedAssetIds[0] ?? "bitcoin";
+}
+
+function resolveChartRangeFromMessage(message: string): CryptoChartRange {
+  const normalizedMessage = normalizeText(message);
+
+  if (
+    normalizedMessage.includes("24h") ||
+    normalizedMessage.includes("dia") ||
+    normalizedMessage.includes("diario") ||
+    normalizedMessage.includes("intraday")
+  ) {
+    return "24h";
+  }
+
+  if (
+    normalizedMessage.includes("semana") ||
+    normalizedMessage.includes("7d") ||
+    normalizedMessage.includes("7 dias")
+  ) {
+    return "7d";
+  }
+
+  if (
+    normalizedMessage.includes("90d") ||
+    normalizedMessage.includes("90 dias") ||
+    normalizedMessage.includes("trimestre")
+  ) {
+    return "90d";
+  }
+
+  if (
+    normalizedMessage.includes("mes") ||
+    normalizedMessage.includes("30d") ||
+    normalizedMessage.includes("30 dias")
+  ) {
+    return "30d";
+  }
+
+  if (
+    normalizedMessage.includes("ano") ||
+    normalizedMessage.includes("1y") ||
+    normalizedMessage.includes("365 dias")
+  ) {
+    return "1y";
+  }
+
+  return "7d";
 }
 
 function hasGenericLimitationAnswer(answer: string): boolean {
@@ -339,6 +441,38 @@ function classifyLiquidity(volumeUsd24h: number | null): string {
   }
 
   return "baixa";
+}
+
+function formatTrendLabel(trend: CryptoTrend): string {
+  if (trend === "bullish") {
+    return "viés de alta";
+  }
+
+  if (trend === "bearish") {
+    return "viés de baixa";
+  }
+
+  return "viés lateral";
+}
+
+function formatRangeLabel(range: CryptoChartRange): string {
+  if (range === "24h") {
+    return "24h";
+  }
+
+  if (range === "7d") {
+    return "7 dias";
+  }
+
+  if (range === "30d") {
+    return "30 dias";
+  }
+
+  if (range === "90d") {
+    return "90 dias";
+  }
+
+  return "1 ano";
 }
 
 function formatIntervalMinutes(intervalSeconds: number): number {
@@ -586,6 +720,49 @@ const copilotTools: OpenRouterToolDefinition[] = [
   },
   {
     description:
+      "Retorna dados de grafico de cripto (historico + insights tecnicos) para analise de tendencia, momentum, suporte e resistencia sem recomendacao de investimento.",
+    inputSchema: copilotCryptoChartToolInputSchema,
+    name: "get_crypto_chart_insights",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        assetId: {
+          default: "bitcoin",
+          description: "Ativo no padrao CoinGecko, exemplo: bitcoin, ethereum, solana, dogecoin",
+          type: "string",
+        },
+        currency: {
+          default: "usd",
+          description: "Moeda de referencia do grafico, exemplo: usd, brl",
+          type: "string",
+        },
+        range: {
+          default: "7d",
+          description: "Janela temporal do grafico: 24h, 7d, 30d, 90d ou 1y",
+          enum: ["24h", "7d", "30d", "90d", "1y"],
+          type: "string",
+        },
+      },
+      type: "object",
+    },
+    run: async (input: z.infer<typeof copilotCryptoChartToolInputSchema>) => {
+      const chart = await cryptoChartService.getChart(input);
+
+      return {
+        assetId: chart.assetId,
+        cache: chart.cache,
+        currency: chart.currency,
+        fetchedAt: chart.fetchedAt,
+        insights: chart.insights,
+        points: chart.points.slice(-160),
+        provider: chart.provider,
+        range: chart.range,
+        textualSummary: `Faixa ${formatRangeLabel(chart.range)} | ${formatTrendLabel(chart.insights.trend)} | variacao ${chart.insights.changePercent}% | volatilidade ${chart.insights.volatilityPercent}%`,
+      };
+    },
+  },
+  {
+    description:
       "Retorna snapshot de mercado global (indices, cambio, juros, commodities e cripto) via Yahoo Finance. Use para contexto macro e comparativo entre classes de ativos.",
     inputSchema: copilotFinancialMarketSnapshotToolInputSchema,
     name: "get_financial_market_snapshot",
@@ -776,6 +953,24 @@ export class CopilotChatService {
             err: error,
           },
           "Failed to build monitoring plan fallback",
+        );
+      }
+    }
+
+    if (hasChartAnalysisIntent(input.message)) {
+      try {
+        const fallbackAnswer = await this.buildChartAnalysisFallback(input.message);
+
+        return {
+          ...completion,
+          answer: fallbackAnswer,
+        };
+      } catch (error) {
+        logger.warn(
+          {
+            err: error,
+          },
+          "Failed to build chart analysis fallback",
         );
       }
     }
@@ -973,6 +1168,26 @@ export class CopilotChatService {
       `Checkpoint 2 (meio do dia): revisar os ativos chave (${monitoredQuotes.join(" | ")}) e abrir alerta se houver variacao brusca ou aumento de falhas por escopo.`,
       `Checkpoint 3 (fechamento): conferir politicas de sync (hot a cada ${formatIntervalMinutes(syncPolicy.policy.hot.intervalSeconds)} min, warm a cada ${formatIntervalMinutes(syncPolicy.policy.warm.intervalSeconds)} min, cold a cada ${formatIntervalMinutes(syncPolicy.policy.cold.intervalSeconds)} min) e registrar ajustes para o proximo ciclo.`,
       "Observacao: este plano e operacional e informativo, sem recomendacao de investimento.",
+    ].join("\n");
+  }
+
+  private async buildChartAnalysisFallback(message: string): Promise<string> {
+    const assetId = resolvePrimaryAssetIdForChart(message);
+    const range = resolveChartRangeFromMessage(message);
+    const chart = await cryptoChartService.getChart({
+      assetId,
+      currency: "usd",
+      range,
+    });
+    const trendLabel = formatTrendLabel(chart.insights.trend);
+
+    return [
+      `Analise tecnica objetiva de ${capitalizeAssetId(chart.assetId)} (${formatRangeLabel(chart.range)}).`,
+      `Preco atual: ${formatSpotPrice(chart.insights.currentPrice, chart.currency)} | variacao no periodo: ${chart.insights.changePercent}% | ${trendLabel}.`,
+      `Momentum curto: ${chart.insights.momentumPercent}% | volatilidade estimada: ${chart.insights.volatilityPercent}%.`,
+      `Faixa tecnica: suporte aproximado em ${formatSpotPrice(chart.insights.supportLevel, chart.currency)} e resistencia em ${formatSpotPrice(chart.insights.resistanceLevel, chart.currency)}.`,
+      `Media curta (aprox.): ${formatSpotPrice(chart.insights.shortMovingAverage, chart.currency)} | cache ${chart.cache.state}${chart.cache.stale ? " (stale)" : ""}.`,
+      "Leitura profissional: use estes sinais como apoio de contexto e combine com gestao de risco e confirmacao de volume antes de qualquer decisao.",
     ].join("\n");
   }
 

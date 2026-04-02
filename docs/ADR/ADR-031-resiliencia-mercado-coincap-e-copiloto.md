@@ -83,3 +83,8 @@ O sistema ja possuia tool calling read-only e protecao de resiliencia para CoinG
 11. Evoluido prompt padrao para orientar uso de tools alem de cripto e evitar recusa generica em analise de risco de curto prazo.
 12. Adicionado fallback por intencao para perguntas de risco (ex.: BTC/ETH curto prazo), com resposta por fatores: volatilidade, liquidez, sinais macro e saude operacional.
 13. Cobertura de testes ampliada para novo fallback de risco e para fluxo de tool calling do snapshot financeiro global.
+14. Adicionado novo endpoint tecnico `GET /v1/crypto/chart` com historico de preco (CoinGecko) e insights tecnicos calculados no backend (trend, volatilidade, momentum, suporte e resistencia).
+15. Integrada tool `get_crypto_chart_insights` no Copiloto para analise de grafico com base em dados estruturados e sem recomendacao de investimento.
+16. Adicionado fallback por intencao para perguntas de grafico/tendencia quando o modelo retorna resposta limitante, mantendo resposta util e objetiva.
+17. Frontend evoluido com modulo "Chart Lab" (canvas, selecao de ativo/faixa e metricas tecnicas) integrado ao chat via acao "Pedir analise tecnica".
+18. Cobertura de testes ampliada para rota de grafico, fallback de analise tecnica e tool calling de insights de grafico.

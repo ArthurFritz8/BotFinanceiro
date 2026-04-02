@@ -250,6 +250,163 @@ body {
   padding-bottom: 0;
 }
 
+.chart-lab-card {
+  background:
+    radial-gradient(circle at 10% 8%, rgba(14, 143, 126, 0.12), transparent 35%),
+    #f7f2e7;
+  border: 1px solid #cfc2a4;
+  border-radius: 14px;
+  margin-top: 0.9rem;
+  padding: 0.76rem;
+}
+
+.chart-lab-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.chart-lab-header h3 {
+  font-family: "Space Grotesk", "Arial Narrow", sans-serif;
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.chart-lab-tag {
+  background: #18334f;
+  border-radius: 999px;
+  color: #eff7ff;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 0.2rem 0.42rem;
+  text-transform: uppercase;
+}
+
+.chart-lab-subtitle {
+  color: #34485a;
+  font-size: 0.78rem;
+  margin: 0.45rem 0 0.68rem;
+}
+
+.chart-controls {
+  display: grid;
+  gap: 0.36rem;
+  grid-template-columns: 1fr;
+}
+
+.chart-controls label {
+  color: #384a59;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.chart-controls select,
+.chart-controls button {
+  border-radius: 10px;
+  font-family: inherit;
+}
+
+.chart-controls select {
+  background: #fff;
+  border: 1px solid #cabd9f;
+  color: #1f2a35;
+  font-size: 0.82rem;
+  padding: 0.44rem 0.52rem;
+}
+
+.chart-controls button {
+  background: #fff;
+  border: 1px solid #9f8c67;
+  color: #22303f;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+  margin-top: 0.32rem;
+  padding: 0.44rem 0.56rem;
+}
+
+.chart-controls button:hover {
+  background: #fff8e8;
+  border-color: #816f4e;
+}
+
+.chart-status {
+  color: #4e5f6d;
+  font-size: 0.74rem;
+  margin-top: 0.62rem;
+}
+
+.chart-status[data-mode="error"] {
+  color: #913923;
+}
+
+.chart-status[data-mode="loading"] {
+  color: #0a7568;
+}
+
+.chart-canvas-wrap {
+  background: #fff;
+  border: 1px solid #cfc2a5;
+  border-radius: 12px;
+  margin-top: 0.5rem;
+  overflow: hidden;
+  padding: 0.3rem;
+}
+
+.chart-canvas-wrap canvas {
+  display: block;
+  height: auto;
+  width: 100%;
+}
+
+.chart-metrics {
+  display: grid;
+  gap: 0.42rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0.62rem;
+}
+
+.chart-metric {
+  background: #fff;
+  border: 1px solid #d4c9b0;
+  border-radius: 10px;
+  padding: 0.4rem 0.44rem;
+}
+
+.chart-metric-label {
+  color: #5f6d7a;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.chart-metric-value {
+  color: #22303f;
+  font-size: 0.78rem;
+  font-weight: 700;
+  margin-top: 0.18rem;
+}
+
+.chart-analyze-button {
+  background: linear-gradient(120deg, #18334f 0%, #294f7a 100%);
+  border: none;
+  border-radius: 10px;
+  color: #edf6ff;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  margin-top: 0.64rem;
+  padding: 0.52rem 0.6rem;
+  width: 100%;
+}
+
+.chart-analyze-button:hover {
+  filter: brightness(1.04);
+}
+
 .chat-panel {
   display: flex;
   flex-direction: column;

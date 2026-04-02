@@ -164,3 +164,78 @@ void it("GET /v1/crypto/spot-price resolve alias pi-network via CoinCap", async 
   assert.equal(body.data.currency, "usd");
   assert.equal(body.data.provider, "coincap");
 });
+
+void it("GET /v1/crypto/chart retorna pontos e insights tecnicos", async () => {
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("api.coingecko.com/api/v3/coins/bitcoin/market_chart")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            prices: [
+              [1712000000000, 64200],
+              [1712003600000, 64550],
+              [1712007200000, 64810],
+              [1712010800000, 65120],
+              [1712014400000, 64990],
+              [1712018000000, 65300],
+            ],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/chart?assetId=bitcoin&currency=usd&range=7d",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<{
+    data: {
+      assetId: string;
+      cache: {
+        stale: boolean;
+        state: string;
+      };
+      currency: string;
+      insights: {
+        changePercent: number;
+        currentPrice: number;
+        trend: "bearish" | "bullish" | "sideways";
+        volatilityPercent: number;
+      };
+      points: Array<{
+        price: number;
+        timestamp: string;
+      }>;
+      provider: "coingecko";
+      range: "24h" | "7d" | "30d" | "90d" | "1y";
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.assetId, "bitcoin");
+  assert.equal(body.data.currency, "usd");
+  assert.equal(body.data.range, "7d");
+  assert.equal(body.data.provider, "coingecko");
+  assert.equal(body.data.cache.state, "miss");
+  assert.equal(body.data.cache.stale, false);
+  assert.equal(body.data.points.length, 6);
+  assert.equal(typeof body.data.points[0]?.timestamp, "string");
+  assert.equal(body.data.insights.currentPrice, 65300);
+  assert.equal(typeof body.data.insights.changePercent, "number");
+  assert.equal(typeof body.data.insights.volatilityPercent, "number");
+});

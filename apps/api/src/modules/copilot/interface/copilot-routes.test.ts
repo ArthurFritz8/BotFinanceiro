@@ -552,6 +552,227 @@ void it("POST /v1/copilot/chat aplica fallback local para analise de risco de cu
   assert.doesNotMatch(body.data.answer, /Nao posso fornecer analise de risco/);
 });
 
+void it("POST /v1/copilot/chat aplica fallback local para analise de grafico", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    "Bitcoin esta cotado em US$67.023. Nao posso fornecer recomendacoes de investimento ou prever se o preco vai subir ou cair.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-chart-fallback-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 18,
+              prompt_tokens: 30,
+              total_tokens: 48,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.coingecko.com/api/v3/coins/bitcoin/market_chart")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            prices: [
+              [1712000000000, 66200],
+              [1712003600000, 66500],
+              [1712007200000, 66820],
+              [1712010800000, 67030],
+              [1712014400000, 66910],
+              [1712018000000, 67203],
+            ],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Como esta o grafico do bitcoin nos ultimos 7 dias?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-chart-fallback-001");
+  assert.match(body.data.answer, /Analise tecnica objetiva de Bitcoin/);
+  assert.match(body.data.answer, /suporte aproximado/);
+  assert.match(body.data.answer, /resistencia/);
+  assert.doesNotMatch(body.data.answer, /Nao posso fornecer recomendacoes/);
+});
+
+void it("POST /v1/copilot/chat executa tool de insights de grafico", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let openRouterCalls = 0;
+  let chartCalls = 0;
+  const capturedOpenRouterBodies: string[] = [];
+
+  globalThis.fetch = ((input, init) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+      capturedOpenRouterBodies.push(typeof init?.body === "string" ? init.body : "");
+
+      if (openRouterCalls === 1) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content: null,
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        function: {
+                          arguments: '{"assetId":"bitcoin","currency":"usd","range":"7d"}',
+                          name: "get_crypto_chart_insights",
+                        },
+                        id: "call_chart_1",
+                        type: "function",
+                      },
+                    ],
+                  },
+                },
+              ],
+              id: "gen-tool-chart-001",
+              model: "google/gemini-1.5-flash",
+              usage: {
+                completion_tokens: 21,
+                prompt_tokens: 33,
+                total_tokens: 54,
+              },
+            }),
+            {
+              headers: {
+                "content-type": "application/json",
+              },
+              status: 200,
+            },
+          ),
+        );
+      }
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    "Grafico de 7 dias com vies de alta moderada, suporte tecnico respeitado e volatilidade controlada.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-tool-chart-002",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 25,
+              prompt_tokens: 49,
+              total_tokens: 74,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.coingecko.com/api/v3/coins/bitcoin/market_chart")) {
+      chartCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            prices: [
+              [1712000000000, 66000],
+              [1712003600000, 66420],
+              [1712007200000, 66650],
+              [1712010800000, 66880],
+              [1712014400000, 67120],
+              [1712018000000, 67340],
+            ],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Analise o grafico de 7 dias do bitcoin.",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 2);
+  assert.equal(chartCalls, 1);
+  assert.match(capturedOpenRouterBodies[0] ?? "", /"name":"get_crypto_chart_insights"/);
+  assert.match(capturedOpenRouterBodies[1] ?? "", /"name":"get_crypto_chart_insights"/);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(
+    body.data.answer,
+    "Grafico de 7 dias com vies de alta moderada, suporte tecnico respeitado e volatilidade controlada.",
+  );
+  assert.deepEqual(body.data.toolCallsUsed, ["get_crypto_chart_insights"]);
+  assert.equal(body.data.responseId, "gen-tool-chart-002");
+  assert.equal(body.data.usage.totalTokens, 74);
+});
+
 void it("POST /v1/copilot/chat executa snapshot financeiro global com tool calling", async () => {
   mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
 

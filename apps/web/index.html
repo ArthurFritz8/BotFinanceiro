@@ -54,11 +54,68 @@
             </button>
             <button
               type="button"
+              data-prompt="Analise o grafico de 7 dias do bitcoin com tendencia, suporte, resistencia e volatilidade."
+            >
+              Analise tecnica do grafico
+            </button>
+            <button
+              type="button"
               data-prompt="Me de um plano de monitoramento para hoje com 3 checkpoints."
             >
               Plano de monitoramento
             </button>
+            <button
+              type="button"
+              data-prompt="Me traga um panorama global com indices, cambio, juros e commodities."
+            >
+              Panorama macro global
+            </button>
           </div>
+
+          <section class="chart-lab-card" aria-labelledby="chart-lab-title">
+            <div class="chart-lab-header">
+              <h3 id="chart-lab-title">Chart Lab</h3>
+              <span class="chart-lab-tag">Novo</span>
+            </div>
+
+            <p class="chart-lab-subtitle">
+              Visual profissional de preco + sinais tecnicos para analise com o Copiloto.
+            </p>
+
+            <form id="chart-controls" class="chart-controls">
+              <label for="chart-asset">Ativo</label>
+              <select id="chart-asset" name="assetId">
+                <option value="bitcoin">Bitcoin (BTC)</option>
+                <option value="ethereum">Ethereum (ETH)</option>
+                <option value="solana">Solana (SOL)</option>
+                <option value="dogecoin">Dogecoin (DOGE)</option>
+                <option value="xrp">XRP</option>
+              </select>
+
+              <label for="chart-range">Janela</label>
+              <select id="chart-range" name="range">
+                <option value="24h">24h</option>
+                <option value="7d" selected>7 dias</option>
+                <option value="30d">30 dias</option>
+                <option value="90d">90 dias</option>
+                <option value="1y">1 ano</option>
+              </select>
+
+              <button type="submit" id="chart-refresh-button">Atualizar grafico</button>
+            </form>
+
+            <div id="chart-status" class="chart-status">Carregando grafico...</div>
+
+            <div class="chart-canvas-wrap">
+              <canvas id="chart-canvas" width="560" height="220" aria-label="Grafico de preco"></canvas>
+            </div>
+
+            <div id="chart-metrics" class="chart-metrics"></div>
+
+            <button type="button" id="chart-analyze-button" class="chart-analyze-button">
+              Pedir analise tecnica no chat
+            </button>
+          </section>
 
           <div class="stack-note">
             <h3>Stack em uso</h3>

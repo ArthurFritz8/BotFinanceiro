@@ -3,6 +3,9 @@ import { z } from "zod";
 
 import { buildSuccessResponse } from "../../../shared/http/api-response.js";
 import {
+  CryptoChartService,
+} from "../application/crypto-chart-service.js";
+import {
   CryptoSpotPriceService,
 } from "../application/crypto-spot-price-service.js";
 import {
@@ -18,8 +21,15 @@ const spotPriceQuerySchema = z.object({
   currency: z.string().trim().min(2).max(10).default("usd"),
 });
 
+const chartQuerySchema = z.object({
+  assetId: z.string().trim().min(1).default("bitcoin"),
+  currency: z.string().trim().min(2).max(10).default("usd"),
+  range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("7d"),
+});
+
 const cryptoSyncPolicyService = new CryptoSyncPolicyService();
 const cryptoSpotPriceService = new CryptoSpotPriceService();
+const cryptoChartService = new CryptoChartService();
 
 export function getSyncPolicy(request: FastifyRequest, reply: FastifyReply): void {
   const parsedQuery = syncPolicyQuerySchema.parse(request.query);
@@ -35,4 +45,11 @@ export async function getSpotPrice(request: FastifyRequest, reply: FastifyReply)
   const spotPrice = await cryptoSpotPriceService.getSpotPrice(parsedQuery);
 
   void reply.send(buildSuccessResponse(request.id, spotPrice));
+}
+
+export async function getChart(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const parsedQuery = chartQuerySchema.parse(request.query);
+  const chart = await cryptoChartService.getChart(parsedQuery);
+
+  void reply.send(buildSuccessResponse(request.id, chart));
 }

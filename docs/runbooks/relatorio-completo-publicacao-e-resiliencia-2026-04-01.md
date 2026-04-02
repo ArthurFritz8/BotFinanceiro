@@ -380,3 +380,42 @@ Objetivo do aditivo:
 1. Reducao significativa de respostas "nao pode" em perguntas analiticas de risco.
 2. Cobertura mais ampla de mercado financeiro (alem de cripto) no fluxo normal do Copiloto.
 3. Maior utilidade pratica para tomada de decisao informada, mantendo neutralidade e sem recomendacao de investimento.
+
+## Aditivo de analise grafica profissional e UX inovadora (2026-04-02)
+
+### Objetivo
+
+1. Evoluir o produto de chat para uma experiencia de analise tecnica acionavel, com visualizacao de grafico e interpretacao automatica por IA.
+
+### Correcao aplicada
+
+1. Novo adapter `CoinGeckoMarketChartAdapter` para historico de preco com retry/backoff.
+2. Novo service `CryptoChartService` com cache e indicadores objetivos:
+- trend
+- volatilidade
+- momentum
+- suporte/resistencia
+3. Novo endpoint tecnico:
+- `GET /v1/crypto/chart?assetId=bitcoin&currency=usd&range=7d`
+4. Nova tool do Copiloto:
+- `get_crypto_chart_insights`
+5. Fallback por intencao para perguntas de grafico quando o modelo retorna resposta limitante.
+6. Frontend evoluido com modulo `Chart Lab`:
+- grafico em canvas
+- seletor de ativo e faixa temporal (24h, 7d, 30d, 90d, 1y)
+- metricas tecnicas em cards
+- botao "Pedir analise tecnica" integrado ao chat
+
+### Evidencias da correcao
+
+1. Teste novo da rota `GET /v1/crypto/chart` validado.
+2. Teste novo de fallback local para analise de grafico no Copiloto validado.
+3. Teste novo de tool calling `get_crypto_chart_insights` validado.
+4. Suite da API validada com sucesso apos ampliacao: `tests: 41`, `pass: 41`, `fail: 0`.
+5. `npm run check` e `npm run guard:docs` concluidos com sucesso.
+
+### Resultado esperado
+
+1. Usuario consegue visualizar contexto tecnico sem sair da plataforma.
+2. Chat deixa de responder apenas com limitacao e passa a entregar leitura tecnica estruturada para perguntas de grafico.
+3. A experiencia combina analise qualitativa (IA) e quantitativa (indicadores), elevando maturidade profissional do produto.
