@@ -158,3 +158,53 @@ void it("GET /v1/brokers/live-quote retorna placeholder para IQ Option", async (
   assert.equal(body.data.market.symbol, null);
   assert.match(body.data.notes, /IQ Option/);
 });
+
+void it("GET /v1/brokers/live-quote retorna erro quando Binance esta indisponivel", async () => {
+  let fetchCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    fetchCalls += 1;
+    return Promise.reject(new Error(`Binance unavailable for ${String(input)}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/brokers/live-quote?broker=binance&assetId=bitcoin",
+  });
+
+  assert.equal(response.statusCode, 503);
+  assert.ok(fetchCalls >= 1);
+
+  const body = response.json<{
+    error: {
+      code: string;
+      message: string;
+    };
+    status: "error";
+  }>();
+
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "BINANCE_UNAVAILABLE");
+  assert.equal(body.error.message, "Binance request failed");
+});
+
+void it("GET /v1/brokers/live-quote valida broker invalido", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/brokers/live-quote?broker=kraken&assetId=bitcoin",
+  });
+
+  assert.equal(response.statusCode, 400);
+
+  const body = response.json<{
+    error: {
+      code: string;
+      message: string;
+    };
+    status: "error";
+  }>();
+
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "VALIDATION_ERROR");
+  assert.equal(body.error.message, "Invalid payload");
+});

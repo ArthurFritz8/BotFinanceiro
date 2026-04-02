@@ -419,3 +419,158 @@ void it("GET /v1/crypto/live-chart retorna snapshot ao vivo com Binance", async 
   assert.equal(body.data.live?.source, "binance");
   assert.equal(body.data.live?.symbol, "BTCUSDT");
 });
+
+void it("GET /v1/crypto/live-chart usa cache stale quando refresh live falha", async () => {
+  const staleCacheKey = "crypto:chart:live:bitcoin:usd:24h";
+
+  memoryCache.set(
+    staleCacheKey,
+    {
+      assetId: "bitcoin",
+      currency: "usd",
+      fetchedAt: "2026-04-02T12:00:00.000Z",
+      insights: {
+        atrPercent: 1.2,
+        changePercent: 2.1,
+        confidenceScore: 71,
+        currentPrice: 65200,
+        emaFast: 65120,
+        emaSlow: 65010,
+        highPrice: 65400,
+        longMovingAverage: 64980,
+        lowPrice: 64010,
+        macdHistogram: 0.42,
+        momentumPercent: 0.8,
+        resistanceLevel: 65380,
+        rsi14: 58.2,
+        shortMovingAverage: 65110,
+        supportLevel: 64690,
+        tradeAction: "buy",
+        tradeLevels: {
+          entryZoneHigh: 65280,
+          entryZoneLow: 65080,
+          stopLoss: 64690,
+          takeProfit1: 65620,
+          takeProfit2: 66080,
+        },
+        trend: "bullish",
+        volatilityPercent: 2.3,
+      },
+      live: {
+        changePercent24h: 1.73,
+        source: "binance",
+        symbol: "BTCUSDT",
+        volume24h: 65234.11,
+      },
+      mode: "live",
+      points: [
+        {
+          close: 65010,
+          high: 65120,
+          low: 64960,
+          open: 65000,
+          timestamp: "2026-04-02T11:50:00.000Z",
+          volume: 1200,
+        },
+        {
+          close: 65200,
+          high: 65320,
+          low: 65110,
+          open: 65120,
+          timestamp: "2026-04-02T12:00:00.000Z",
+          volume: 1300,
+        },
+      ],
+      provider: "binance",
+      range: "24h",
+    },
+    -1,
+    45,
+  );
+
+  let fetchCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    fetchCalls += 1;
+    return Promise.reject(new Error(`Network down for ${String(input)}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/live-chart?assetId=bitcoin&range=24h",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.ok(fetchCalls >= 1);
+
+  const body = response.json<{
+    data: {
+      cache: {
+        stale: boolean;
+        state: string;
+      };
+      live: {
+        symbol: string;
+      } | null;
+      mode: "live";
+      provider: "binance";
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.mode, "live");
+  assert.equal(body.data.provider, "binance");
+  assert.equal(body.data.cache.state, "stale");
+  assert.equal(body.data.cache.stale, true);
+  assert.equal(body.data.live?.symbol, "BTCUSDT");
+});
+
+void it("GET /v1/crypto/chart nao usa fallback Binance para moeda nao-USD", async () => {
+  let coinGeckoCalls = 0;
+  let binanceCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("api.coingecko.com/api/v3/coins/bitcoin/market_chart")) {
+      coinGeckoCalls += 1;
+
+      return Promise.resolve(
+        new Response(JSON.stringify({ error: "asset not found" }), {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 404,
+        }),
+      );
+    }
+
+    if (requestUrl.includes("api.binance.com")) {
+      binanceCalls += 1;
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/chart?assetId=bitcoin&currency=brl&range=24h",
+  });
+
+  assert.equal(response.statusCode, 502);
+  assert.equal(coinGeckoCalls, 1);
+  assert.equal(binanceCalls, 0);
+
+  const body = response.json<{
+    error: {
+      code: string;
+      message: string;
+    };
+    status: "error";
+  }>();
+
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "COINGECKO_BAD_STATUS");
+  assert.equal(body.error.message, "CoinGecko returned a non-success status");
+});

@@ -35,7 +35,204 @@
         </div>
       </section>
 
-      <section class="layout-grid reveal reveal-delay-1">
+      <section class="chart-desk reveal reveal-delay-1" aria-labelledby="chart-lab-title">
+        <div class="chart-desk-top">
+          <div>
+            <p class="eyebrow chart-eyebrow">Trading Workspace</p>
+            <h2 id="chart-lab-title">Chart Lab Pro</h2>
+            <p class="chart-desk-subtitle">
+              Grafico interativo profissional com candles, overlays tecnicos e leitura tática em tempo
+              real.
+            </p>
+          </div>
+          <span class="chart-lab-tag">Live Desk</span>
+        </div>
+
+        <form id="chart-controls" class="chart-controls">
+          <div class="chart-control-field">
+            <label for="chart-asset">Ativo</label>
+            <select id="chart-asset" name="assetId">
+              <option value="bitcoin">Bitcoin (BTC)</option>
+              <option value="ethereum">Ethereum (ETH)</option>
+              <option value="solana">Solana (SOL)</option>
+              <option value="dogecoin">Dogecoin (DOGE)</option>
+              <option value="xrp">XRP</option>
+              <option value="cardano">Cardano (ADA)</option>
+              <option value="chainlink">Chainlink (LINK)</option>
+              <option value="avalanche-2">Avalanche (AVAX)</option>
+              <option value="binancecoin">BNB</option>
+              <option value="uniswap">Uniswap (UNI)</option>
+              <option value="aave">Aave (AAVE)</option>
+            </select>
+          </div>
+
+          <div class="chart-control-field">
+            <label for="chart-mode">Modo</label>
+            <select id="chart-mode" name="mode">
+              <option value="delayed" selected>Delay (mais estavel)</option>
+              <option value="live">Ao vivo (Binance)</option>
+            </select>
+          </div>
+
+          <div class="chart-control-field">
+            <label for="chart-range">Janela</label>
+            <select id="chart-range" name="range">
+              <option value="24h">24h</option>
+              <option value="7d" selected>7 dias</option>
+              <option value="30d">30 dias</option>
+              <option value="90d">90 dias</option>
+              <option value="1y">1 ano</option>
+            </select>
+          </div>
+
+          <div class="chart-control-field">
+            <label for="chart-style">Visual</label>
+            <select id="chart-style" name="style">
+              <option value="candles" selected>Candles</option>
+              <option value="line">Linha</option>
+              <option value="area">Area</option>
+              <option value="bars">Barras</option>
+              <option value="heikin">Heikin Ashi</option>
+            </select>
+          </div>
+
+          <div class="chart-control-field">
+            <label for="chart-exchange">Corretora</label>
+            <select id="chart-exchange" name="exchange">
+              <option value="BINANCE" selected>Binance</option>
+              <option value="BYBIT">Bybit</option>
+              <option value="COINBASE">Coinbase</option>
+              <option value="KRAKEN">Kraken</option>
+              <option value="OKX">OKX</option>
+            </select>
+          </div>
+
+          <div class="chart-control-field">
+            <label for="chart-auto-refresh">Auto-refresh</label>
+            <select id="chart-auto-refresh" name="autoRefresh">
+              <option value="5000" selected>5s</option>
+              <option value="10000">10s</option>
+              <option value="20000">20s</option>
+              <option value="0">Manual</option>
+            </select>
+          </div>
+
+          <div class="chart-control-field chart-control-field-wide">
+            <label for="chart-symbol">Simbolo terminal</label>
+            <input
+              id="chart-symbol"
+              name="terminalSymbol"
+              type="text"
+              value="BTCUSDT"
+              list="chart-symbol-options"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Ex.: BTCUSDT"
+            />
+            <datalist id="chart-symbol-options">
+              <option value="BTCUSDT"></option>
+              <option value="ETHUSDT"></option>
+              <option value="SOLUSDT"></option>
+              <option value="XRPUSDT"></option>
+              <option value="ADAUSDT"></option>
+              <option value="DOGEUSDT"></option>
+              <option value="LINKUSDT"></option>
+              <option value="AVAXUSDT"></option>
+              <option value="BNBUSDT"></option>
+              <option value="AAVEUSDT"></option>
+              <option value="UNIUSDT"></option>
+              <option value="MATICUSDT"></option>
+              <option value="LTCUSDT"></option>
+              <option value="TRXUSDT"></option>
+              <option value="DOTUSDT"></option>
+            </datalist>
+          </div>
+
+          <div class="chart-control-toggles">
+            <label class="toggle-chip" for="chart-overlay-ema">
+              <input id="chart-overlay-ema" type="checkbox" checked />
+              EMAs 9/21
+            </label>
+            <label class="toggle-chip" for="chart-overlay-levels">
+              <input id="chart-overlay-levels" type="checkbox" checked />
+              Niveis taticos
+            </label>
+          </div>
+
+          <div class="chart-buttons">
+            <button type="submit" id="chart-refresh-button">Atualizar grafico</button>
+            <button type="button" id="chart-fit-button" class="chart-secondary-button">
+              Recentrar
+            </button>
+          </div>
+        </form>
+
+        <div class="terminal-switches">
+          <div id="chart-view-switch" class="chart-view-switch" role="tablist" aria-label="Modo do grafico">
+            <button type="button" class="view-chip is-active" data-view="tv" role="tab">
+              Terminal PRO
+            </button>
+            <button type="button" class="view-chip" data-view="copilot" role="tab">
+              Insights IA
+            </button>
+          </div>
+
+          <div id="chart-interval-switch" class="chart-interval-switch" aria-label="Intervalos rapidos">
+            <button type="button" class="interval-chip" data-interval="1">1m</button>
+            <button type="button" class="interval-chip" data-interval="5">5m</button>
+            <button type="button" class="interval-chip is-active" data-interval="60">1h</button>
+            <button type="button" class="interval-chip" data-interval="240">4h</button>
+            <button type="button" class="interval-chip" data-interval="1D">1D</button>
+            <button type="button" class="interval-chip" data-interval="1W">1W</button>
+          </div>
+        </div>
+
+        <p class="terminal-helper">
+          No modo Terminal PRO, use a barra lateral para desenhar linhas, texto, fibo, canais e outras
+          anotacoes como nas corretoras.
+        </p>
+        <p class="terminal-shortcuts">
+          Atalhos: Ctrl+K simbolo • Alt+1..6 intervalo • Alt+V modo • Alt+R refresh • Alt+F recenter
+        </p>
+
+        <div class="chart-toolbar">
+          <div id="chart-status" class="chart-status">Carregando grafico...</div>
+          <div id="chart-legend" class="chart-legend">Passe o mouse no grafico para detalhes.</div>
+        </div>
+
+        <div class="chart-workbench">
+          <div class="chart-main-pane">
+            <div id="tv-stage" class="tv-stage" aria-label="Terminal de grafico profissional">
+              <div id="tv-widget" class="tv-widget"></div>
+            </div>
+
+            <div id="chart-copilot-stage" class="chart-stage is-hidden">
+              <div id="chart-viewport" class="chart-viewport" aria-label="Grafico interativo de preco"></div>
+            </div>
+          </div>
+
+          <aside class="market-watch" aria-label="Watchlist">
+            <div class="market-watch-header">
+              <div>
+                <h3>Watchlist</h3>
+                <span id="watchlist-status" class="watchlist-status">Aguardando sync</span>
+              </div>
+              <button type="button" id="watchlist-refresh">Sync</button>
+            </div>
+            <div id="watchlist-grid" class="watchlist-grid"></div>
+          </aside>
+        </div>
+
+        <div id="chart-metrics" class="chart-metrics"></div>
+
+        <div class="chart-actions-row">
+          <button type="button" id="chart-analyze-button" class="chart-analyze-button">
+            Pedir analise tecnica no chat
+          </button>
+        </div>
+      </section>
+
+      <section class="layout-grid reveal reveal-delay-2">
         <aside class="insights-card">
           <h2>Atalhos Inteligentes</h2>
           <p>
@@ -71,57 +268,6 @@
               Panorama macro global
             </button>
           </div>
-
-          <section class="chart-lab-card" aria-labelledby="chart-lab-title">
-            <div class="chart-lab-header">
-              <h3 id="chart-lab-title">Chart Lab</h3>
-              <span class="chart-lab-tag">Novo</span>
-            </div>
-
-            <p class="chart-lab-subtitle">
-              Visual profissional de preco + sinais tecnicos para analise com o Copiloto.
-            </p>
-
-            <form id="chart-controls" class="chart-controls">
-              <label for="chart-asset">Ativo</label>
-              <select id="chart-asset" name="assetId">
-                <option value="bitcoin">Bitcoin (BTC)</option>
-                <option value="ethereum">Ethereum (ETH)</option>
-                <option value="solana">Solana (SOL)</option>
-                <option value="dogecoin">Dogecoin (DOGE)</option>
-                <option value="xrp">XRP</option>
-              </select>
-
-              <label for="chart-mode">Modo</label>
-              <select id="chart-mode" name="mode">
-                <option value="delayed" selected>Delay (mais estavel)</option>
-                <option value="live">Ao vivo (Binance)</option>
-              </select>
-
-              <label for="chart-range">Janela</label>
-              <select id="chart-range" name="range">
-                <option value="24h">24h</option>
-                <option value="7d" selected>7 dias</option>
-                <option value="30d">30 dias</option>
-                <option value="90d">90 dias</option>
-                <option value="1y">1 ano</option>
-              </select>
-
-              <button type="submit" id="chart-refresh-button">Atualizar grafico</button>
-            </form>
-
-            <div id="chart-status" class="chart-status">Carregando grafico...</div>
-
-            <div class="chart-canvas-wrap">
-              <canvas id="chart-canvas" width="560" height="220" aria-label="Grafico de preco"></canvas>
-            </div>
-
-            <div id="chart-metrics" class="chart-metrics"></div>
-
-            <button type="button" id="chart-analyze-button" class="chart-analyze-button">
-              Pedir analise tecnica no chat
-            </button>
-          </section>
 
           <div class="stack-note">
             <h3>Stack em uso</h3>

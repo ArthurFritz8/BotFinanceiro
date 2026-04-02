@@ -101,3 +101,9 @@ O sistema ja possuia tool calling read-only e protecao de resiliencia para CoinG
 29. Copiloto ganhou nova tool `get_broker_live_quote` para perguntas sobre corretoras e conectividade.
 30. Fallback por intencao do Copiloto foi expandido para consultas de corretora (ex.: Binance/IQ Option), reduzindo respostas vazias quando nao houver tool call.
 31. Cobertura de testes ampliada para rotas de corretora e fluxo de tool calling/fallback de corretoras no Copiloto.
+32. Chart Lab evoluiu para persistir preferencias locais (ativo, modo, range, estilo, exchange, simbolo, overlays, intervalo e view mode) via localStorage, mantendo continuidade de uso entre sessoes.
+33. Watchlist passou a sincronizar cotacao live por `GET /v1/brokers/live-quote` com fallback automatico para `GET /v1/crypto/spot-price` quando necessario.
+34. Introduzido fallback resiliente no frontend para o grafico: quando `live-chart` falha, o workspace alterna automaticamente para snapshot `delayed` sem interromper a leitura tecnica.
+35. Operacao do terminal ganhou atalhos de produtividade (Ctrl+K, Alt+1..6, Alt+V, Alt+R, Alt+F) para reduzir friccao em fluxo profissional.
+36. Auto-refresh da watchlist foi desacoplado e calibrado com intervalo minimo para evitar burst de requisicoes, mantendo responsividade sem degradar estabilidade.
+37. Interface da watchlist foi refinada com status de sincronizacao, indicador de fonte (live/fallback) e variacao visual por direcao de mercado.
