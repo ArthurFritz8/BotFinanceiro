@@ -74,3 +74,7 @@ O sistema ja possuia tool calling read-only e protecao de resiliencia para CoinG
 2. Incluido fallback deterministico para pedido de plano de monitoramento com 3 checkpoints.
 3. Adicionado retry com backoff no adapter OpenRouter para reduzir impacto de falhas transientes de rede/provider.
 4. Cobertura de testes ampliada para os novos cenarios de fallback.
+5. Adicionado retry com backoff no adapter CoinCap para reduzir falhas transientes de mercado em consultas spot e panorama.
+6. Ajustada politica de logging do fallback CoinGecko -> CoinCap para classificar como `info` eventos retryable (ex.: `429`, circuito aberto), reduzindo ruido de logs em producao.
+7. Ajustado scheduler para classificar falhas retryable de provider como `info`, mantendo `warn` para falhas nao transientes.
+8. Fortalecida tipagem do guard de erro retryable no scheduler para manter conformidade com lint estrito sem alterar comportamento funcional.

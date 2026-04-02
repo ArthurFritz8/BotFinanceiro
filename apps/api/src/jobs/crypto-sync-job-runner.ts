@@ -126,6 +126,24 @@ function isCoinGeckoRateLimitError(error: unknown): boolean {
   return responseStatus === 429;
 }
 
+function isRetryableProviderError(error: unknown): error is AppError {
+  if (!(error instanceof AppError)) {
+    return false;
+  }
+
+  if (typeof error.details !== "object" || error.details === null) {
+    return false;
+  }
+
+  const retryable = (error.details as Record<string, unknown>).retryable;
+
+  if (retryable !== true) {
+    return false;
+  }
+
+  return error.code.startsWith("COINGECKO_") || error.code.startsWith("COINCAP_");
+}
+
 export class CryptoSyncJobRunner {
   private readonly budgetGuard = new DailyBudgetGuard(env.COINGECKO_DAILY_BUDGET);
   private readonly rateLimiter = new TokenBucketRateLimiter(
@@ -384,7 +402,7 @@ export class CryptoSyncJobRunner {
 
         this.budgetGuard.consume(1);
         synced += 1;
-      } catch (error) {
+      } catch (error: unknown) {
         this.budgetGuard.consume(1);
         failed += 1;
 
@@ -397,6 +415,22 @@ export class CryptoSyncJobRunner {
               scope: schedule.scope,
             },
             "CoinGecko rate limit during scheduler refresh",
+          );
+
+          processedAssets += 1;
+          await sleep(this.getInterRequestDelayMs());
+          continue;
+        }
+
+        if (isRetryableProviderError(error)) {
+          logger.info(
+            {
+              assetId,
+              code: error.code,
+              currency: env.CRYPTO_SYNC_TARGET_CURRENCY,
+              scope: schedule.scope,
+            },
+            "Transient provider failure during scheduler refresh",
           );
 
           processedAssets += 1;

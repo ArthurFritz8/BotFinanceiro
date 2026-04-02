@@ -32,6 +32,32 @@ interface CoinCapSpotPriceData {
 
 type UnifiedSpotPriceData = SpotPriceData | CoinCapSpotPriceData;
 
+interface RetryableErrorDetails {
+  responseStatus?: number;
+  retryable?: boolean;
+}
+
+function hasRetryableFlag(details: unknown): details is RetryableErrorDetails {
+  if (typeof details !== "object" || details === null) {
+    return false;
+  }
+
+  const detailsRecord = details as Record<string, unknown>;
+  const hasRetryable = typeof detailsRecord.retryable === "boolean";
+  const hasResponseStatus =
+    detailsRecord.responseStatus === undefined || typeof detailsRecord.responseStatus === "number";
+
+  return hasRetryable || hasResponseStatus;
+}
+
+function extractResponseStatus(error: AppError): number | undefined {
+  if (!hasRetryableFlag(error.details)) {
+    return undefined;
+  }
+
+  return error.details.responseStatus;
+}
+
 function buildCacheKey(assetId: string, currency: string): string {
   return `crypto:spot-price:${assetId}:${currency}`;
 }
@@ -123,14 +149,26 @@ export class CryptoSpotPriceService {
         throw error;
       }
 
-      logger.warn(
-        {
-          assetId: input.assetId,
-          currency: input.currency,
-          err: error,
-        },
-        "CoinGecko failed, attempting CoinCap fallback",
-      );
+      if (this.shouldLogFallbackAsInfo(error)) {
+        logger.info(
+          {
+            assetId: input.assetId,
+            currency: input.currency,
+            sourceErrorCode: error instanceof AppError ? error.code : "UNKNOWN",
+            sourceResponseStatus: error instanceof AppError ? extractResponseStatus(error) : undefined,
+          },
+          "CoinGecko transient failure, attempting CoinCap fallback",
+        );
+      } else {
+        logger.warn(
+          {
+            assetId: input.assetId,
+            currency: input.currency,
+            err: error,
+          },
+          "CoinGecko failed, attempting CoinCap fallback",
+        );
+      }
 
       const coinCapSpot = await this.coinCapAdapter.getSpotPriceUsd({
         assetId: input.assetId,
@@ -156,5 +194,25 @@ export class CryptoSpotPriceService {
     }
 
     return error.code.startsWith("COINGECKO_");
+  }
+
+  private shouldLogFallbackAsInfo(error: unknown): boolean {
+    if (!(error instanceof AppError)) {
+      return false;
+    }
+
+    if (error.code === "COINGECKO_CIRCUIT_OPEN") {
+      return true;
+    }
+
+    if (error.code === "COINGECKO_BAD_STATUS" && extractResponseStatus(error) === 429) {
+      return true;
+    }
+
+    if (hasRetryableFlag(error.details)) {
+      return error.details.retryable === true;
+    }
+
+    return false;
   }
 }

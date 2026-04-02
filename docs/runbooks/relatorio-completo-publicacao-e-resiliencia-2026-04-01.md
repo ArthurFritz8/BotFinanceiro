@@ -319,3 +319,30 @@ Objetivo do aditivo:
 1. `npm run test -w @botfinanceiro/api`: `tests: 36`, `pass: 36`, `fail: 0`.
 2. `npm run check`: concluido sem erros.
 3. `npm run guard:docs`: validado apos atualizar este documento.
+
+## Aditivo de resiliencia de scheduler e logs operacionais (2026-04-02)
+
+### Contexto observado em producao
+
+1. O servico estava Live e funcional, mas com logs em vermelho durante ciclos de scheduler.
+2. Ocorrencias principais:
+- CoinGecko com `429` (rate limit)
+- CoinCap com indisponibilidade transitoria (`COINCAP_UNAVAILABLE`)
+3. Esses cenarios sao esperados em integracoes externas e nao devem ser tratados como erro operacional critico quando classificados como retryable.
+
+### Correcao aplicada
+
+1. `CoinCapMarketDataAdapter` passou a usar retry com backoff exponencial para chamadas HTTP transientes.
+2. `CryptoSpotPriceService` passou a registrar fallback CoinGecko -> CoinCap como `info` quando a falha de origem e retryable (ex.: 429/circuit open), mantendo `warn` para falhas nao transientes.
+3. `CryptoSyncJobRunner` passou a registrar como `info` falhas retryable de providers durante refresh do scheduler, reduzindo ruído de logs sem mascarar erro real.
+4. Tipagem do guard de erro retryable no scheduler foi fortalecida para remover uso inseguro de erro desconhecido em lint (`no-unsafe-assignment`).
+
+### Evidencias da correcao
+
+1. `npm run check`: concluido com sucesso (lint + typecheck).
+2. `npm run guard:docs`: concluido com sucesso apos este aditivo.
+
+### Resultado esperado
+
+1. Menos alertas falsos em observabilidade de producao para falhas transientes de provider.
+2. Preservacao da telemetria util para troubleshooting com menor ruido visual em operacao diaria.

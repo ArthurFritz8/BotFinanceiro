@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
+import { retryWithExponentialBackoff } from "../../shared/resilience/retry-with-backoff.js";
 
 const coinCapAssetSchema = z.object({
   changePercent24Hr: z.string().optional(),
@@ -64,6 +65,35 @@ function normalizeMatchToken(value: string): string {
 
 function isRetryableStatusCode(statusCode: number): boolean {
   return statusCode === 408 || statusCode === 425 || statusCode === 429 || statusCode >= 500;
+}
+
+interface RetryableErrorDetails {
+  retryable?: boolean;
+}
+
+function hasRetryableFlag(details: unknown): details is RetryableErrorDetails {
+  if (typeof details !== "object" || details === null) {
+    return false;
+  }
+
+  const detailsRecord = details as Record<string, unknown>;
+  return typeof detailsRecord.retryable === "boolean";
+}
+
+function shouldRetryCoinCapRequest(error: unknown): boolean {
+  if (!(error instanceof AppError)) {
+    return true;
+  }
+
+  if (error.code === "COINCAP_UNAVAILABLE") {
+    return true;
+  }
+
+  if (error.code === "COINCAP_BAD_STATUS" && hasRetryableFlag(error.details)) {
+    return error.details.retryable === true;
+  }
+
+  return false;
 }
 
 function buildSpotSearchTerm(assetId: string): string {
@@ -284,6 +314,18 @@ export class CoinCapMarketDataAdapter {
   }
 
   private async requestJson(path: string): Promise<unknown> {
+    return retryWithExponentialBackoff(
+      () => this.requestJsonOnce(path),
+      {
+        attempts: 3,
+        baseDelayMs: 250,
+        jitterPercent: 20,
+        shouldRetry: shouldRetryCoinCapRequest,
+      },
+    );
+  }
+
+  private async requestJsonOnce(path: string): Promise<unknown> {
     let response: Response;
 
     try {
