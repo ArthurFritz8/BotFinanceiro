@@ -19,6 +19,10 @@ import {
   type CopilotChatSessionHistory,
 } from "../../../shared/observability/copilot-chat-audit-store.js";
 import {
+  BrokerMarketService,
+  type BrokerName,
+} from "../../brokers/application/broker-market-service.js";
+import {
   CryptoChartService,
   type CryptoChartRange,
   type CryptoTrend,
@@ -45,6 +49,7 @@ export interface CopilotChatInput {
 const openRouterChatAdapter = new OpenRouterChatAdapter();
 const coinCapMarketDataAdapter = new CoinCapMarketDataAdapter();
 const yahooMarketDataAdapter = new YahooMarketDataAdapter();
+const brokerMarketService = new BrokerMarketService();
 const cryptoChartService = new CryptoChartService();
 const cryptoSpotPriceService = new CryptoSpotPriceService();
 const cryptoSyncPolicyService = new CryptoSyncPolicyService();
@@ -55,6 +60,7 @@ const copilotDefaultSystemPrompt = [
   "Quando a pergunta envolver resumo, panorama ou contexto do mercado cripto, priorize a tool get_crypto_market_overview.",
   "Quando a pergunta envolver preco ou comparacao entre ativos, use get_crypto_spot_price ou get_crypto_multi_spot_price.",
   "Quando a pergunta envolver grafico, tendencia, suporte/resistencia ou analise tecnica de cripto, use get_crypto_chart_insights.",
+  "Quando a pergunta envolver corretoras (Binance/IQ Option), use get_broker_live_quote para informar disponibilidade e cotacao ao vivo quando possivel.",
   "Quando a pergunta pedir comprar/vender, responda com sinal tatico informativo (buy/sell/wait), confianca e niveis de risco, sem tratar como recomendacao de investimento.",
   "Quando a pergunta envolver indices, acoes, cambio, juros ou commodities, use get_financial_market_snapshot.",
   "Quando a pergunta envolver risco de curto prazo, entregue analise por fatores (volatilidade, liquidez, macro e operacao), sem recomendacao de investimento.",
@@ -101,6 +107,11 @@ const copilotFinancialMarketSnapshotToolInputSchema = z.object({
     .min(1)
     .max(12)
     .optional(),
+});
+
+const copilotBrokerLiveQuoteToolInputSchema = z.object({
+  assetId: z.string().trim().min(1).default("bitcoin"),
+  broker: z.enum(["binance", "iqoption"]).default("binance"),
 });
 
 type FinancialMarketPreset = z.infer<typeof copilotFinancialMarketSnapshotToolInputSchema>["preset"];
@@ -279,6 +290,26 @@ function hasChartAnalysisIntent(message: string): boolean {
   return (asksForChart || asksDirection) && mentionsAsset;
 }
 
+function hasBrokerIntegrationIntent(message: string): boolean {
+  const normalizedMessage = normalizeText(message);
+  const mentionsBroker =
+    normalizedMessage.includes("corretora") ||
+    normalizedMessage.includes("broker") ||
+    normalizedMessage.includes("binance") ||
+    normalizedMessage.includes("iq option") ||
+    normalizedMessage.includes("iqoption");
+  const asksForLiveQuote =
+    normalizedMessage.includes("cotacao") ||
+    normalizedMessage.includes("cotacao ao vivo") ||
+    normalizedMessage.includes("preco ao vivo") ||
+    normalizedMessage.includes("preco") ||
+    normalizedMessage.includes("integracao") ||
+    normalizedMessage.includes("conectar") ||
+    normalizedMessage.includes("api");
+
+  return mentionsBroker && asksForLiveQuote;
+}
+
 function hasExactAlias(normalizedMessage: string, alias: string): boolean {
   const normalizedAlias = normalizeText(alias);
 
@@ -369,6 +400,16 @@ function resolveChartModeFromMessage(message: string): "delayed" | "live" {
   }
 
   return "delayed";
+}
+
+function resolveBrokerFromMessage(message: string): BrokerName {
+  const normalizedMessage = normalizeText(message);
+
+  if (normalizedMessage.includes("iq option") || normalizedMessage.includes("iqoption")) {
+    return "iqoption";
+  }
+
+  return "binance";
 }
 
 function hasGenericLimitationAnswer(answer: string): boolean {
@@ -823,6 +864,32 @@ const copilotTools: OpenRouterToolDefinition[] = [
   },
   {
     description:
+      "Consulta status de integracao e cotacao ao vivo por corretora (Binance/IQ Option). Use para perguntas sobre corretoras, conectividade e preco em broker.",
+    inputSchema: copilotBrokerLiveQuoteToolInputSchema,
+    name: "get_broker_live_quote",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        assetId: {
+          default: "bitcoin",
+          description: "Ativo cripto para consulta no broker (ex.: bitcoin, ethereum, solana)",
+          type: "string",
+        },
+        broker: {
+          default: "binance",
+          description: "Corretora alvo para cotacao: binance ou iqoption",
+          enum: ["binance", "iqoption"],
+          type: "string",
+        },
+      },
+      type: "object",
+    },
+    run: (input: z.infer<typeof copilotBrokerLiveQuoteToolInputSchema>) => {
+      return brokerMarketService.getLiveQuote(input);
+    },
+  },
+  {
+    description:
       "Retorna snapshot de mercado global (indices, cambio, juros, commodities e cripto) via Yahoo Finance. Use para contexto macro e comparativo entre classes de ativos.",
     inputSchema: copilotFinancialMarketSnapshotToolInputSchema,
     name: "get_financial_market_snapshot",
@@ -1031,6 +1098,24 @@ export class CopilotChatService {
             err: error,
           },
           "Failed to build chart analysis fallback",
+        );
+      }
+    }
+
+    if (hasBrokerIntegrationIntent(input.message)) {
+      try {
+        const fallbackAnswer = await this.buildBrokerIntegrationFallback(input.message);
+
+        return {
+          ...completion,
+          answer: fallbackAnswer,
+        };
+      } catch (error) {
+        logger.warn(
+          {
+            err: error,
+          },
+          "Failed to build broker integration fallback",
         );
       }
     }
@@ -1262,6 +1347,32 @@ export class CopilotChatService {
       `Faixa tecnica: suporte ${formatSpotPrice(chart.insights.supportLevel, chart.currency)} | resistencia ${formatSpotPrice(chart.insights.resistanceLevel, chart.currency)} | entrada ${formatSpotPrice(chart.insights.tradeLevels.entryZoneLow, chart.currency)} - ${formatSpotPrice(chart.insights.tradeLevels.entryZoneHigh, chart.currency)} | stop ${formatSpotPrice(chart.insights.tradeLevels.stopLoss, chart.currency)} | TP1 ${formatSpotPrice(chart.insights.tradeLevels.takeProfit1, chart.currency)} | TP2 ${formatSpotPrice(chart.insights.tradeLevels.takeProfit2, chart.currency)}.`,
       `EMA rapida: ${formatSpotPrice(chart.insights.emaFast, chart.currency)} | EMA lenta: ${formatSpotPrice(chart.insights.emaSlow, chart.currency)} | provider ${chart.provider}${liveSummary} | cache ${chart.cache.state}${chart.cache.stale ? " (stale)" : ""}.`,
       "Leitura profissional: combine sinais tecnicos com gestao de risco, tamanho de posicao e confirmacao de liquidez antes de qualquer execucao.",
+    ].join("\n");
+  }
+
+  private async buildBrokerIntegrationFallback(message: string): Promise<string> {
+    const broker = resolveBrokerFromMessage(message);
+    const assetId = resolvePrimaryAssetIdForChart(message);
+    const quote = await brokerMarketService.getLiveQuote({
+      assetId,
+      broker,
+    });
+
+    if (quote.market.price === null) {
+      return [
+        `Broker ${broker.toUpperCase()} mapeado no bot, mas ainda em modo ${quote.status}.`,
+        `Ativo consultado: ${capitalizeAssetId(quote.assetId)} | cotacao ao vivo indisponivel nesta build.`,
+        `Status tecnico: ${quote.notes}`,
+        "Proximo passo de integracao: habilitar bridge privada autenticada da corretora para saldo, ordens e stream de preco em tempo real.",
+      ].join("\n");
+    }
+
+    return [
+      `Cotacao via broker ${quote.broker.toUpperCase()} para ${capitalizeAssetId(quote.assetId)}.`,
+      `Preco: ${formatSpotPrice(quote.market.price, quote.currency)} | 24h: ${formatPercent(quote.market.changePercent24h)} | volume 24h: ${formatCompactUsd(quote.market.volume24h)} | simbolo: ${quote.market.symbol ?? "n/d"}.`,
+      `Capacidades disponiveis nesta integracao: liveQuote=${quote.capabilities.liveQuote ? "sim" : "nao"}, orderExecution=${quote.capabilities.orderExecution ? "sim" : "nao"}, accountBalance=${quote.capabilities.accountBalance ? "sim" : "nao"}.`,
+      `Observacao operacional: ${quote.notes}`,
+      "Leitura profissional: use cotacao de broker como referencia de execucao e confirme liquidez/spread antes de qualquer decisao.",
     ].join("\n");
   }
 

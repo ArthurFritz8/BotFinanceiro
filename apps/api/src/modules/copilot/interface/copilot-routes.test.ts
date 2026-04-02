@@ -885,6 +885,206 @@ void it("POST /v1/copilot/chat aplica fallback live para pergunta de comprar/ven
   assert.doesNotMatch(body.data.answer, /Nao posso fornecer recomendacao/);
 });
 
+void it("POST /v1/copilot/chat aplica fallback de corretora para IQ Option", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let openRouterCalls = 0;
+  let fetchCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    fetchCalls += 1;
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "Nao tenho informacoes suficientes sobre a corretora solicitada.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-broker-fallback-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 14,
+              prompt_tokens: 24,
+              total_tokens: 38,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "A integracao da corretora IQ Option para bitcoin esta funcionando?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 1);
+  assert.equal(fetchCalls, 1);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-broker-fallback-001");
+  assert.match(body.data.answer, /IQOPTION/);
+  assert.match(body.data.answer, /requires_configuration/);
+  assert.match(body.data.answer, /bridge privada/);
+  assert.doesNotMatch(body.data.answer, /Nao tenho informacoes suficientes/);
+});
+
+void it("POST /v1/copilot/chat executa tool de cotacao por corretora", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let openRouterCalls = 0;
+  let tickerCalls = 0;
+  const capturedOpenRouterBodies: string[] = [];
+
+  globalThis.fetch = ((input, init) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+      capturedOpenRouterBodies.push(typeof init?.body === "string" ? init.body : "");
+
+      if (openRouterCalls === 1) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content: null,
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        function: {
+                          arguments: '{"broker":"binance","assetId":"bitcoin"}',
+                          name: "get_broker_live_quote",
+                        },
+                        id: "call_broker_1",
+                        type: "function",
+                      },
+                    ],
+                  },
+                },
+              ],
+              id: "gen-tool-broker-001",
+              model: "google/gemini-1.5-flash",
+              usage: {
+                completion_tokens: 18,
+                prompt_tokens: 27,
+                total_tokens: 45,
+              },
+            }),
+            {
+              headers: {
+                "content-type": "application/json",
+              },
+              status: 200,
+            },
+          ),
+        );
+      }
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "Binance responde com cotacao ao vivo e IQ Option permanece em fase de configuracao.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-tool-broker-002",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 22,
+              prompt_tokens: 41,
+              total_tokens: 63,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.binance.com/api/v3/ticker/24hr") && requestUrl.includes("symbol=BTCUSDT")) {
+      tickerCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            lastPrice: "65650.7",
+            priceChangePercent: "1.62",
+            symbol: "BTCUSDT",
+            volume: "70500.2",
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Traga a cotacao da corretora Binance para bitcoin.",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 2);
+  assert.equal(tickerCalls, 1);
+  assert.match(capturedOpenRouterBodies[0] ?? "", /"name":"get_broker_live_quote"/);
+  assert.match(capturedOpenRouterBodies[1] ?? "", /"name":"get_broker_live_quote"/);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(
+    body.data.answer,
+    "Binance responde com cotacao ao vivo e IQ Option permanece em fase de configuracao.",
+  );
+  assert.deepEqual(body.data.toolCallsUsed, ["get_broker_live_quote"]);
+  assert.equal(body.data.responseId, "gen-tool-broker-002");
+  assert.equal(body.data.usage.totalTokens, 63);
+});
+
 void it("POST /v1/copilot/chat executa snapshot financeiro global com tool calling", async () => {
   mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
 

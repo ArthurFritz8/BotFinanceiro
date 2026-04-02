@@ -157,6 +157,7 @@ Tool calling read-only habilitado no Copiloto:
 5. `get_financial_market_snapshot`
 6. `get_operational_health`
 7. `get_crypto_sync_policy`
+8. `get_broker_live_quote`
 
 Observacao tecnica da tool de grafico:
 
@@ -170,6 +171,7 @@ Cobertura de consultas apos esta evolucao:
 
 1. cripto (preco, comparativo, resumo, risco de curto prazo por fatores, analise de grafico)
 2. mercado global (indices, cambio, juros, commodities e simbolos customizaveis via Yahoo)
+3. corretoras (status de integracao e cotacao ao vivo por broker, com Binance ativa e IQ Option mapeada para configuracao)
 
 Endpoint tecnico para grafico:
 
@@ -182,6 +184,20 @@ Endpoint tecnico para grafico ao vivo:
 ```bash
 curl "http://localhost:3000/v1/crypto/live-chart?assetId=bitcoin&range=24h"
 ```
+
+Endpoints tecnicos para corretoras:
+
+```bash
+curl "http://localhost:3000/v1/brokers/catalog"
+curl "http://localhost:3000/v1/brokers/live-quote?broker=binance&assetId=bitcoin"
+curl "http://localhost:3000/v1/brokers/live-quote?broker=iqoption&assetId=bitcoin"
+```
+
+Variaveis de ambiente para conectores de corretora (opcional):
+
+1. `IQOPTION_ENABLED`
+2. `IQOPTION_API_BASE_URL`
+3. `IQOPTION_TIMEOUT_MS`
 
 ## Interface web do Copiloto
 

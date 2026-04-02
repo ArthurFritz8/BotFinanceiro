@@ -466,3 +466,47 @@ Objetivo do aditivo:
 1. Melhor aderencia ao pedido de uso "ao vivo" com pipeline dedicado e resiliente.
 2. Respostas mais acionaveis no chat para perguntas de direcao de mercado, mantendo neutralidade e sem recomendacao financeira.
 3. Menor fragilidade em ativos sujeitos a indisponibilidade temporaria de provider unico.
+
+## Aditivo de integracao de corretoras (Binance + IQ Option) (2026-04-02)
+
+### Objetivo
+
+1. Adicionar camada de corretoras no backend e no Copiloto para consultas de conectividade e cotacao ao vivo por broker.
+
+### Correcao aplicada
+
+1. Novo modulo `brokers` com service unificado (`BrokerMarketService`) para catalogo e quote por corretora.
+2. Novos endpoints:
+- `GET /v1/brokers/catalog`
+- `GET /v1/brokers/live-quote?broker=binance&assetId=bitcoin`
+- `GET /v1/brokers/live-quote?broker=iqoption&assetId=bitcoin`
+3. Binance integrado como broker ativo para live quote (ticker 24h).
+4. IQ Option registrado no catalogo como `requires_configuration` com retorno estruturado para evolucao via bridge privada autenticada.
+5. Copiloto evoluido com nova tool:
+- `get_broker_live_quote`
+6. Fallback por intencao ampliado para perguntas de corretora (Binance/IQ Option), evitando resposta genérica de indisponibilidade.
+7. Ambiente atualizado para conectores de broker:
+- `IQOPTION_ENABLED`
+- `IQOPTION_API_BASE_URL`
+- `IQOPTION_TIMEOUT_MS`
+
+### Evidencias da correcao
+
+1. Testes de rota de corretoras adicionados e validados:
+- catalogo de brokers
+- live quote Binance
+- placeholder estruturado IQ Option
+2. Testes do Copiloto adicionados e validados:
+- fallback por intencao para corretora IQ Option
+- tool calling de `get_broker_live_quote`
+3. Resultado consolidado da suite API:
+- `tests: 49`
+- `pass: 49`
+- `fail: 0`
+4. `npm run check` validado com sucesso.
+
+### Resultado esperado
+
+1. Cobertura inicial real para corretoras no produto, com Binance operacional para cotacao ao vivo.
+2. Arquitetura preparada para evoluir IQ Option e outras corretoras sem quebrar contratos existentes.
+3. Melhor qualidade de resposta do Copiloto para perguntas de broker/integracao.

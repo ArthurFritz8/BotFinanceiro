@@ -94,3 +94,10 @@ O sistema ja possuia tool calling read-only e protecao de resiliencia para CoinG
 22. Indicadores tecnicos ampliados no backend: EMA (9/21), RSI14, MACD histogram, ATR, confianca e plano tatico (`buy|sell|wait`) com niveis operacionais (entrada, stop, TP1, TP2).
 23. Tool `get_crypto_chart_insights` passou a aceitar `mode` (`delayed|live`) e retornar resumo textual com acao tatica e confianca, mantendo carater informativo sem recomendacao de investimento.
 24. Frontend Chart Lab passou a oferecer modo `Ao vivo` com polling automatico, metricas tecnicas avancadas e fluxo de pergunta orientado a sinal tatico no chat.
+25. Criado modulo de corretoras (`brokers`) com interface padronizada para catalogo e cotacao ao vivo por broker.
+26. Introduzidos endpoints `GET /v1/brokers/catalog` e `GET /v1/brokers/live-quote`.
+27. Binance passou a ser exposta como broker ativo para cotacao ao vivo (`ticker 24h`) no contrato unificado de corretoras.
+28. IQ Option passou a constar no catalogo como conector registrado (`requires_configuration`), com resposta estruturada para evolucao por bridge privada autenticada.
+29. Copiloto ganhou nova tool `get_broker_live_quote` para perguntas sobre corretoras e conectividade.
+30. Fallback por intencao do Copiloto foi expandido para consultas de corretora (ex.: Binance/IQ Option), reduzindo respostas vazias quando nao houver tool call.
+31. Cobertura de testes ampliada para rotas de corretora e fluxo de tool calling/fallback de corretoras no Copiloto.
