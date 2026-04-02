@@ -290,3 +290,32 @@ Objetivo do aditivo:
 1. padronizar registro de mudancas em toda entrega
 2. forcar evidencias de validacao tecnica antes de publicar
 3. reduzir erros reincidentes de deploy/configuracao/documentacao
+
+## Aditivo de correcao operacional (2026-04-02)
+
+### Contexto observado em producao
+
+1. `GET /v1/crypto/spot-price` estava funcional para BTC/PI.
+2. Para prompts de resumo/plano, o modelo retornava mensagens de falha do tipo:
+- "Ocorreu uma falha ao obter dados do CoinCap..."
+- "Ocorreu uma falha ao obter o panorama do mercado..."
+3. Em varios casos, `toolCallsUsed` vinha vazio (sem chamada de tool), degradando a experiencia.
+4. O frontend tambem apresentou erro eventual "OpenRouter request failed" (falha transiente de rede/provider).
+
+### Correcao aplicada
+
+1. Hotfix de fallback por intencao no Copiloto:
+- se resposta vier com assinatura de falha generica e sem tool call:
+	- para intencao de resumo de mercado: gera fallback deterministico de resumo
+	- para intencao de plano de monitoramento: gera plano deterministico com 3 checkpoints
+2. Ampliada deteccao de respostas de falha para incluir frases de erro operacional (CoinCap/panorama/tente novamente).
+3. Adicionado retry com backoff no adapter OpenRouter para reduzir falhas transientes de request.
+4. Cobertura de testes ampliada para:
+- fallback de resumo com frase real de falha CoinCap
+- fallback de plano de monitoramento com checkpoints
+
+### Evidencias da correcao
+
+1. `npm run test -w @botfinanceiro/api`: `tests: 36`, `pass: 36`, `fail: 0`.
+2. `npm run check`: concluido sem erros.
+3. `npm run guard:docs`: validado apos atualizar este documento.

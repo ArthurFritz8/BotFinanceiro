@@ -189,7 +189,7 @@ void it("POST /v1/copilot/chat aplica fallback local para resumo de mercado quan
             choices: [
               {
                 message: {
-                  content: "Sinto muito, nao tenho a capacidade de fornecer um resumo do mercado cripto.",
+                  content: "Ocorreu uma falha ao obter dados do CoinCap. Por favor, tente novamente mais tarde.",
                   role: "assistant",
                 },
               },
@@ -281,7 +281,97 @@ void it("POST /v1/copilot/chat aplica fallback local para resumo de mercado quan
   assert.match(body.data.answer, /Resumo rapido do mercado cripto/);
   assert.match(body.data.answer, /CoinCap/);
   assert.match(body.data.answer, /Melhor 24h:/);
-  assert.doesNotMatch(body.data.answer, /nao tenho a capacidade/);
+  assert.doesNotMatch(body.data.answer, /falha ao obter dados do CoinCap/);
+});
+
+void it("POST /v1/copilot/chat aplica fallback local para plano de monitoramento", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    "Ocorreu uma falha ao obter o panorama do mercado neste momento. Por favor, tente novamente mais tarde.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-monitoring-fallback-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 19,
+              prompt_tokens: 28,
+              total_tokens: 47,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("/simple/price")) {
+      const parsedUrl = new URL(requestUrl);
+      const assetId = parsedUrl.searchParams.get("ids") ?? "";
+      const currency = parsedUrl.searchParams.get("vs_currencies") ?? "usd";
+
+      const pricesByAsset: Record<string, number> = {
+        bitcoin: 64000,
+        ethereum: 3200,
+        solana: 145,
+      };
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            [assetId]: {
+              [currency]: pricesByAsset[assetId] ?? 0,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Me de um plano de monitoramento para hoje com 3 checkpoints.",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-monitoring-fallback-001");
+  assert.deepEqual(body.data.toolCallsUsed, []);
+  assert.match(body.data.answer, /Plano de monitoramento para hoje/);
+  assert.match(body.data.answer, /Checkpoint 1/);
+  assert.match(body.data.answer, /Checkpoint 2/);
+  assert.match(body.data.answer, /Checkpoint 3/);
+  assert.doesNotMatch(body.data.answer, /falha ao obter o panorama/);
 });
 
 void it("POST /v1/copilot/chat executa fluxo de tool calling read-only", async () => {

@@ -65,3 +65,12 @@ O sistema ja possuia tool calling read-only e protecao de resiliencia para CoinG
 3. Maior robustez operacional no Copiloto em cenario de falha parcial de provider.
 4. Eliminacao da causa principal de 404 de CSS no frontend publicado em GitHub Pages.
 5. Evolucao alinhada ao padrao de governanca arquitetural por ADR sequencial.
+
+## Aditivo (2026-04-02)
+
+1. Ajustado fallback do Copiloto para cobrir respostas de falha operacional sem tool call (`toolCallsUsed=[]`), incluindo frases como:
+- "falha ao obter dados do CoinCap"
+- "falha ao obter o panorama do mercado"
+2. Incluido fallback deterministico para pedido de plano de monitoramento com 3 checkpoints.
+3. Adicionado retry com backoff no adapter OpenRouter para reduzir impacto de falhas transientes de rede/provider.
+4. Cobertura de testes ampliada para os novos cenarios de fallback.

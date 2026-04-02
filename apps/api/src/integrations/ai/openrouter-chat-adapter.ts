@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
+import { retryWithExponentialBackoff } from "../../shared/resilience/retry-with-backoff.js";
 
 const openRouterChatInputSchema = z.object({
   maxTokens: z.number().int().min(1).max(2000).default(500),
@@ -97,6 +98,35 @@ export interface OpenRouterToolDefinition<TInputSchema extends z.ZodTypeAny = z.
 
 function isRetryableStatusCode(statusCode: number): boolean {
   return statusCode === 408 || statusCode === 425 || statusCode === 429 || statusCode >= 500;
+}
+
+interface RetryableErrorDetails {
+  retryable?: boolean;
+}
+
+function hasRetryableFlag(details: unknown): details is RetryableErrorDetails {
+  if (typeof details !== "object" || details === null) {
+    return false;
+  }
+
+  const detailsRecord = details as Record<string, unknown>;
+  return typeof detailsRecord.retryable === "boolean";
+}
+
+function shouldRetryOpenRouterRequest(error: unknown): boolean {
+  if (!(error instanceof AppError)) {
+    return true;
+  }
+
+  if (error.code === "OPENROUTER_UNAVAILABLE") {
+    return true;
+  }
+
+  if (error.code === "OPENROUTER_BAD_STATUS" && hasRetryableFlag(error.details)) {
+    return error.details.retryable === true;
+  }
+
+  return false;
 }
 
 function extractAssistantContent(content: OpenRouterMessageContent): string {
@@ -355,6 +385,22 @@ export class OpenRouterChatAdapter {
   }
 
   private async requestCompletion(
+    messages: OpenRouterRequestMessage[],
+    input: z.infer<typeof openRouterChatInputSchema>,
+    tools: OpenRouterToolDefinition[],
+  ): Promise<z.infer<typeof openRouterResponseSchema>> {
+    return retryWithExponentialBackoff(
+      () => this.requestCompletionOnce(messages, input, tools),
+      {
+        attempts: 3,
+        baseDelayMs: 300,
+        jitterPercent: 20,
+        shouldRetry: shouldRetryOpenRouterRequest,
+      },
+    );
+  }
+
+  private async requestCompletionOnce(
     messages: OpenRouterRequestMessage[],
     input: z.infer<typeof openRouterChatInputSchema>,
     tools: OpenRouterToolDefinition[],

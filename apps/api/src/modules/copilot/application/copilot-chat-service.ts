@@ -128,6 +128,21 @@ function hasMarketSummaryIntent(message: string): boolean {
   return asksForSummary && mentionsCryptoMarket;
 }
 
+function hasMonitoringPlanIntent(message: string): boolean {
+  const normalizedMessage = normalizeText(message);
+  const asksForPlan =
+    normalizedMessage.includes("plano") ||
+    normalizedMessage.includes("checkpoint") ||
+    normalizedMessage.includes("check point") ||
+    normalizedMessage.includes("checkpoints");
+  const mentionsMonitoring =
+    normalizedMessage.includes("monitoramento") ||
+    normalizedMessage.includes("monitorar") ||
+    normalizedMessage.includes("checkpoints");
+
+  return asksForPlan && mentionsMonitoring;
+}
+
 function hasGenericLimitationAnswer(answer: string): boolean {
   const normalizedAnswer = normalizeText(answer);
 
@@ -137,7 +152,11 @@ function hasGenericLimitationAnswer(answer: string): boolean {
     normalizedAnswer.includes("nao tenho informacoes") ||
     normalizedAnswer.includes("nao consigo fornecer") ||
     normalizedAnswer.includes("nao posso fornecer") ||
-    normalizedAnswer.includes("sinto muito")
+    normalizedAnswer.includes("sinto muito") ||
+    normalizedAnswer.includes("falha ao obter") ||
+    normalizedAnswer.includes("panorama do mercado") ||
+    normalizedAnswer.includes("dados do coincap") ||
+    normalizedAnswer.includes("tente novamente mais tarde")
   );
 }
 
@@ -167,6 +186,18 @@ function formatPercent(value: number | null): string {
 
   const signal = value > 0 ? "+" : "";
   return `${signal}${value.toFixed(2)}%`;
+}
+
+function formatIntervalMinutes(intervalSeconds: number): number {
+  return Math.max(1, Math.round(intervalSeconds / 60));
+}
+
+function capitalizeAssetId(assetId: string): string {
+  if (assetId.length === 0) {
+    return assetId;
+  }
+
+  return `${assetId.charAt(0).toUpperCase()}${assetId.slice(1)}`;
 }
 
 function buildPriceComparisonTable(
@@ -398,7 +429,7 @@ export class CopilotChatService {
   public async chat(input: CopilotChatInput): Promise<OpenRouterChatCompletion> {
     const preparedInput = this.withDefaultSystemPrompt(input);
     const completion = await openRouterChatAdapter.createCompletionWithTools(preparedInput, copilotTools);
-    const completionWithFallback = await this.applyMarketSummaryFallback(preparedInput, completion);
+    const completionWithFallback = await this.applyIntentFallback(preparedInput, completion);
 
     try {
       await copilotChatAuditStore.append({
@@ -441,7 +472,7 @@ export class CopilotChatService {
     };
   }
 
-  private async applyMarketSummaryFallback(
+  private async applyIntentFallback(
     input: CopilotChatInput,
     completion: OpenRouterChatCompletion,
   ): Promise<OpenRouterChatCompletion> {
@@ -449,16 +480,36 @@ export class CopilotChatService {
       return completion;
     }
 
-    if (!hasMarketSummaryIntent(input.message)) {
-      return completion;
-    }
-
     if (!hasGenericLimitationAnswer(completion.answer)) {
       return completion;
     }
 
+    if (hasMarketSummaryIntent(input.message)) {
+      try {
+        const fallbackAnswer = await this.buildMarketSummaryFallback();
+
+        return {
+          ...completion,
+          answer: fallbackAnswer,
+        };
+      } catch (error) {
+        logger.warn(
+          {
+            err: error,
+          },
+          "Failed to build market summary fallback",
+        );
+
+        return completion;
+      }
+    }
+
+    if (!hasMonitoringPlanIntent(input.message)) {
+      return completion;
+    }
+
     try {
-      const fallbackAnswer = await this.buildMarketSummaryFallback();
+      const fallbackAnswer = await this.buildMonitoringPlanFallback();
 
       return {
         ...completion,
@@ -469,7 +520,7 @@ export class CopilotChatService {
         {
           err: error,
         },
-        "Failed to build market summary fallback",
+        "Failed to build monitoring plan fallback",
       );
 
       return completion;
@@ -619,6 +670,35 @@ export class CopilotChatService {
         ? `Ativos sem cotacao no momento: ${failedSummary}.`
         : "Todos os ativos monitorados responderam sem erro de cotacao.",
       "Nota: este resumo local usa apenas preco spot, sem noticias e sem recomendacao de investimento.",
+    ].join("\n");
+  }
+
+  private async buildMonitoringPlanFallback(): Promise<string> {
+    const operationalHealth = systemStatusService.getOperationalHealth();
+    const syncPolicy = cryptoSyncPolicyService.getPolicy();
+
+    const monitoredAssets = ["bitcoin", "ethereum", "solana"] as const;
+    const monitoredQuotes = await Promise.all(
+      monitoredAssets.map(async (assetId) => {
+        try {
+          const spotPrice = await cryptoSpotPriceService.getSpotPrice({
+            assetId,
+            currency: "usd",
+          });
+
+          return `${capitalizeAssetId(assetId)} ${formatSpotPrice(spotPrice.price, "usd")}`;
+        } catch {
+          return `${capitalizeAssetId(assetId)} n/d`;
+        }
+      }),
+    );
+
+    return [
+      "Plano de monitoramento para hoje (3 checkpoints).",
+      `Checkpoint 1 (abertura): validar saude operacional (status ${operationalHealth.status}, circuito ${operationalHealth.diagnostics.circuitState}, budget ${operationalHealth.diagnostics.budgetRemainingPercent}%).`,
+      `Checkpoint 2 (meio do dia): revisar os ativos chave (${monitoredQuotes.join(" | ")}) e abrir alerta se houver variacao brusca ou aumento de falhas por escopo.`,
+      `Checkpoint 3 (fechamento): conferir politicas de sync (hot a cada ${formatIntervalMinutes(syncPolicy.policy.hot.intervalSeconds)} min, warm a cada ${formatIntervalMinutes(syncPolicy.policy.warm.intervalSeconds)} min, cold a cada ${formatIntervalMinutes(syncPolicy.policy.cold.intervalSeconds)} min) e registrar ajustes para o proximo ciclo.`,
+      "Observacao: este plano e operacional e informativo, sem recomendacao de investimento.",
     ].join("\n");
   }
 }
