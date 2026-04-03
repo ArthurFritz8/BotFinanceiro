@@ -13,6 +13,7 @@ const app = buildApp();
 await app.ready();
 
 const originalFetch = globalThis.fetch;
+type LiveChartBroker = "binance" | "bybit" | "coinbase" | "kraken" | "okx";
 
 void beforeEach(() => {
   globalThis.fetch = originalFetch;
@@ -396,12 +397,12 @@ void it("GET /v1/crypto/live-chart retorna snapshot ao vivo com Binance", async 
       currency: string;
       live: {
         changePercent24h: number | null;
-        source: "binance";
+        source: LiveChartBroker;
         symbol: string;
         volume24h: number | null;
       } | null;
       mode: "live";
-      provider: "binance";
+      provider: LiveChartBroker;
       points: Array<{
         close: number;
       }>;
@@ -420,8 +421,279 @@ void it("GET /v1/crypto/live-chart retorna snapshot ao vivo com Binance", async 
   assert.equal(body.data.live?.symbol, "BTCUSDT");
 });
 
+void it("GET /v1/crypto/live-chart retorna snapshot ao vivo com OKX quando exchange=okx", async () => {
+  let candleCalls = 0;
+  let tickerCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("www.okx.com/api/v5/market/candles") && requestUrl.includes("instId=BTC-USDT")) {
+      candleCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            data: [
+              ["1712001200000", "65240", "65380", "65200", "65310", "1240"],
+              ["1712000900000", "65190", "65310", "65150", "65240", "1190"],
+              ["1712000600000", "65120", "65230", "65080", "65190", "1030"],
+              ["1712000300000", "65080", "65190", "65010", "65120", "980"],
+              ["1712000000000", "65000", "65140", "64920", "65080", "1100"],
+            ],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("www.okx.com/api/v5/market/ticker") && requestUrl.includes("instId=BTC-USDT")) {
+      tickerCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                last: "65312.45",
+                open24h: "64200",
+                volCcy24h: "65234.11",
+              },
+            ],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=okx",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(candleCalls, 1);
+  assert.equal(tickerCalls, 1);
+
+  const body = response.json<{
+    data: {
+      live: {
+        source: LiveChartBroker;
+        symbol: string;
+      } | null;
+      mode: "live";
+      provider: LiveChartBroker;
+      points: Array<{
+        close: number;
+      }>;
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.mode, "live");
+  assert.equal(body.data.provider, "okx");
+  assert.equal(body.data.points.length, 5);
+  assert.equal(body.data.live?.source, "okx");
+  assert.equal(body.data.live?.symbol, "BTCUSDT");
+});
+
+void it("GET /v1/crypto/live-chart isola cache por exchange em trocas rapidas", async () => {
+  let binanceKlineCalls = 0;
+  let binanceTickerCalls = 0;
+  let okxCandleCalls = 0;
+  let okxTickerCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("api.binance.com/api/v3/klines") && requestUrl.includes("symbol=BTCUSDT")) {
+      binanceKlineCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify([
+            [1712000000000, "65000", "65140", "64920", "65080", "1100"],
+            [1712000300000, "65080", "65190", "65010", "65120", "980"],
+            [1712000600000, "65120", "65230", "65080", "65190", "1030"],
+            [1712000900000, "65190", "65310", "65150", "65240", "1190"],
+            [1712001200000, "65240", "65380", "65200", "65310", "1240"],
+          ]),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.binance.com/api/v3/ticker/24hr") && requestUrl.includes("symbol=BTCUSDT")) {
+      binanceTickerCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            lastPrice: "65312.45",
+            priceChangePercent: "1.73",
+            symbol: "BTCUSDT",
+            volume: "65234.11",
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("www.okx.com/api/v5/market/candles") && requestUrl.includes("instId=BTC-USDT")) {
+      okxCandleCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            data: [
+              ["1712001200000", "70240", "70380", "70200", "70310", "1240"],
+              ["1712000900000", "70190", "70310", "70150", "70240", "1190"],
+              ["1712000600000", "70120", "70230", "70080", "70190", "1030"],
+              ["1712000300000", "70080", "70190", "70010", "70120", "980"],
+              ["1712000000000", "70000", "70140", "69920", "70080", "1100"],
+            ],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("www.okx.com/api/v5/market/ticker") && requestUrl.includes("instId=BTC-USDT")) {
+      okxTickerCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                last: "70312.45",
+                open24h: "69200",
+                volCcy24h: "75234.11",
+              },
+            ],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const binanceResponseA = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=binance",
+  });
+
+  const okxResponse = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=okx",
+  });
+
+  const binanceResponseB = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=binance",
+  });
+
+  assert.equal(binanceResponseA.statusCode, 200);
+  assert.equal(okxResponse.statusCode, 200);
+  assert.equal(binanceResponseB.statusCode, 200);
+
+  const bodyA = binanceResponseA.json<{
+    data: {
+      cache: {
+        state: string;
+      };
+      provider: LiveChartBroker;
+    };
+  }>();
+  const bodyOkx = okxResponse.json<{
+    data: {
+      cache: {
+        state: string;
+      };
+      provider: LiveChartBroker;
+    };
+  }>();
+  const bodyB = binanceResponseB.json<{
+    data: {
+      cache: {
+        state: string;
+      };
+      provider: LiveChartBroker;
+    };
+  }>();
+
+  assert.equal(bodyA.data.provider, "binance");
+  assert.equal(bodyA.data.cache.state, "refreshed");
+  assert.equal(bodyOkx.data.provider, "okx");
+  assert.equal(bodyOkx.data.cache.state, "refreshed");
+  assert.equal(bodyB.data.provider, "binance");
+  assert.equal(bodyB.data.cache.state, "fresh");
+
+  assert.equal(binanceKlineCalls, 1);
+  assert.equal(binanceTickerCalls, 1);
+  assert.equal(okxCandleCalls, 1);
+  assert.equal(okxTickerCalls, 1);
+});
+
+void it("GET /v1/crypto/live-chart valida exchange invalida", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=deribit",
+  });
+
+  assert.equal(response.statusCode, 400);
+
+  const body = response.json<{
+    error: {
+      code: string;
+      message: string;
+    };
+    status: "error";
+  }>();
+
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "VALIDATION_ERROR");
+  assert.equal(body.error.message, "Invalid payload");
+});
+
 void it("GET /v1/crypto/live-chart usa cache stale quando refresh live falha", async () => {
-  const staleCacheKey = "crypto:chart:live:bitcoin:usd:24h";
+  const staleCacheKey = "crypto:chart:live:bitcoin:usd:24h:binance";
 
   memoryCache.set(
     staleCacheKey,

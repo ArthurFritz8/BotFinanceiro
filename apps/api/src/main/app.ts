@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 
+import { registerAirdropsRoutes } from "../modules/airdrops/interface/airdrops-routes.js";
 import { registerBrokersRoutes } from "../modules/brokers/interface/brokers-routes.js";
 import { registerCopilotRoutes } from "../modules/copilot/interface/copilot-routes.js";
 import { registerCryptoRoutes } from "../modules/crypto/interface/crypto-routes.js";
@@ -58,6 +59,7 @@ export function buildApp() {
   registerSystemRoutes(app);
   void app.register(
     (instance, _, done) => {
+      registerAirdropsRoutes(instance);
       registerBrokersRoutes(instance);
       registerCopilotRoutes(instance);
       registerCryptoRoutes(instance);

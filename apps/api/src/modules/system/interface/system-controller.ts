@@ -99,6 +99,57 @@ export function getSchedulerMetrics(request: FastifyRequest, reply: FastifyReply
   void reply.send(buildSuccessResponse(request.id, data));
 }
 
+export function getBrokerLiveQuoteStreamHealth(request: FastifyRequest, reply: FastifyReply): void {
+  const data = systemStatusService.getBrokerLiveQuoteStreamHealth();
+  void reply.send(buildSuccessResponse(request.id, data));
+}
+
+export function exportBrokerLiveQuoteStreamHealthCsv(
+  _request: FastifyRequest,
+  reply: FastifyReply,
+): void {
+  const csvExport = systemStatusService.getBrokerLiveQuoteStreamHealthCsv();
+
+  void reply
+    .header("Content-Type", "text/csv; charset=utf-8")
+    .header("Content-Disposition", `attachment; filename="${csvExport.fileName}"`)
+    .send(csvExport.csv);
+}
+
+export function getCryptoLiveChartHealth(request: FastifyRequest, reply: FastifyReply): void {
+  const data = systemStatusService.getCryptoLiveChartHealth();
+  void reply.send(buildSuccessResponse(request.id, data));
+}
+
+export function exportCryptoLiveChartHealthCsv(
+  _request: FastifyRequest,
+  reply: FastifyReply,
+): void {
+  const csvExport = systemStatusService.getCryptoLiveChartHealthCsv();
+
+  void reply
+    .header("Content-Type", "text/csv; charset=utf-8")
+    .header("Content-Disposition", `attachment; filename="${csvExport.fileName}"`)
+    .send(csvExport.csv);
+}
+
+export function getAirdropsIntelligenceHealth(request: FastifyRequest, reply: FastifyReply): void {
+  const data = systemStatusService.getAirdropsIntelligenceHealth();
+  void reply.send(buildSuccessResponse(request.id, data));
+}
+
+export function exportAirdropsIntelligenceHealthCsv(
+  _request: FastifyRequest,
+  reply: FastifyReply,
+): void {
+  const csvExport = systemStatusService.getAirdropsIntelligenceHealthCsv();
+
+  void reply
+    .header("Content-Type", "text/csv; charset=utf-8")
+    .header("Content-Disposition", `attachment; filename="${csvExport.fileName}"`)
+    .send(csvExport.csv);
+}
+
 export function getOperationalHealth(request: FastifyRequest, reply: FastifyReply): void {
   const data = systemStatusService.getOperationalHealth();
   void reply.send(buildSuccessResponse(request.id, data));

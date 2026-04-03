@@ -49,8 +49,11 @@ const chartQuerySchema = z.object({
   range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("7d"),
 });
 
+const liveChartExchangeSchema = z.enum(["binance", "bybit", "coinbase", "kraken", "okx"]);
+
 const liveChartQuerySchema = z.object({
   assetId: z.string().trim().min(1).default("bitcoin"),
+  exchange: liveChartExchangeSchema.default("binance"),
   range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("24h"),
 });
 
@@ -95,7 +98,11 @@ export async function getChart(request: FastifyRequest, reply: FastifyReply): Pr
 
 export async function getLiveChart(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const parsedQuery = liveChartQuerySchema.parse(request.query);
-  const chart = await cryptoChartService.getLiveChart(parsedQuery);
+  const chart = await cryptoChartService.getLiveChart({
+    assetId: parsedQuery.assetId,
+    broker: parsedQuery.exchange,
+    range: parsedQuery.range,
+  });
 
   void reply.send(buildSuccessResponse(request.id, chart));
 }

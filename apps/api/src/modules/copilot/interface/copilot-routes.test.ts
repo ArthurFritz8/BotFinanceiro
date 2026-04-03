@@ -635,6 +635,269 @@ void it("POST /v1/copilot/chat aplica fallback local para analise de grafico", a
   assert.doesNotMatch(body.data.answer, /Nao posso fornecer recomendacoes/);
 });
 
+void it("POST /v1/copilot/chat aplica fallback de grafico live respeitando broker da mensagem", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let openRouterCalls = 0;
+  let bybitTickerCalls = 0;
+  let bybitKlineCalls = 0;
+  let binanceCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    "Sou um copiloto financeiro focado em dados e operacao. Nao posso fornecer recomendacao de investimento.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-chart-live-broker-fallback-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 19,
+              prompt_tokens: 30,
+              total_tokens: 49,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.bybit.com/v5/market/tickers") && requestUrl.includes("symbol=BTCUSDT")) {
+      bybitTickerCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            result: {
+              list: [
+                {
+                  lastPrice: "67120.45",
+                  symbol: "BTCUSDT",
+                  turnover24h: "1934000000",
+                  price24hPcnt: "0.0287",
+                },
+              ],
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.bybit.com/v5/market/kline") && requestUrl.includes("symbol=BTCUSDT")) {
+      bybitKlineCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            result: {
+              list: [
+                ["1712000000000", "66210", "66400", "66110", "66320", "1200"],
+                ["1712003600000", "66320", "66500", "66280", "66470", "1320"],
+                ["1712007200000", "66470", "66720", "66410", "66680", "1450"],
+                ["1712010800000", "66680", "66910", "66600", "66840", "1510"],
+                ["1712014400000", "66840", "67150", "66790", "67090", "1630"],
+                ["1712018000000", "67090", "67210", "66980", "67120", "1710"],
+              ],
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.binance.com")) {
+      binanceCalls += 1;
+      return Promise.reject(new Error(`Binance endpoint should not be called: ${requestUrl}`));
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "No grafico ao vivo da Bybit para bitcoin, qual leitura tecnica agora?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 1);
+  assert.equal(bybitTickerCalls, 1);
+  assert.equal(bybitKlineCalls, 1);
+  assert.equal(binanceCalls, 0);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-chart-live-broker-fallback-001");
+  assert.match(body.data.answer, /modo live/);
+  assert.match(body.data.answer, /provider bybit/);
+  assert.match(body.data.answer, /Faixa tecnica: suporte/);
+});
+
+void it("POST /v1/copilot/chat aplica fallback local para radar de airdrops", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "Nao tenho informacoes suficientes sobre airdrops no momento.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-airdrop-fallback-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 15,
+              prompt_tokens: 24,
+              total_tokens: 39,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("airdrops.io")) {
+      return Promise.resolve(
+        new Response(
+          `<a href="/base-quest-airdrop">Base Quest Airdrop campaign</a><p>Bridge + swap + points</p>`,
+          {
+            headers: {
+              "content-type": "text/html",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("airdropalert.com")) {
+      return Promise.resolve(
+        new Response(
+          `<a href="/zksync-retroactive-airdrop">zkSync Retroactive Airdrop</a>`,
+          {
+            headers: {
+              "content-type": "text/html",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.llama.fi/protocols")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify([
+            {
+              chain: "Arbitrum",
+              gecko_id: null,
+              name: "Orbiter",
+              tvl: 98000000,
+            },
+          ]),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("/search/trending")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            coins: [
+              {
+                item: {
+                  id: "orbiter-finance",
+                  market_cap_rank: 230,
+                  name: "Orbiter Finance",
+                  symbol: "OBT",
+                },
+              },
+            ],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Quais airdrops estao quentes essa semana em base e zksync?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-airdrop-fallback-001");
+  assert.match(body.data.answer, /Radar de airdrops \(multi-fonte/);
+  assert.match(body.data.answer, /Cobertura de fontes:/);
+  assert.match(body.data.answer, /Base/);
+  assert.match(body.data.answer, /score/);
+  assert.doesNotMatch(body.data.answer, /Nao tenho informacoes suficientes sobre airdrops/);
+});
+
 void it("POST /v1/copilot/chat executa tool de insights de grafico", async () => {
   mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
 

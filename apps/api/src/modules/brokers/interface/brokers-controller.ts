@@ -28,6 +28,12 @@ const liveQuoteBatchQuerySchema = z.object({
   broker: z.enum(["binance", "bybit", "coinbase", "kraken", "okx", "iqoption"]).default("binance"),
 });
 
+const liveQuoteStreamQuerySchema = z.object({
+  assetIds: assetIdsCsvSchema,
+  broker: z.enum(["binance", "bybit", "coinbase", "kraken", "okx", "iqoption"]).default("binance"),
+  intervalMs: z.coerce.number().int().min(2000).max(60000).default(10000),
+});
+
 const brokerMarketService = new BrokerMarketService();
 
 export function getBrokerCatalog(request: FastifyRequest, reply: FastifyReply): void {
@@ -54,4 +60,19 @@ export async function getBrokerLiveQuoteBatch(
   const liveQuoteBatch = await brokerMarketService.getLiveQuoteBatch(parsedQuery);
 
   void reply.send(buildSuccessResponse(request.id, liveQuoteBatch));
+}
+
+export function parseBrokerLiveQuoteStreamQuery(query: unknown): {
+  assetIds: string[];
+  broker: "binance" | "bybit" | "coinbase" | "kraken" | "okx" | "iqoption";
+  intervalMs: number;
+} {
+  return liveQuoteStreamQuerySchema.parse(query);
+}
+
+export async function getBrokerLiveQuoteStreamSnapshot(input: {
+  assetIds: string[];
+  broker: "binance" | "bybit" | "coinbase" | "kraken" | "okx" | "iqoption";
+}) {
+  return brokerMarketService.getLiveQuoteBatch(input);
 }

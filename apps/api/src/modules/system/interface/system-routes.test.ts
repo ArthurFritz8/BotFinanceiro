@@ -13,6 +13,15 @@ const {
 const {
   operationalHealthHistoryStore,
 } = await import("../../../shared/observability/operational-health-history-store.js");
+const {
+  brokerLiveQuoteStreamMetricsStore,
+} = await import("../../../shared/observability/broker-live-quote-stream-metrics-store.js");
+const {
+  cryptoLiveChartMetricsStore,
+} = await import("../../../shared/observability/crypto-live-chart-metrics-store.js");
+const {
+  airdropsIntelligenceMetricsStore,
+} = await import("../../../shared/observability/airdrops-intelligence-metrics-store.js");
 const app = buildApp();
 await app.ready();
 
@@ -159,6 +168,80 @@ interface OperationalHealthHistoryClearResult {
   removedCount: number;
 }
 
+interface BrokerStreamHealthResponse {
+  brokers: Record<
+    "binance" | "bybit" | "coinbase" | "kraken" | "okx" | "iqoption",
+    {
+      activeConnections: number;
+      closedConnections: number;
+      keepAliveEvents: number;
+      lastErrorAt: string | null;
+      lastErrorMessage: string | null;
+      lastKeepAliveAt: string | null;
+      lastSnapshotAt: string | null;
+      openedConnections: number;
+      snapshotErrors: number;
+      snapshotsPublished: number;
+    }
+  >;
+  generatedAt: string;
+  global: {
+    activeConnections: number;
+    closedConnections: number;
+    openedConnections: number;
+    snapshotErrors: number;
+    snapshotsPublished: number;
+  };
+}
+
+interface CryptoLiveChartHealthResponse {
+  brokers: Record<
+    "binance" | "bybit" | "coinbase" | "kraken" | "okx",
+    {
+      avgLatencyMs: number | null;
+      failedRequests: number;
+      lastErrorAt: string | null;
+      lastErrorMessage: string | null;
+      lastLatencyMs: number | null;
+      lastSuccessAt: string | null;
+      p95LatencyMs: number | null;
+      requests: number;
+      successRatePercent: number;
+      successfulRequests: number;
+    }
+  >;
+  generatedAt: string;
+  global: {
+    avgLatencyMs: number | null;
+    failedRequests: number;
+    p95LatencyMs: number | null;
+    requests: number;
+    successRatePercent: number;
+    successfulRequests: number;
+  };
+}
+
+interface AirdropsIntelligenceHealthResponse {
+  generatedAt: string;
+  global: {
+    failedRequests: number;
+    requests: number;
+    successRatePercent: number;
+    successfulRequests: number;
+    totalItems: number;
+  };
+  sources: Record<
+    "airdrop_alert" | "airdrops_io" | "coingecko_trending" | "defillama" | "drops_tab" | "earnifi",
+    {
+      failedRequests: number;
+      requests: number;
+      successRatePercent: number;
+      successfulRequests: number;
+      totalItems: number;
+    }
+  >;
+}
+
 interface CopilotAuditHistoryResponse {
   filters: {
     from: string | null;
@@ -281,6 +364,10 @@ const originalCopilotStoreState = {
 };
 
 void beforeEach(() => {
+  brokerLiveQuoteStreamMetricsStore.reset();
+  cryptoLiveChartMetricsStore.reset();
+  airdropsIntelligenceMetricsStore.reset();
+
   storeInternal.initialized = true;
   storeInternal.records = buildFixtureRecords();
   storeInternal.clear = () => {
@@ -373,6 +460,401 @@ void it("GET /internal/health/operational/history retorna 401 sem token", async 
   assert.equal(body.status, "error");
   assert.equal(body.error.code, "INTERNAL_AUTH_MISSING_TOKEN");
   assert.equal(body.error.message, "Missing internal route token");
+});
+
+void it("GET /internal/health/streams/brokers retorna 401 sem token", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/internal/health/streams/brokers",
+  });
+
+  assert.equal(response.statusCode, 401);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "INTERNAL_AUTH_MISSING_TOKEN");
+  assert.equal(body.error.message, "Missing internal route token");
+});
+
+void it("GET /internal/health/streams/brokers retorna metricas do stream com token valido", async () => {
+  brokerLiveQuoteStreamMetricsStore.onConnectionOpened({
+    broker: "okx",
+    streamId: "stream_okx_1",
+  });
+  brokerLiveQuoteStreamMetricsStore.onSnapshotPublished({
+    broker: "okx",
+  });
+  brokerLiveQuoteStreamMetricsStore.onKeepAlive({
+    broker: "okx",
+  });
+  brokerLiveQuoteStreamMetricsStore.onSnapshotError({
+    broker: "okx",
+    message: "upstream timeout",
+  });
+
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/health/streams/brokers",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<BrokerStreamHealthResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(typeof body.data.generatedAt, "string");
+  assert.equal(body.data.global.openedConnections, 1);
+  assert.equal(body.data.global.activeConnections, 1);
+  assert.equal(body.data.global.snapshotsPublished, 1);
+  assert.equal(body.data.global.snapshotErrors, 1);
+  assert.equal(body.data.brokers.okx.openedConnections, 1);
+  assert.equal(body.data.brokers.okx.keepAliveEvents, 1);
+  assert.equal(body.data.brokers.okx.snapshotsPublished, 1);
+  assert.equal(body.data.brokers.okx.snapshotErrors, 1);
+  assert.equal(body.data.brokers.okx.lastErrorMessage, "upstream timeout");
+});
+
+void it("GET /internal/health/streams/brokers.csv retorna 401 sem token", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/internal/health/streams/brokers.csv",
+  });
+
+  assert.equal(response.statusCode, 401);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "INTERNAL_AUTH_MISSING_TOKEN");
+  assert.equal(body.error.message, "Missing internal route token");
+});
+
+void it("GET /internal/health/streams/brokers.csv retorna CSV com token valido", async () => {
+  brokerLiveQuoteStreamMetricsStore.onConnectionOpened({
+    broker: "okx",
+    streamId: "stream_okx_csv_1",
+  });
+  brokerLiveQuoteStreamMetricsStore.onSnapshotPublished({
+    broker: "okx",
+  });
+  brokerLiveQuoteStreamMetricsStore.onKeepAlive({
+    broker: "okx",
+  });
+
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/health/streams/brokers.csv",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const contentTypeHeader = response.headers["content-type"];
+  const contentType = Array.isArray(contentTypeHeader)
+    ? contentTypeHeader.join(";")
+    : contentTypeHeader ?? "";
+  assert.match(contentType, /^text\/csv/);
+
+  const contentDispositionHeader = response.headers["content-disposition"];
+  const contentDisposition = Array.isArray(contentDispositionHeader)
+    ? contentDispositionHeader.join(";")
+    : contentDispositionHeader ?? "";
+  assert.match(contentDisposition, /^attachment; filename="broker-stream-health-/);
+
+  const lines = response.body.split("\n");
+  assert.equal(
+    lines[0],
+    [
+      "scope",
+      "broker",
+      "opened_connections",
+      "active_connections",
+      "closed_connections",
+      "snapshots_published",
+      "snapshot_errors",
+      "keepalive_events",
+      "last_snapshot_at",
+      "last_keepalive_at",
+      "last_error_at",
+      "last_error_message",
+      "generated_at",
+    ].join(","),
+  );
+  assert.match(response.body, /global,all,1,1,0,1,0/);
+  assert.match(response.body, /broker,okx,1,1,0,1,0,1/);
+});
+
+void it("GET /internal/health/live-chart/crypto retorna 401 sem token", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/internal/health/live-chart/crypto",
+  });
+
+  assert.equal(response.statusCode, 401);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "INTERNAL_AUTH_MISSING_TOKEN");
+  assert.equal(body.error.message, "Missing internal route token");
+});
+
+void it("GET /internal/health/live-chart/crypto retorna metricas agregadas por broker", async () => {
+  cryptoLiveChartMetricsStore.onRefreshSuccess({
+    broker: "binance",
+    latencyMs: 120,
+  });
+  cryptoLiveChartMetricsStore.onRefreshSuccess({
+    broker: "okx",
+    latencyMs: 210,
+  });
+  cryptoLiveChartMetricsStore.onRefreshError({
+    broker: "okx",
+    latencyMs: 420,
+    message: "okx timeout",
+  });
+
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/health/live-chart/crypto",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<CryptoLiveChartHealthResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(typeof body.data.generatedAt, "string");
+  assert.equal(body.data.global.requests, 3);
+  assert.equal(body.data.global.successfulRequests, 2);
+  assert.equal(body.data.global.failedRequests, 1);
+  assert.equal(body.data.global.successRatePercent, 66.67);
+  assert.equal(body.data.brokers.okx.requests, 2);
+  assert.equal(body.data.brokers.okx.successfulRequests, 1);
+  assert.equal(body.data.brokers.okx.failedRequests, 1);
+  assert.equal(body.data.brokers.okx.lastErrorMessage, "okx timeout");
+  assert.equal(body.data.brokers.okx.lastLatencyMs, 420);
+});
+
+void it("GET /internal/health/live-chart/crypto.csv retorna 401 sem token", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/internal/health/live-chart/crypto.csv",
+  });
+
+  assert.equal(response.statusCode, 401);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "INTERNAL_AUTH_MISSING_TOKEN");
+  assert.equal(body.error.message, "Missing internal route token");
+});
+
+void it("GET /internal/health/live-chart/crypto.csv retorna CSV com token valido", async () => {
+  cryptoLiveChartMetricsStore.onRefreshSuccess({
+    broker: "binance",
+    latencyMs: 120,
+  });
+  cryptoLiveChartMetricsStore.onRefreshError({
+    broker: "okx",
+    latencyMs: 480,
+    message: "upstream timeout",
+  });
+
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/health/live-chart/crypto.csv",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const contentTypeHeader = response.headers["content-type"];
+  const contentType = Array.isArray(contentTypeHeader)
+    ? contentTypeHeader.join(";")
+    : contentTypeHeader ?? "";
+  assert.match(contentType, /^text\/csv/);
+
+  const contentDispositionHeader = response.headers["content-disposition"];
+  const contentDisposition = Array.isArray(contentDispositionHeader)
+    ? contentDispositionHeader.join(";")
+    : contentDispositionHeader ?? "";
+  assert.match(contentDisposition, /^attachment; filename="crypto-live-chart-health-/);
+
+  const lines = response.body.split("\n");
+  assert.equal(
+    lines[0],
+    [
+      "scope",
+      "broker",
+      "requests",
+      "successful_requests",
+      "failed_requests",
+      "success_rate_percent",
+      "avg_latency_ms",
+      "p95_latency_ms",
+      "last_latency_ms",
+      "last_success_at",
+      "last_error_at",
+      "last_error_message",
+      "generated_at",
+    ].join(","),
+  );
+  assert.match(response.body, /global,all,2,1,1,50/);
+  assert.match(response.body, /broker,okx,1,0,1,0/);
+});
+
+void it("GET /internal/health/airdrops retorna 401 sem token", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/internal/health/airdrops",
+  });
+
+  assert.equal(response.statusCode, 401);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "INTERNAL_AUTH_MISSING_TOKEN");
+  assert.equal(body.error.message, "Missing internal route token");
+});
+
+void it("GET /internal/health/airdrops retorna metricas de fontes com token valido", async () => {
+  airdropsIntelligenceMetricsStore.recordSourceSnapshot({
+    error: null,
+    fetchedAt: "2026-04-03T12:00:00.000Z",
+    latencyMs: 420,
+    source: "airdrops_io",
+    status: "ok",
+    totalItems: 12,
+  });
+
+  airdropsIntelligenceMetricsStore.recordSourceSnapshot({
+    error: {
+      code: "AIRDROPS_SOURCE_UNAVAILABLE",
+      message: "temporary outage",
+    },
+    fetchedAt: "2026-04-03T12:00:10.000Z",
+    latencyMs: 680,
+    source: "defillama",
+    status: "error",
+    totalItems: 0,
+  });
+
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/health/airdrops",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<AirdropsIntelligenceHealthResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(typeof body.data.generatedAt, "string");
+  assert.equal(body.data.global.requests, 2);
+  assert.equal(body.data.global.successfulRequests, 1);
+  assert.equal(body.data.global.failedRequests, 1);
+  assert.equal(body.data.global.totalItems, 12);
+  assert.equal(body.data.sources.airdrops_io.requests, 1);
+  assert.equal(body.data.sources.airdrops_io.successfulRequests, 1);
+  assert.equal(body.data.sources.defillama.failedRequests, 1);
+  assert.equal(body.data.sources.defillama.requests, 1);
+});
+
+void it("GET /internal/health/airdrops.csv retorna 401 sem token", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/internal/health/airdrops.csv",
+  });
+
+  assert.equal(response.statusCode, 401);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "INTERNAL_AUTH_MISSING_TOKEN");
+  assert.equal(body.error.message, "Missing internal route token");
+});
+
+void it("GET /internal/health/airdrops.csv retorna CSV com token valido", async () => {
+  airdropsIntelligenceMetricsStore.recordSourceSnapshot({
+    error: null,
+    fetchedAt: "2026-04-03T12:00:00.000Z",
+    latencyMs: 420,
+    source: "airdrops_io",
+    status: "ok",
+    totalItems: 12,
+  });
+
+  airdropsIntelligenceMetricsStore.recordSourceSnapshot({
+    error: {
+      code: "AIRDROPS_SOURCE_UNAVAILABLE",
+      message: "temporary outage",
+    },
+    fetchedAt: "2026-04-03T12:00:10.000Z",
+    latencyMs: 680,
+    source: "defillama",
+    status: "error",
+    totalItems: 0,
+  });
+
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/health/airdrops.csv",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const contentTypeHeader = response.headers["content-type"];
+  const contentType = Array.isArray(contentTypeHeader)
+    ? contentTypeHeader.join(";")
+    : contentTypeHeader ?? "";
+  assert.match(contentType, /^text\/csv/);
+
+  const contentDispositionHeader = response.headers["content-disposition"];
+  const contentDisposition = Array.isArray(contentDispositionHeader)
+    ? contentDispositionHeader.join(";")
+    : contentDispositionHeader ?? "";
+  assert.match(contentDisposition, /^attachment; filename="airdrops-health-/);
+
+  const lines = response.body.split("\n");
+  assert.equal(
+    lines[0],
+    [
+      "scope",
+      "source",
+      "requests",
+      "successful_requests",
+      "failed_requests",
+      "success_rate_percent",
+      "total_items",
+      "avg_latency_ms",
+      "p95_latency_ms",
+      "last_latency_ms",
+      "last_status",
+      "last_fetch_at",
+      "last_error_at",
+      "last_error_code",
+      "last_error_message",
+      "last_run_at",
+      "last_success_at",
+      "generated_at",
+    ].join(","),
+  );
+  assert.equal(lines.length, 8);
+  assert.match(response.body, /global,all,2,1,1/);
+  assert.match(response.body, /source,airdrops_io,1,1,0/);
+  assert.match(response.body, /source,defillama,1,0,1/);
 });
 
 void it("GET /internal/health/operational/history retorna payload esperado com token valido", async () => {

@@ -70,7 +70,7 @@
             <label for="chart-mode">Modo</label>
             <select id="chart-mode" name="mode">
               <option value="delayed" selected>Delay (mais estavel)</option>
-              <option value="live">Ao vivo (Binance)</option>
+              <option value="live">Ao vivo (por corretora)</option>
             </select>
           </div>
 
@@ -219,6 +219,7 @@
               </div>
               <button type="button" id="watchlist-refresh">Sync</button>
             </div>
+            <div id="watchlist-diagnostics" class="watchlist-diagnostics"></div>
             <div id="watchlist-grid" class="watchlist-grid"></div>
           </aside>
         </div>
@@ -230,6 +231,68 @@
             Pedir analise tecnica no chat
           </button>
         </div>
+
+        <section class="airdrop-radar" aria-labelledby="airdrop-radar-title">
+          <div class="airdrop-radar-top">
+            <div>
+              <p class="eyebrow airdrop-radar-eyebrow">Airdrops Intelligence</p>
+              <h3 id="airdrop-radar-title">Radar de oportunidades</h3>
+            </div>
+            <button type="button" id="airdrop-refresh-button">Atualizar radar</button>
+          </div>
+
+          <form id="airdrop-filters" class="airdrop-filters">
+            <label class="airdrop-filter-field" for="airdrop-chain-filter">
+              Chain
+              <select id="airdrop-chain-filter" name="chain">
+                <option value="all">Todas</option>
+              </select>
+            </label>
+
+            <label class="airdrop-filter-field" for="airdrop-confidence-filter">
+              Confianca
+              <select id="airdrop-confidence-filter" name="confidence">
+                <option value="all">Todas</option>
+                <option value="high">Alta</option>
+                <option value="medium">Media</option>
+                <option value="low">Baixa</option>
+              </select>
+            </label>
+
+            <label class="airdrop-filter-field" for="airdrop-score-filter">
+              Score minimo
+              <input
+                id="airdrop-score-filter"
+                name="score"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value="35"
+              />
+              <span id="airdrop-score-filter-value">35</span>
+            </label>
+
+            <label class="airdrop-filter-field" for="airdrop-query-filter">
+              Busca
+              <input
+                id="airdrop-query-filter"
+                name="query"
+                type="text"
+                maxlength="80"
+                placeholder="Ex.: base, zksync, testnet"
+              />
+            </label>
+
+            <label class="airdrop-filter-toggle" for="airdrop-include-speculative">
+              <input id="airdrop-include-speculative" name="includeSpeculative" type="checkbox" checked />
+              Incluir oportunidades especulativas
+            </label>
+          </form>
+
+          <div id="airdrop-summary" class="airdrop-summary">Carregando radar...</div>
+          <div id="airdrop-list" class="airdrop-list"></div>
+        </section>
       </section>
 
       <section class="layout-grid reveal reveal-delay-2">
@@ -266,6 +329,12 @@
               data-prompt="Me traga um panorama global com indices, cambio, juros e commodities."
             >
               Panorama macro global
+            </button>
+            <button
+              type="button"
+              data-prompt="Monte um radar de airdrops desta semana com score, nivel de confianca e tarefas praticas para eu validar elegibilidade."
+            >
+              Radar de airdrops
             </button>
           </div>
 

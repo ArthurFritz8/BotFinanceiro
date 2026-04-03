@@ -5,6 +5,7 @@ import {
   CoinCapMarketDataAdapter,
   type CoinCapMarketAsset,
 } from "../../../integrations/market_data/coincap-market-data-adapter.js";
+import { MultiExchangeMarketDataAdapter } from "../../../integrations/market_data/multi-exchange-market-data-adapter.js";
 import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 
@@ -19,6 +20,8 @@ const liveQuoteBatchInputSchema = z.object({
   assetIds: z.array(z.string().trim().min(1)).min(1).max(25),
   broker: brokerNameSchema.default("binance"),
 });
+
+type NativeBroker = "bybit" | "coinbase" | "kraken" | "okx";
 
 export type BrokerName = z.infer<typeof brokerNameSchema>;
 
@@ -72,6 +75,10 @@ export interface BrokerLiveQuoteBatchItem {
 export interface BrokerLiveQuoteBatchResponse {
   broker: BrokerName;
   currency: "usd";
+  diagnostics: {
+    latencyMs: number;
+    providerMode: "proxy" | "public" | "unavailable";
+  };
   fetchedAt: string;
   quotes: BrokerLiveQuoteBatchItem[];
   requestedAssets: string[];
@@ -121,13 +128,11 @@ function formatProxySymbol(symbol: string): string {
   return `${symbol.toUpperCase()}USD`;
 }
 
-function isProxyBroker(broker: BrokerName): broker is "bybit" | "coinbase" | "kraken" | "okx" {
+function isNativeBroker(broker: BrokerName): broker is NativeBroker {
   return broker === "bybit" || broker === "coinbase" || broker === "kraken" || broker === "okx";
 }
 
-function buildProxyCatalogItem(
-  broker: "bybit" | "coinbase" | "kraken" | "okx",
-): BrokerCatalogItem {
+function buildNativeCatalogItem(broker: NativeBroker): BrokerCatalogItem {
   return {
     broker,
     capabilities: {
@@ -135,9 +140,9 @@ function buildProxyCatalogItem(
       liveQuote: true,
       orderExecution: false,
     },
-    mode: "proxy",
+    mode: "public",
     notes:
-      "Cotacao via feed publico resiliente (proxy multi-provider), sem execucao de ordem nesta build.",
+      "Cotacao via endpoint publico nativo da corretora, com fallback resiliente para feed proxy quando necessario.",
     status: "active",
   };
 }
@@ -188,16 +193,19 @@ function buildIqOptionCatalogItem(): BrokerCatalogItem {
 
 export class BrokerMarketService {
   private readonly binanceAdapter = new BinanceMarketDataAdapter();
+
   private readonly coinCapAdapter = new CoinCapMarketDataAdapter();
+
+  private readonly multiExchangeAdapter = new MultiExchangeMarketDataAdapter();
 
   public getBrokerCatalog(): BrokerCatalogResponse {
     return {
       brokers: [
         buildBinanceCatalogItem(),
-        buildProxyCatalogItem("bybit"),
-        buildProxyCatalogItem("coinbase"),
-        buildProxyCatalogItem("kraken"),
-        buildProxyCatalogItem("okx"),
+        buildNativeCatalogItem("bybit"),
+        buildNativeCatalogItem("coinbase"),
+        buildNativeCatalogItem("kraken"),
+        buildNativeCatalogItem("okx"),
         buildIqOptionCatalogItem(),
       ],
       fetchedAt: new Date().toISOString(),
@@ -209,10 +217,6 @@ export class BrokerMarketService {
     broker: BrokerName;
   }): Promise<BrokerLiveQuoteResponse> {
     const parsedInput = liveQuoteInputSchema.parse(input);
-
-    if (isProxyBroker(parsedInput.broker)) {
-      return this.getProxyLiveQuote(parsedInput.assetId, parsedInput.broker);
-    }
 
     if (parsedInput.broker === "binance") {
       const tickerSnapshot = await this.binanceAdapter.getTickerSnapshot({
@@ -236,6 +240,10 @@ export class BrokerMarketService {
         notes: catalog.notes,
         status: catalog.status,
       };
+    }
+
+    if (isNativeBroker(parsedInput.broker)) {
+      return this.getNativeExchangeLiveQuote(parsedInput.assetId, parsedInput.broker);
     }
 
     const catalog = buildIqOptionCatalogItem();
@@ -262,6 +270,7 @@ export class BrokerMarketService {
     assetIds: string[];
     broker: BrokerName;
   }): Promise<BrokerLiveQuoteBatchResponse> {
+    const startedAt = Date.now();
     const parsedInput = liveQuoteBatchInputSchema.parse(input);
     const requestedAssets = sanitizeAssetIds(parsedInput.assetIds);
 
@@ -269,6 +278,10 @@ export class BrokerMarketService {
       return {
         broker: parsedInput.broker,
         currency: "usd",
+        diagnostics: {
+          latencyMs: 0,
+          providerMode: this.resolveProviderMode(parsedInput.broker),
+        },
         fetchedAt: new Date().toISOString(),
         quotes: [],
         requestedAssets,
@@ -280,32 +293,6 @@ export class BrokerMarketService {
           unavailable: 0,
         },
       };
-    }
-
-    if (isProxyBroker(parsedInput.broker)) {
-      const quotes = await this.getProxyBatchQuotes(parsedInput.broker, requestedAssets);
-      return this.buildBatchResponse(parsedInput.broker, requestedAssets, quotes);
-    }
-
-    if (parsedInput.broker === "iqoption") {
-      const quotes = await Promise.all(
-        requestedAssets.map(async (assetId) => {
-          const quote = await this.getLiveQuote({
-            assetId,
-            broker: "iqoption",
-          });
-
-          return {
-            assetId,
-            broker: "iqoption" as const,
-            error: null,
-            quote,
-            status: "unavailable" as const,
-          };
-        }),
-      );
-
-      return this.buildBatchResponse(parsedInput.broker, requestedAssets, quotes);
     }
 
     const quotes = await Promise.all(
@@ -321,7 +308,7 @@ export class BrokerMarketService {
             broker: parsedInput.broker,
             error: null,
             quote,
-            status: "ok" as const,
+            status: quote.status === "requires_configuration" ? "unavailable" as const : "ok" as const,
           };
         } catch (error) {
           return {
@@ -335,75 +322,56 @@ export class BrokerMarketService {
       }),
     );
 
-    return this.buildBatchResponse(parsedInput.broker, requestedAssets, quotes);
+    return this.buildBatchResponse(parsedInput.broker, requestedAssets, quotes, Date.now() - startedAt);
   }
 
-  private async getProxyBatchQuotes(
-    broker: "bybit" | "coinbase" | "kraken" | "okx",
-    requestedAssets: string[],
-  ): Promise<BrokerLiveQuoteBatchItem[]> {
-    let marketOverviewAssets: CoinCapMarketAsset[] = [];
-
-    try {
-      const marketOverview = await this.coinCapAdapter.getMarketOverview({
-        limit: 25,
-      });
-      marketOverviewAssets = marketOverview.assets;
-    } catch {
-      marketOverviewAssets = [];
-    }
-
-    return Promise.all(
-      requestedAssets.map(async (assetId) => {
-        try {
-          const quote = await this.buildProxyQuoteFromCoinCap(assetId, broker, marketOverviewAssets);
-
-          return {
-            assetId,
-            broker,
-            error: null,
-            quote,
-            status: "ok" as const,
-          };
-        } catch (error) {
-          return {
-            assetId,
-            broker,
-            error: toBatchError(error),
-            quote: null,
-            status: "error" as const,
-          };
-        }
-      }),
-    );
-  }
-
-  private async getProxyLiveQuote(
+  private async getNativeExchangeLiveQuote(
     assetId: string,
-    broker: "bybit" | "coinbase" | "kraken" | "okx",
+    broker: NativeBroker,
   ): Promise<BrokerLiveQuoteResponse> {
-    let marketOverviewAssets: CoinCapMarketAsset[] = [];
+    const normalizedAssetId = assetId.toLowerCase();
+    const catalog = buildNativeCatalogItem(broker);
 
     try {
-      const marketOverview = await this.coinCapAdapter.getMarketOverview({
-        limit: 25,
+      const tickerSnapshot = await this.multiExchangeAdapter.getTickerSnapshot({
+        assetId: normalizedAssetId,
+        broker,
       });
-      marketOverviewAssets = marketOverview.assets;
-    } catch {
-      marketOverviewAssets = [];
-    }
 
-    const quote = await this.buildProxyQuoteFromCoinCap(assetId, broker, marketOverviewAssets);
-    return quote;
+      return {
+        assetId: normalizedAssetId,
+        broker,
+        capabilities: catalog.capabilities,
+        currency: "usd",
+        fetchedAt: tickerSnapshot.fetchedAt,
+        market: {
+          changePercent24h: tickerSnapshot.changePercent24h,
+          price: tickerSnapshot.lastPrice,
+          symbol: tickerSnapshot.symbol,
+          volume24h: tickerSnapshot.volume24h,
+        },
+        mode: catalog.mode,
+        notes: catalog.notes,
+        status: catalog.status,
+      };
+    } catch {
+      const fallbackQuote = await this.buildProxyQuoteFromCoinCap(normalizedAssetId, broker);
+
+      return {
+        ...fallbackQuote,
+        mode: "proxy",
+        notes: `${fallbackQuote.notes} Fallback automatico aplicado por indisponibilidade temporaria do endpoint nativo.`,
+      };
+    }
   }
 
   private async buildProxyQuoteFromCoinCap(
     rawAssetId: string,
-    broker: "bybit" | "coinbase" | "kraken" | "okx",
+    broker: NativeBroker,
     marketOverviewAssets?: CoinCapMarketAsset[],
   ): Promise<BrokerLiveQuoteResponse> {
     const assetId = rawAssetId.toLowerCase();
-    const catalog = buildProxyCatalogItem(broker);
+    const catalog = buildNativeCatalogItem(broker);
     const marketAsset = this.findAssetInOverview(assetId, marketOverviewAssets ?? []);
 
     if (marketAsset) {
@@ -419,7 +387,7 @@ export class BrokerMarketService {
           symbol: formatProxySymbol(marketAsset.symbol),
           volume24h: marketAsset.volumeUsd24h,
         },
-        mode: catalog.mode,
+        mode: "proxy",
         notes: catalog.notes,
         status: catalog.status,
       };
@@ -441,7 +409,7 @@ export class BrokerMarketService {
         symbol: formatProxySymbol(spotQuote.symbol),
         volume24h: null,
       },
-      mode: catalog.mode,
+      mode: "proxy",
       notes: `${catalog.notes} Variacao/volume podem ficar n/d para ativos fora do top overview.`,
       status: catalog.status,
     };
@@ -465,10 +433,19 @@ export class BrokerMarketService {
     return null;
   }
 
+  private resolveProviderMode(broker: BrokerName): "proxy" | "public" | "unavailable" {
+    if (broker === "iqoption") {
+      return "unavailable";
+    }
+
+    return "public";
+  }
+
   private buildBatchResponse(
     broker: BrokerName,
     requestedAssets: string[],
     quotes: BrokerLiveQuoteBatchItem[],
+    latencyMs: number,
   ): BrokerLiveQuoteBatchResponse {
     const ok = quotes.filter((item) => item.status === "ok").length;
     const unavailable = quotes.filter((item) => item.status === "unavailable").length;
@@ -481,6 +458,10 @@ export class BrokerMarketService {
     return {
       broker,
       currency: "usd",
+      diagnostics: {
+        latencyMs: Number(Math.max(0, latencyMs).toFixed(1)),
+        providerMode: this.resolveProviderMode(broker),
+      },
       fetchedAt: new Date().toISOString(),
       quotes,
       requestedAssets,

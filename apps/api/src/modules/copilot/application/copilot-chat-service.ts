@@ -19,6 +19,11 @@ import {
   type CopilotChatSessionHistory,
 } from "../../../shared/observability/copilot-chat-audit-store.js";
 import {
+  AirdropIntelligenceService,
+  type AirdropRewardType,
+  type AirdropConfidence,
+} from "../../airdrops/application/airdrop-intelligence-service.js";
+import {
   BrokerMarketService,
   type BrokerName,
 } from "../../brokers/application/broker-market-service.js";
@@ -54,12 +59,14 @@ const cryptoChartService = new CryptoChartService();
 const cryptoSpotPriceService = new CryptoSpotPriceService();
 const cryptoSyncPolicyService = new CryptoSyncPolicyService();
 const systemStatusService = new SystemStatusService();
+const airdropIntelligenceService = new AirdropIntelligenceService();
 
 const copilotDefaultSystemPrompt = [
   "Voce e um copiloto financeiro focado em dados objetivos de mercado e operacao.",
   "Quando a pergunta envolver resumo, panorama ou contexto do mercado cripto, priorize a tool get_crypto_market_overview.",
   "Quando a pergunta envolver preco ou comparacao entre ativos, use get_crypto_spot_price ou get_crypto_multi_spot_price.",
   "Quando a pergunta envolver grafico, tendencia, suporte/resistencia ou analise tecnica de cripto, use get_crypto_chart_insights.",
+  "Quando a pergunta envolver airdrops, retroativos, testnet, quests ou farming, use get_airdrop_opportunities.",
   "Quando a pergunta envolver corretoras (Binance, Bybit, Coinbase, Kraken, OKX, IQ Option), use get_broker_live_quote para informar disponibilidade e cotacao ao vivo quando possivel.",
   "Quando a pergunta pedir comprar/vender, responda com sinal tatico informativo (buy/sell/wait), confianca e niveis de risco, sem tratar como recomendacao de investimento.",
   "Quando a pergunta envolver indices, acoes, cambio, juros ou commodities, use get_financial_market_snapshot.",
@@ -90,8 +97,16 @@ const copilotMarketOverviewToolInputSchema = z.object({
 const copilotCryptoChartToolInputSchema = z.object({
   assetId: z.string().trim().min(1).default("bitcoin"),
   currency: z.string().trim().min(2).max(10).default("usd"),
+  exchange: z.enum(["binance", "bybit", "coinbase", "kraken", "okx"]).default("binance"),
   mode: z.enum(["delayed", "live"]).default("delayed"),
   range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("7d"),
+});
+
+const copilotAirdropOpportunitiesToolInputSchema = z.object({
+  includeSpeculative: z.boolean().default(true),
+  limit: z.number().int().min(3).max(25).default(10),
+  minScore: z.number().min(0).max(100).default(30),
+  query: z.string().trim().max(160).optional(),
 });
 
 const copilotSyncPolicyToolInputSchema = z.object({
@@ -190,6 +205,36 @@ const riskAssetAliases: Array<{ aliases: string[]; assetId: string }> = [
     assetId: "pi-network",
   },
 ];
+
+const airdropNoiseTokens = new Set([
+  "airdrop",
+  "airdrops",
+  "buscar",
+  "busque",
+  "campanha",
+  "campanhas",
+  "com",
+  "da",
+  "das",
+  "de",
+  "do",
+  "dos",
+  "fazer",
+  "me",
+  "na",
+  "nas",
+  "no",
+  "nos",
+  "para",
+  "por",
+  "quais",
+  "quero",
+  "retroativo",
+  "retroativos",
+  "semana",
+  "sobre",
+  "testnet",
+]);
 
 function normalizeText(value: string): string {
   return value
@@ -311,6 +356,37 @@ function hasBrokerIntegrationIntent(message: string): boolean {
     normalizedMessage.includes("api");
 
   return mentionsBroker && asksForLiveQuote;
+}
+
+function hasAirdropIntent(message: string): boolean {
+  const normalizedMessage = normalizeText(message);
+  const asksForAirdrops =
+    normalizedMessage.includes("airdrop") ||
+    normalizedMessage.includes("airdrops") ||
+    normalizedMessage.includes("retroativo") ||
+    normalizedMessage.includes("retroactive") ||
+    normalizedMessage.includes("farming") ||
+    normalizedMessage.includes("quest") ||
+    normalizedMessage.includes("testnet") ||
+    normalizedMessage.includes("drop") ||
+    normalizedMessage.includes("eligibilidade") ||
+    normalizedMessage.includes("elegivel");
+
+  return asksForAirdrops;
+}
+
+function resolveAirdropFocusQuery(message: string): string | undefined {
+  const normalizedMessage = normalizeText(message);
+  const filteredTokens = normalizedMessage
+    .split(/[^a-z0-9]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3 && !airdropNoiseTokens.has(token));
+
+  if (filteredTokens.length === 0) {
+    return undefined;
+  }
+
+  return [...new Set(filteredTokens)].slice(0, 6).join(" ");
 }
 
 function hasExactAlias(normalizedMessage: string, alias: string): boolean {
@@ -582,6 +658,34 @@ function formatTradeActionLabel(tradeAction: TradeAction): string {
 
 function formatConfidenceScore(value: number): string {
   return `${Math.round(value)}%`;
+}
+
+function formatAirdropConfidenceLabel(confidence: AirdropConfidence): string {
+  if (confidence === "high") {
+    return "alta";
+  }
+
+  if (confidence === "medium") {
+    return "media";
+  }
+
+  return "baixa";
+}
+
+function formatAirdropRewardTypeLabel(rewardType: AirdropRewardType): string {
+  if (rewardType === "token") {
+    return "token";
+  }
+
+  if (rewardType === "points") {
+    return "points";
+  }
+
+  if (rewardType === "nft") {
+    return "nft";
+  }
+
+  return "indefinido";
 }
 
 function formatRangeLabel(range: CryptoChartRange): string {
@@ -865,9 +969,15 @@ const copilotTools: OpenRouterToolDefinition[] = [
           description: "Moeda de referencia do grafico, exemplo: usd, brl",
           type: "string",
         },
+        exchange: {
+          default: "binance",
+          description: "Corretora para modo live: binance, bybit, coinbase, kraken ou okx",
+          enum: ["binance", "bybit", "coinbase", "kraken", "okx"],
+          type: "string",
+        },
         mode: {
           default: "delayed",
-          description: "Modo de consulta: delayed (historico padrao) ou live (snapshot quase em tempo real via Binance)",
+          description: "Modo de consulta: delayed (historico padrao) ou live (snapshot quase em tempo real por exchange)",
           enum: ["delayed", "live"],
           type: "string",
         },
@@ -885,6 +995,7 @@ const copilotTools: OpenRouterToolDefinition[] = [
         input.mode === "live"
           ? await cryptoChartService.getLiveChart({
               assetId: input.assetId,
+              broker: input.exchange,
               range: input.range,
             })
           : await cryptoChartService.getChart({
@@ -906,6 +1017,44 @@ const copilotTools: OpenRouterToolDefinition[] = [
         range: chart.range,
         textualSummary: `Modo ${chart.mode} | Faixa ${formatRangeLabel(chart.range)} | ${formatTrendLabel(chart.insights.trend)} | acao ${formatTradeActionLabel(chart.insights.tradeAction)} | confianca ${formatConfidenceScore(chart.insights.confidenceScore)} | variacao ${chart.insights.changePercent}% | volatilidade ${chart.insights.volatilityPercent}%`,
       };
+    },
+  },
+  {
+    description:
+      "Retorna radar de oportunidades de airdrops em multiplas fontes (airdrops.io, airdropalert, DefiLlama e CoinGecko), com score, confianca e tarefas sugeridas.",
+    inputSchema: copilotAirdropOpportunitiesToolInputSchema,
+    name: "get_airdrop_opportunities",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        includeSpeculative: {
+          default: true,
+          description: "Quando true inclui oportunidades especulativas de menor confianca",
+          type: "boolean",
+        },
+        limit: {
+          default: 10,
+          description: "Quantidade maxima de oportunidades retornadas",
+          maximum: 25,
+          minimum: 3,
+          type: "number",
+        },
+        minScore: {
+          default: 30,
+          description: "Score minimo (0-100) para filtrar oportunidades",
+          maximum: 100,
+          minimum: 0,
+          type: "number",
+        },
+        query: {
+          description: "Filtro opcional por projeto/ecossistema (ex.: base, zksync, restaking)",
+          type: "string",
+        },
+      },
+      type: "object",
+    },
+    run: (input: z.infer<typeof copilotAirdropOpportunitiesToolInputSchema>) => {
+      return airdropIntelligenceService.getOpportunities(input);
     },
   },
   {
@@ -1127,6 +1276,24 @@ export class CopilotChatService {
         );
 
         return completion;
+      }
+    }
+
+    if (hasAirdropIntent(input.message)) {
+      try {
+        const fallbackAnswer = await this.buildAirdropIntelligenceFallback(input.message);
+
+        return {
+          ...completion,
+          answer: fallbackAnswer,
+        };
+      } catch (error) {
+        logger.warn(
+          {
+            err: error,
+          },
+          "Failed to build airdrop intelligence fallback",
+        );
       }
     }
 
@@ -1380,14 +1547,54 @@ export class CopilotChatService {
     ].join("\n");
   }
 
+  private async buildAirdropIntelligenceFallback(message: string): Promise<string> {
+    const focusQuery = resolveAirdropFocusQuery(message);
+    const airdropRadar = await airdropIntelligenceService.getOpportunities({
+      includeSpeculative: true,
+      limit: 8,
+      minScore: 28,
+      query: focusQuery,
+    });
+
+    if (airdropRadar.opportunities.length === 0) {
+      return [
+        "Radar de airdrops (multi-fonte) sem oportunidades pontuadas no corte atual.",
+        focusQuery ? `Filtro aplicado: ${focusQuery}.` : "Filtro aplicado: geral.",
+        `Cobertura de fontes: ${airdropRadar.summary.sourcesHealthy}/${airdropRadar.summary.totalSources} (${airdropRadar.summary.sourceCoveragePercent}%).`,
+        "Ajuste sugerido: reduza o minScore para 20-25, inclua oportunidades especulativas e amplie para ecossistemas especificos (Base, Arbitrum, zkSync, Solana).",
+        "Aviso: oportunidades de airdrop nao sao garantia de recompensa; valide sempre regras oficiais e risco operacional.",
+      ].join("\n");
+    }
+
+    const topOpportunities = airdropRadar.opportunities
+      .slice(0, 5)
+      .map((opportunity, index) => {
+        const tasksLabel = opportunity.tasks.slice(0, 2).join("; ");
+        const chainLabel = opportunity.chain ?? "multichain";
+
+        return `${index + 1}. ${opportunity.project} | score ${opportunity.score} | confianca ${formatAirdropConfidenceLabel(opportunity.confidence)} | chain ${chainLabel} | reward ${formatAirdropRewardTypeLabel(opportunity.rewardType)} | tarefas: ${tasksLabel} | fontes: ${opportunity.sources.join(", ")} | link: ${opportunity.url}`;
+      });
+
+    return [
+      "Radar de airdrops (multi-fonte, leitura objetiva e sem promessa de reward).",
+      focusQuery ? `Filtro aplicado: ${focusQuery}.` : "Filtro aplicado: geral.",
+      `Cobertura de fontes: ${airdropRadar.summary.sourcesHealthy}/${airdropRadar.summary.totalSources} (${airdropRadar.summary.sourceCoveragePercent}%).`,
+      ...topOpportunities,
+      "Checklist profissional: validar criterio oficial de elegibilidade, custo de gas/ponte, risco de contrato e prazo de snapshot antes de executar qualquer tarefa.",
+    ].join("\n");
+  }
+
   private async buildChartAnalysisFallback(message: string): Promise<string> {
     const assetId = resolvePrimaryAssetIdForChart(message);
     const range = resolveChartRangeFromMessage(message);
     const mode = resolveChartModeFromMessage(message);
+    const resolvedBroker = resolveBrokerFromMessage(message);
+    const broker = resolvedBroker === "iqoption" ? "binance" : resolvedBroker;
     const chart =
       mode === "live"
         ? await cryptoChartService.getLiveChart({
             assetId,
+            broker,
             range,
           })
         : await cryptoChartService.getChart({

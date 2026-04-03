@@ -9,8 +9,14 @@ import { assertInternalRouteAuth } from "../../../shared/http/internal-route-aut
 import {
   clearCopilotAuditHistory,
   clearOperationalHealthHistory,
+  exportAirdropsIntelligenceHealthCsv,
+  exportBrokerLiveQuoteStreamHealthCsv,
+  exportCryptoLiveChartHealthCsv,
   exportOperationalHealthHistoryAggregatedCsv,
   exportOperationalHealthHistoryCsv,
+  getAirdropsIntelligenceHealth,
+  getBrokerLiveQuoteStreamHealth,
+  getCryptoLiveChartHealth,
   getCopilotAuditHistory,
   getHealth,
   getOperationalHealthHistoryAggregated,
@@ -39,6 +45,12 @@ export function registerSystemRoutes(app: FastifyInstance): void {
   app.get("/health", getHealth);
   app.get("/ready", getReady);
   app.get("/internal/scheduler/crypto-metrics", internalRouteOptions, getSchedulerMetrics);
+  app.get("/internal/health/streams/brokers", internalRouteOptions, getBrokerLiveQuoteStreamHealth);
+  app.get("/internal/health/streams/brokers.csv", internalRouteOptions, exportBrokerLiveQuoteStreamHealthCsv);
+  app.get("/internal/health/live-chart/crypto", internalRouteOptions, getCryptoLiveChartHealth);
+  app.get("/internal/health/live-chart/crypto.csv", internalRouteOptions, exportCryptoLiveChartHealthCsv);
+  app.get("/internal/health/airdrops", internalRouteOptions, getAirdropsIntelligenceHealth);
+  app.get("/internal/health/airdrops.csv", internalRouteOptions, exportAirdropsIntelligenceHealthCsv);
   app.get("/internal/health/operational", internalRouteOptions, getOperationalHealth);
   app.get(
     "/internal/health/operational/history",

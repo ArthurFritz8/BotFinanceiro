@@ -6,13 +6,21 @@ import {
   CoinGeckoMarketChartAdapter,
   type CoinGeckoChartPoint,
 } from "../../../integrations/market_data/coingecko-market-chart-adapter.js";
+import {
+  MultiExchangeMarketDataAdapter,
+  type MultiExchangeChartPoint,
+  type ExchangeBroker,
+} from "../../../integrations/market_data/multi-exchange-market-data-adapter.js";
 import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { memoryCache } from "../../../shared/cache/memory-cache.js";
+import { cryptoLiveChartMetricsStore } from "../../../shared/observability/crypto-live-chart-metrics-store.js";
 
 export type CryptoChartRange = "24h" | "7d" | "30d" | "90d" | "1y";
 export type CryptoTrend = "bearish" | "bullish" | "sideways";
 export type TradeAction = "buy" | "sell" | "wait";
+export type LiveChartBroker = "binance" | ExchangeBroker;
+export type CryptoChartProvider = "coingecko" | LiveChartBroker;
 
 interface CachedChartPayload {
   assetId: string;
@@ -22,7 +30,7 @@ interface CachedChartPayload {
   live: CryptoLiveSnapshot | null;
   mode: "delayed" | "live";
   points: CryptoChartPoint[];
-  provider: "binance" | "coingecko";
+  provider: CryptoChartProvider;
   range: CryptoChartRange;
 }
 
@@ -76,7 +84,7 @@ export interface CryptoChartInsights {
 
 export interface CryptoLiveSnapshot {
   changePercent24h: number | null;
-  source: "binance";
+  source: LiveChartBroker;
   symbol: string;
   volume24h: number | null;
 }
@@ -93,7 +101,7 @@ export interface CryptoChartResponse {
   live: CryptoLiveSnapshot | null;
   mode: "delayed" | "live";
   points: CryptoChartPoint[];
-  provider: "binance" | "coingecko";
+  provider: CryptoChartProvider;
   range: CryptoChartRange;
 }
 
@@ -105,7 +113,12 @@ function buildCacheKey(
   assetId: string,
   currency: string,
   range: CryptoChartRange,
+  broker?: LiveChartBroker,
 ): string {
+  if (mode === "live") {
+    return `crypto:chart:${mode}:${assetId}:${currency}:${range}:${broker ?? "binance"}`;
+  }
+
   return `crypto:chart:${mode}:${assetId}:${currency}:${range}`;
 }
 
@@ -501,6 +514,17 @@ function normalizeBinancePoint(point: BinanceChartPoint): CryptoChartPoint {
   };
 }
 
+function normalizeMultiExchangePoint(point: MultiExchangeChartPoint): CryptoChartPoint {
+  return {
+    close: point.close,
+    high: point.high,
+    low: point.low,
+    open: point.open,
+    timestamp: point.timestamp,
+    volume: point.volume,
+  };
+}
+
 function toResponse(
   payload: CachedChartPayload,
   cacheState: "fresh" | "miss" | "refreshed" | "stale",
@@ -526,6 +550,7 @@ function toResponse(
 export class CryptoChartService {
   private readonly coinGeckoAdapter = new CoinGeckoMarketChartAdapter();
   private readonly binanceAdapter = new BinanceMarketDataAdapter();
+  private readonly multiExchangeAdapter = new MultiExchangeMarketDataAdapter();
 
   public async refreshChart(input: {
     assetId: string;
@@ -589,9 +614,12 @@ export class CryptoChartService {
   public async getLiveChart(input: {
     assetId: string;
     range: CryptoChartRange;
+    broker?: LiveChartBroker;
   }): Promise<CryptoChartResponse> {
+    const liveBroker = input.broker ?? "binance";
     const normalizedInput = {
       assetId: input.assetId.toLowerCase(),
+      broker: liveBroker,
       currency: "usd",
       range: input.range,
     };
@@ -600,6 +628,7 @@ export class CryptoChartService {
       normalizedInput.assetId,
       normalizedInput.currency,
       normalizedInput.range,
+      normalizedInput.broker,
     );
     const cachedPayload = memoryCache.get<CachedChartPayload>(cacheKey);
 
@@ -620,44 +649,99 @@ export class CryptoChartService {
 
   private async refreshLiveChart(input: {
     assetId: string;
+    broker: LiveChartBroker;
     currency: string;
     range: CryptoChartRange;
   }): Promise<CryptoChartResponse> {
-    const [chartPayload, tickerSnapshot] = await Promise.all([
-      this.binanceAdapter.getMarketChart({
-        assetId: input.assetId,
-        range: input.range,
-      }),
-      this.binanceAdapter.getTickerSnapshot({
-        assetId: input.assetId,
-      }),
-    ]);
-    const normalizedPayload: CachedChartPayload = {
-      assetId: chartPayload.assetId,
-      currency: "usd",
-      fetchedAt: chartPayload.fetchedAt,
-      insights: computeInsights(chartPayload.points.map((point) => normalizeBinancePoint(point))),
-      live: {
-        changePercent24h: tickerSnapshot.changePercent24h,
-        source: "binance",
-        symbol: tickerSnapshot.symbol,
-        volume24h: tickerSnapshot.volume24h,
-      },
-      mode: "live",
-      points: chartPayload.points.map((point) => normalizeBinancePoint(point)),
-      provider: "binance",
-      range: chartPayload.range,
-    };
-    const cacheKey = buildCacheKey(
-      normalizedPayload.mode,
-      normalizedPayload.assetId,
-      normalizedPayload.currency,
-      normalizedPayload.range,
-    );
+    const startedAtMs = Date.now();
 
-    memoryCache.set(cacheKey, normalizedPayload, liveChartFreshTtlSeconds, liveChartStaleSeconds);
+    try {
+      let normalizedPayload: CachedChartPayload;
 
-    return toResponse(normalizedPayload, "refreshed", false);
+      if (input.broker === "binance") {
+        const [chartPayload, tickerSnapshot] = await Promise.all([
+          this.binanceAdapter.getMarketChart({
+            assetId: input.assetId,
+            range: input.range,
+          }),
+          this.binanceAdapter.getTickerSnapshot({
+            assetId: input.assetId,
+          }),
+        ]);
+        const points = chartPayload.points.map((point) => normalizeBinancePoint(point));
+
+        normalizedPayload = {
+          assetId: chartPayload.assetId,
+          currency: "usd",
+          fetchedAt: chartPayload.fetchedAt,
+          insights: computeInsights(points),
+          live: {
+            changePercent24h: tickerSnapshot.changePercent24h,
+            source: "binance",
+            symbol: tickerSnapshot.symbol,
+            volume24h: tickerSnapshot.volume24h,
+          },
+          mode: "live",
+          points,
+          provider: "binance",
+          range: chartPayload.range,
+        };
+      } else {
+        const [chartPayload, tickerSnapshot] = await Promise.all([
+          this.multiExchangeAdapter.getMarketChart({
+            assetId: input.assetId,
+            broker: input.broker,
+            range: input.range,
+          }),
+          this.multiExchangeAdapter.getTickerSnapshot({
+            assetId: input.assetId,
+            broker: input.broker,
+          }),
+        ]);
+        const points = chartPayload.points.map((point) => normalizeMultiExchangePoint(point));
+
+        normalizedPayload = {
+          assetId: chartPayload.assetId,
+          currency: "usd",
+          fetchedAt: chartPayload.fetchedAt,
+          insights: computeInsights(points),
+          live: {
+            changePercent24h: tickerSnapshot.changePercent24h,
+            source: tickerSnapshot.broker,
+            symbol: tickerSnapshot.symbol,
+            volume24h: tickerSnapshot.volume24h,
+          },
+          mode: "live",
+          points,
+          provider: chartPayload.broker,
+          range: chartPayload.range,
+        };
+      }
+
+      const cacheKey = buildCacheKey(
+        normalizedPayload.mode,
+        normalizedPayload.assetId,
+        normalizedPayload.currency,
+        normalizedPayload.range,
+        input.broker,
+      );
+
+      memoryCache.set(cacheKey, normalizedPayload, liveChartFreshTtlSeconds, liveChartStaleSeconds);
+      cryptoLiveChartMetricsStore.onRefreshSuccess({
+        broker: input.broker,
+        latencyMs: Date.now() - startedAtMs,
+      });
+
+      return toResponse(normalizedPayload, "refreshed", false);
+    } catch (error) {
+      cryptoLiveChartMetricsStore.onRefreshError({
+        broker: input.broker,
+        latencyMs: Date.now() - startedAtMs,
+        message: error instanceof Error ? error.message : "live-chart refresh failed",
+      });
+
+      throw error;
+    }
   }
 
   private async fetchDelayedChartWithFallback(input: {

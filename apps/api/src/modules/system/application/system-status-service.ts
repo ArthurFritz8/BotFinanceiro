@@ -5,6 +5,18 @@ import {
 } from "../../../jobs/crypto-sync-job-runner.js";
 import { env } from "../../../shared/config/env.js";
 import {
+  brokerLiveQuoteStreamMetricsStore,
+  type BrokerLiveQuoteStreamMetricsSnapshot,
+} from "../../../shared/observability/broker-live-quote-stream-metrics-store.js";
+import {
+  cryptoLiveChartMetricsStore,
+  type CryptoLiveChartMetricsSnapshot,
+} from "../../../shared/observability/crypto-live-chart-metrics-store.js";
+import {
+  airdropsIntelligenceMetricsStore,
+  type AirdropsIntelligenceMetricsSnapshot,
+} from "../../../shared/observability/airdrops-intelligence-metrics-store.js";
+import {
   operationalHealthHistoryStore,
   type PersistedOperationalHealthRecord,
 } from "../../../shared/observability/operational-health-history-store.js";
@@ -19,6 +31,12 @@ export interface ReadinessStatus {
   schedulerEnabled: boolean;
   status: "ready";
 }
+
+export interface BrokerLiveQuoteStreamHealth extends BrokerLiveQuoteStreamMetricsSnapshot {}
+
+export interface CryptoLiveChartHealth extends CryptoLiveChartMetricsSnapshot {}
+
+export interface AirdropsIntelligenceHealth extends AirdropsIntelligenceMetricsSnapshot {}
 
 type OperationalSeverity = "critical" | "warning";
 
@@ -122,6 +140,30 @@ export interface OperationalHealthHistoryCsvExport {
   limit: number;
   totalMatched: number;
   totalStored: number;
+}
+
+export interface AirdropsIntelligenceHealthCsvExport {
+  csv: string;
+  exportedCount: number;
+  fileName: string;
+  generatedAt: string;
+  totalSources: number;
+}
+
+export interface BrokerLiveQuoteStreamHealthCsvExport {
+  csv: string;
+  exportedCount: number;
+  fileName: string;
+  generatedAt: string;
+  totalBrokers: number;
+}
+
+export interface CryptoLiveChartHealthCsvExport {
+  csv: string;
+  exportedCount: number;
+  fileName: string;
+  generatedAt: string;
+  totalBrokers: number;
 }
 
 export interface OperationalHistoryQueryOptions {
@@ -348,6 +390,18 @@ export class SystemStatusService {
 
   public getSchedulerMetrics(): CryptoSchedulerMetricsSnapshot {
     return cryptoSyncJobRunner.getMetricsSnapshot();
+  }
+
+  public getBrokerLiveQuoteStreamHealth(): BrokerLiveQuoteStreamHealth {
+    return brokerLiveQuoteStreamMetricsStore.getSnapshot();
+  }
+
+  public getCryptoLiveChartHealth(): CryptoLiveChartHealth {
+    return cryptoLiveChartMetricsStore.getSnapshot();
+  }
+
+  public getAirdropsIntelligenceHealth(): AirdropsIntelligenceHealth {
+    return airdropsIntelligenceMetricsStore.getSnapshot();
   }
 
   public getOperationalHealth(): OperationalHealthStatus {
@@ -619,6 +673,228 @@ export class SystemStatusService {
       granularity: aggregatedHistory.granularity,
       totalBuckets: aggregatedHistory.totalBuckets,
       totalStored: aggregatedHistory.totalStored,
+    };
+  }
+
+  public getAirdropsIntelligenceHealthCsv(): AirdropsIntelligenceHealthCsvExport {
+    const snapshot = this.getAirdropsIntelligenceHealth();
+    const headers = [
+      "scope",
+      "source",
+      "requests",
+      "successful_requests",
+      "failed_requests",
+      "success_rate_percent",
+      "total_items",
+      "avg_latency_ms",
+      "p95_latency_ms",
+      "last_latency_ms",
+      "last_status",
+      "last_fetch_at",
+      "last_error_at",
+      "last_error_code",
+      "last_error_message",
+      "last_run_at",
+      "last_success_at",
+      "generated_at",
+    ];
+    const lines = [buildCsvRow(headers)];
+
+    lines.push(
+      buildCsvRow([
+        "global",
+        "all",
+        snapshot.global.requests,
+        snapshot.global.successfulRequests,
+        snapshot.global.failedRequests,
+        snapshot.global.successRatePercent,
+        snapshot.global.totalItems,
+        snapshot.global.avgLatencyMs,
+        snapshot.global.p95LatencyMs,
+        "",
+        "",
+        "",
+        snapshot.global.lastErrorAt,
+        snapshot.global.lastErrorCode,
+        snapshot.global.lastErrorMessage,
+        snapshot.global.lastRunAt,
+        snapshot.global.lastSuccessAt,
+        snapshot.generatedAt,
+      ]),
+    );
+
+    for (const [sourceName, sourceSnapshot] of Object.entries(snapshot.sources)) {
+      lines.push(
+        buildCsvRow([
+          "source",
+          sourceName,
+          sourceSnapshot.requests,
+          sourceSnapshot.successfulRequests,
+          sourceSnapshot.failedRequests,
+          sourceSnapshot.successRatePercent,
+          sourceSnapshot.totalItems,
+          sourceSnapshot.avgLatencyMs,
+          sourceSnapshot.p95LatencyMs,
+          sourceSnapshot.lastLatencyMs,
+          sourceSnapshot.lastStatus,
+          sourceSnapshot.lastFetchAt,
+          sourceSnapshot.lastErrorAt,
+          sourceSnapshot.lastErrorCode,
+          sourceSnapshot.lastErrorMessage,
+          "",
+          "",
+          snapshot.generatedAt,
+        ]),
+      );
+    }
+
+    const generatedAt = new Date().toISOString();
+    const safeDate = generatedAt.replaceAll(":", "-").replaceAll(".", "-");
+
+    return {
+      csv: lines.join("\n"),
+      exportedCount: lines.length - 1,
+      fileName: `airdrops-health-${safeDate}.csv`,
+      generatedAt,
+      totalSources: Object.keys(snapshot.sources).length,
+    };
+  }
+
+  public getBrokerLiveQuoteStreamHealthCsv(): BrokerLiveQuoteStreamHealthCsvExport {
+    const snapshot = this.getBrokerLiveQuoteStreamHealth();
+    const headers = [
+      "scope",
+      "broker",
+      "opened_connections",
+      "active_connections",
+      "closed_connections",
+      "snapshots_published",
+      "snapshot_errors",
+      "keepalive_events",
+      "last_snapshot_at",
+      "last_keepalive_at",
+      "last_error_at",
+      "last_error_message",
+      "generated_at",
+    ];
+    const lines = [buildCsvRow(headers)];
+
+    lines.push(
+      buildCsvRow([
+        "global",
+        "all",
+        snapshot.global.openedConnections,
+        snapshot.global.activeConnections,
+        snapshot.global.closedConnections,
+        snapshot.global.snapshotsPublished,
+        snapshot.global.snapshotErrors,
+        "",
+        "",
+        "",
+        "",
+        "",
+        snapshot.generatedAt,
+      ]),
+    );
+
+    for (const [brokerName, brokerSnapshot] of Object.entries(snapshot.brokers)) {
+      lines.push(
+        buildCsvRow([
+          "broker",
+          brokerName,
+          brokerSnapshot.openedConnections,
+          brokerSnapshot.activeConnections,
+          brokerSnapshot.closedConnections,
+          brokerSnapshot.snapshotsPublished,
+          brokerSnapshot.snapshotErrors,
+          brokerSnapshot.keepAliveEvents,
+          brokerSnapshot.lastSnapshotAt,
+          brokerSnapshot.lastKeepAliveAt,
+          brokerSnapshot.lastErrorAt,
+          brokerSnapshot.lastErrorMessage,
+          snapshot.generatedAt,
+        ]),
+      );
+    }
+
+    const generatedAt = new Date().toISOString();
+    const safeDate = generatedAt.replaceAll(":", "-").replaceAll(".", "-");
+
+    return {
+      csv: lines.join("\n"),
+      exportedCount: lines.length - 1,
+      fileName: `broker-stream-health-${safeDate}.csv`,
+      generatedAt,
+      totalBrokers: Object.keys(snapshot.brokers).length,
+    };
+  }
+
+  public getCryptoLiveChartHealthCsv(): CryptoLiveChartHealthCsvExport {
+    const snapshot = this.getCryptoLiveChartHealth();
+    const headers = [
+      "scope",
+      "broker",
+      "requests",
+      "successful_requests",
+      "failed_requests",
+      "success_rate_percent",
+      "avg_latency_ms",
+      "p95_latency_ms",
+      "last_latency_ms",
+      "last_success_at",
+      "last_error_at",
+      "last_error_message",
+      "generated_at",
+    ];
+    const lines = [buildCsvRow(headers)];
+
+    lines.push(
+      buildCsvRow([
+        "global",
+        "all",
+        snapshot.global.requests,
+        snapshot.global.successfulRequests,
+        snapshot.global.failedRequests,
+        snapshot.global.successRatePercent,
+        snapshot.global.avgLatencyMs,
+        snapshot.global.p95LatencyMs,
+        "",
+        "",
+        "",
+        "",
+        snapshot.generatedAt,
+      ]),
+    );
+
+    for (const [brokerName, brokerSnapshot] of Object.entries(snapshot.brokers)) {
+      lines.push(
+        buildCsvRow([
+          "broker",
+          brokerName,
+          brokerSnapshot.requests,
+          brokerSnapshot.successfulRequests,
+          brokerSnapshot.failedRequests,
+          brokerSnapshot.successRatePercent,
+          brokerSnapshot.avgLatencyMs,
+          brokerSnapshot.p95LatencyMs,
+          brokerSnapshot.lastLatencyMs,
+          brokerSnapshot.lastSuccessAt,
+          brokerSnapshot.lastErrorAt,
+          brokerSnapshot.lastErrorMessage,
+          snapshot.generatedAt,
+        ]),
+      );
+    }
+
+    const generatedAt = new Date().toISOString();
+    const safeDate = generatedAt.replaceAll(":", "-").replaceAll(".", "-");
+
+    return {
+      csv: lines.join("\n"),
+      exportedCount: lines.length - 1,
+      fileName: `crypto-live-chart-health-${safeDate}.csv`,
+      generatedAt,
+      totalBrokers: Object.keys(snapshot.brokers).length,
     };
   }
 }

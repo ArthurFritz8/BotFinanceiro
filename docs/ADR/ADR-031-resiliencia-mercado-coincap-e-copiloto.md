@@ -124,3 +124,34 @@ O sistema ja possuia tool calling read-only e protecao de resiliencia para CoinG
 52. Fluxo de erro do grafico ganhou contingencia: em falha de historico, o frontend preserva ultimo snapshot valido e/ou exibe snapshot de contingencia baseado em spot para nao deixar tela vazia.
 53. Copiloto recebeu guarda de qualidade para intencao de grafico: quando resposta vier desalinhada (ex.: risco generico sem leitura tecnica), o fallback tecnico estruturado e forçado automaticamente.
 54. Prompt de acao "Pedir analise tecnica" foi reforcado com contexto de corretora, exigencia de fallback explicito e foco em sinais tecnicos completos (RSI, MACD, ATR, suporte/resistencia e plano tatico).
+55. Modulo de corretoras evoluiu para cotacao nativa por exchange (`bybit`, `coinbase`, `kraken`, `okx`) via novo adapter multi-provider, reduzindo dependencia exclusiva de feed proxy.
+56. Fluxo de cotacao nativa ganhou fallback automatico para CoinCap no backend quando endpoint da exchange falha, preservando continuidade operacional sem interromper a watchlist.
+57. Catalogo de corretoras foi atualizado para refletir modo `public` nas exchanges com feed nativo ativo, mantendo `iqoption` como `requires_configuration`.
+58. Endpoint de stream em tempo real foi adicionado em `GET /v1/brokers/live-quote/stream` (SSE) com snapshots periodicos, keepalive e payload sequenciado para consumo resiliente no frontend.
+59. Watchlist do frontend passou a operar em modo stream-first (SSE) com fallback automatico para polling quando necessario, reduzindo latencia percebida e burst de requisicoes em sincronizacao.
+60. Adicionado painel operacional em tempo real na watchlist com diagnostico visual de transporte, latencia, modo de provider, taxa de fallback e taxa de falhas.
+61. Pipeline de sincronizacao da watchlist foi refatorado para reaproveitar processamento batch/fallback tanto em polling quanto em stream, mantendo consistencia de status e renderizacao.
+62. Testes de brokers foram atualizados para validar cotacao nativa OKX e novo estado de catalogo (`public`) nas exchanges com integracao ativa.
+63. Adicionada instrumentacao dedicada do stream SSE de corretoras com store in-memory de metricas (conexoes abertas/ativas/fechadas, snapshots publicados, erros e keepalive) por broker e consolidado global.
+64. Exposto endpoint interno autenticado `GET /internal/health/streams/brokers` para observabilidade operacional do stream, incluindo timestamps de ultimo snapshot/erro/keepalive por corretora.
+65. Adapter multi-exchange evoluiu para candles nativos (`market chart`) em `bybit`, `coinbase`, `kraken` e `okx`, com normalizacao OHLCV e retry resiliente para falhas transientes.
+66. Endpoint `GET /v1/crypto/live-chart` passou a aceitar `exchange` (`binance|bybit|coinbase|kraken|okx`) e a servir snapshot live nativo por corretora, com cache segmentado por broker.
+67. Frontend Chart Lab passou a enviar `exchange` no fluxo live e habilitar live nativo para as corretoras suportadas; cobertura de testes foi ampliada para `exchange=okx` e validacao de exchange invalida.
+68. Adicionado store de observabilidade para live-chart com agregacao de latencia por corretora (requests, sucesso/erro, taxa de sucesso, media e p95), instrumentado no refresh live do backend.
+69. Exposto endpoint interno autenticado `GET /internal/health/live-chart/crypto` para diagnostico operacional do live-chart por exchange.
+70. Cobertura de integracao ampliada para simular troca rapida de exchange no live-chart e validar isolamento de cache por broker, evitando contaminacao entre Binance e exchanges nativas.
+71. Corrigido fluxo do Copiloto para propagar `exchange/broker` no tool `get_crypto_chart_insights` em modo `live`, eliminando divergencia entre contexto do usuario (ex.: Bybit) e resposta analitica baseada em Binance.
+72. Fallback tecnico de grafico no Copiloto foi ajustado para resolver corretora a partir da mensagem e consultar `live-chart` no broker correto antes de compor insights.
+73. Adicionado modulo de inteligencia de airdrops com agregacao multi-fonte (`airdrops.io`, `airdropalert`, `DefiLlama`, `CoinGecko trending`), scoring (0-100), nivel de confianca e tarefas sugeridas por oportunidade.
+74. Exposto endpoint `GET /v1/airdrops/opportunities` com filtro por `query`, `minScore`, `limit` e controle de oportunidades especulativas (`includeSpeculative`), mantendo resposta resiliente em sucesso parcial por fonte.
+75. Copiloto recebeu nova tool read-only `get_airdrop_opportunities` e fallback por intencao para perguntas de airdrop, reduzindo respostas vazias quando o modelo nao usa tool call.
+76. Frontend foi ajustado para posicionar o card "Atalhos Inteligentes" na lateral direita em desktop e incluir atalho rapido para radar de airdrops; texto do modo live passou a refletir operacao por corretora.
+77. Adicionado store de observabilidade dedicado a inteligencia de airdrops com metricas por fonte (requests, sucesso/erro, latencia media/p95, ultimo erro e volume de itens).
+78. Exposto endpoint interno autenticado `GET /internal/health/airdrops` para diagnostico operacional do pipeline de discovery de airdrops, incluindo fontes premium quando configuradas.
+79. Modulo de airdrops evoluiu para suportar fontes premium com API key (`drops_tab`, `earnifi`) em modo opcional, mantendo degradacao graciosa e sem quebrar o fluxo base quando desativadas.
+80. Frontend ganhou painel dedicado "Radar de oportunidades" dentro do Chart Lab com filtros de chain, confianca, score minimo e busca textual, consumindo o endpoint de airdrops e exibindo cards operacionais com tarefas acionaveis.
+81. Exposto endpoint interno autenticado `GET /internal/health/airdrops.csv` para exportacao operacional do estado de airdrops (linha global + fontes), facilitando auditoria e ingestao por ferramentas externas.
+82. Frontend do radar de airdrops recebeu acao direta por card ("Levar ao chat"), preenchendo prompt contextual no composer para acelerar analise de elegibilidade, risco operacional e red flags.
+83. Endpoint `GET /v1/airdrops/opportunities` foi ampliado com filtros avancados (`chain`, `confidence`, `sources`) e ordenacao configuravel (`sortBy=score|recent`), reduzindo pos-processamento externo e melhorando consultas operacionais segmentadas.
+84. Observabilidade interna evoluiu com exportacoes CSV adicionais: `GET /internal/health/streams/brokers.csv` e `GET /internal/health/live-chart/crypto.csv`, padronizando ingestao em pipelines de auditoria e monitoramento.
+85. Radar de airdrops no frontend passou a persistir filtros em storage local e ganhou acao "Copiar prompt" por card, acelerando fluxos de analise fora do composer sem perda de contexto.

@@ -39,13 +39,25 @@ const tvWidgetContainer = document.querySelector("#tv-widget");
 const watchlistGrid = document.querySelector("#watchlist-grid");
 const watchlistRefreshButton = document.querySelector("#watchlist-refresh");
 const watchlistStatusElement = document.querySelector("#watchlist-status");
+const watchlistDiagnosticsElement = document.querySelector("#watchlist-diagnostics");
 const chartViewport = document.querySelector("#chart-viewport");
 const chartMetricsElement = document.querySelector("#chart-metrics");
 const chartAnalyzeButton = document.querySelector("#chart-analyze-button");
+const airdropRefreshButton = document.querySelector("#airdrop-refresh-button");
+const airdropFiltersForm = document.querySelector("#airdrop-filters");
+const airdropChainFilter = document.querySelector("#airdrop-chain-filter");
+const airdropConfidenceFilter = document.querySelector("#airdrop-confidence-filter");
+const airdropScoreFilter = document.querySelector("#airdrop-score-filter");
+const airdropScoreFilterValue = document.querySelector("#airdrop-score-filter-value");
+const airdropQueryFilter = document.querySelector("#airdrop-query-filter");
+const airdropIncludeSpeculativeToggle = document.querySelector("#airdrop-include-speculative");
+const airdropSummaryElement = document.querySelector("#airdrop-summary");
+const airdropListElement = document.querySelector("#airdrop-list");
 
 const CHAT_HISTORY_STORAGE_KEY = "botfinanceiro.copilot.history.v1";
 const CHAT_SESSION_STORAGE_KEY = "botfinanceiro.copilot.session.v1";
 const CHART_PREFERENCES_STORAGE_KEY = "botfinanceiro.chart.preferences.v1";
+const AIRDROP_PREFERENCES_STORAGE_KEY = "botfinanceiro.airdrop.preferences.v1";
 const MAX_STORED_MESSAGES = 60;
 const MAX_RECENT_HISTORY_ITEMS = 8;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
@@ -94,7 +106,7 @@ const EXCHANGE_TO_BROKER = {
   KRAKEN: "kraken",
   OKX: "okx",
 };
-const EXCHANGES_WITH_NATIVE_LIVE = new Set(["BINANCE"]);
+const EXCHANGES_WITH_NATIVE_LIVE = new Set(["BINANCE", "BYBIT", "COINBASE", "KRAKEN", "OKX"]);
 const TERMINAL_WATCHLIST = [
   {
     assetId: "bitcoin",
@@ -211,9 +223,27 @@ let chartViewMode = "tv";
 let tvMountIdCounter = 0;
 let terminalRefreshTimer = null;
 let watchlistAutoRefreshTimer = null;
+let watchlistStream = null;
+let watchlistStreamBackoffTimer = null;
+let watchlistStreamReconnectAttempt = 0;
+let watchlistStreamBroker = "";
 let watchlistMarketByAsset = new Map();
 let watchlistLastUpdatedAt = "";
 let isWatchlistLoading = false;
+let watchlistDiagnostics = {
+  broker: "binance",
+  errorCount: 0,
+  fallbackCount: 0,
+  latencyMs: null,
+  mode: "polling",
+  providerMode: "public",
+  successCount: 0,
+  unavailableCount: 0,
+};
+let airdropRadarPayload = null;
+let isAirdropRadarLoading = false;
+let airdropQueryDebounceTimer = null;
+let airdropPersistedChainPreference = "all";
 
 function mapSymbolToExchange(symbol, exchange) {
   const normalizedSymbol = sanitizeTerminalSymbol(symbol);
@@ -508,6 +538,590 @@ function formatShortTime(isoDate) {
   });
 }
 
+function formatAirdropDate(isoDate) {
+  if (typeof isoDate !== "string" || isoDate.length === 0) {
+    return "n/d";
+  }
+
+  const parsedDate = new Date(isoDate);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return "n/d";
+  }
+
+  return parsedDate.toLocaleString("pt-BR", {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "2-digit",
+  });
+}
+
+function formatAirdropConfidenceLabel(value) {
+  if (value === "high") {
+    return "Confianca alta";
+  }
+
+  if (value === "medium") {
+    return "Confianca media";
+  }
+
+  return "Confianca baixa";
+}
+
+function formatAirdropRewardTypeLabel(value) {
+  if (value === "token") {
+    return "Reward token";
+  }
+
+  if (value === "points") {
+    return "Reward points";
+  }
+
+  if (value === "nft") {
+    return "Reward NFT";
+  }
+
+  return "Reward indefinido";
+}
+
+function buildAirdropChatPrompt(input) {
+  const project = typeof input.project === "string" ? input.project : "Projeto n/d";
+  const chain = typeof input.chain === "string" ? input.chain : "Global";
+  const score = typeof input.score === "string" ? input.score : "n/d";
+  const confidence = typeof input.confidence === "string"
+    ? formatAirdropConfidenceLabel(input.confidence)
+    : "Confianca n/d";
+  const rewardType = typeof input.rewardType === "string"
+    ? formatAirdropRewardTypeLabel(input.rewardType)
+    : "Reward indefinido";
+  const sources = typeof input.sources === "string" ? input.sources : "n/d";
+  const tasks = typeof input.tasks === "string" ? input.tasks : "Acompanhar regras oficiais";
+  const sourceUrl = typeof input.url === "string" ? input.url : "";
+
+  return [
+    "Analise esta oportunidade de airdrop e monte um plano de execucao objetivo.",
+    `Projeto: ${project}`,
+    `Chain: ${chain}`,
+    `Score: ${score}`,
+    `Confianca: ${confidence}`,
+    `Reward: ${rewardType}`,
+    `Tarefas iniciais: ${tasks}`,
+    `Fontes: ${sources}`,
+    sourceUrl.length > 0 ? `Link: ${sourceUrl}` : "Link: n/d",
+    "Quero retorno em 4 blocos: elegibilidade, risco operacional/gas, checklist por prioridade e red flags de golpe.",
+  ].join("\n");
+}
+
+async function copyTextToClipboard(value) {
+  if (typeof value !== "string" || value.length === 0) {
+    return false;
+  }
+
+  if (navigator?.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch {
+      // Fallback abaixo para navegadores mais restritos.
+    }
+  }
+
+  const temporaryTextArea = document.createElement("textarea");
+  temporaryTextArea.value = value;
+  temporaryTextArea.setAttribute("readonly", "");
+  temporaryTextArea.style.position = "fixed";
+  temporaryTextArea.style.opacity = "0";
+  document.body.append(temporaryTextArea);
+  temporaryTextArea.select();
+
+  let copied = false;
+
+  try {
+    copied = document.execCommand("copy");
+  } catch {
+    copied = false;
+  } finally {
+    temporaryTextArea.remove();
+  }
+
+  return copied;
+}
+
+function normalizeAirdropChain(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().toLowerCase();
+}
+
+function formatAirdropChainLabel(value) {
+  const normalized = normalizeAirdropChain(value);
+
+  if (normalized.length === 0) {
+    return "Global";
+  }
+
+  return normalized
+    .split(/[^a-z0-9]+/)
+    .filter((part) => part.length > 0)
+    .map((part) => `${part[0].toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function setAirdropRefreshLoadingState(isLoading) {
+  if (!(airdropRefreshButton instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  airdropRefreshButton.disabled = isLoading;
+  airdropRefreshButton.textContent = isLoading ? "Atualizando..." : "Atualizar radar";
+}
+
+function setAirdropSummary(message, mode = "") {
+  if (!(airdropSummaryElement instanceof HTMLElement)) {
+    return;
+  }
+
+  airdropSummaryElement.textContent = message;
+
+  if (mode.length > 0) {
+    airdropSummaryElement.setAttribute("data-mode", mode);
+  } else {
+    airdropSummaryElement.removeAttribute("data-mode");
+  }
+}
+
+function setAirdropScoreFilterLabel() {
+  if (!(airdropScoreFilterValue instanceof HTMLElement)) {
+    return;
+  }
+
+  const scoreValue = airdropScoreFilter instanceof HTMLInputElement
+    ? Number.parseInt(airdropScoreFilter.value, 10)
+    : 35;
+
+  airdropScoreFilterValue.textContent = Number.isFinite(scoreValue)
+    ? String(Math.max(0, Math.min(100, scoreValue)))
+    : "35";
+}
+
+function getAirdropFilterState() {
+  const chain = airdropChainFilter instanceof HTMLSelectElement ? airdropChainFilter.value : "all";
+  const confidence = airdropConfidenceFilter instanceof HTMLSelectElement
+    ? airdropConfidenceFilter.value
+    : "all";
+  const score = airdropScoreFilter instanceof HTMLInputElement
+    ? Number.parseInt(airdropScoreFilter.value, 10)
+    : 35;
+
+  return {
+    chain,
+    confidence,
+    includeSpeculative:
+      !(airdropIncludeSpeculativeToggle instanceof HTMLInputElement)
+      || airdropIncludeSpeculativeToggle.checked,
+    query:
+      airdropQueryFilter instanceof HTMLInputElement
+        ? airdropQueryFilter.value.trim()
+        : "",
+    score: Number.isFinite(score) ? Math.max(0, Math.min(100, score)) : 35,
+  };
+}
+
+async function requestAirdropRadar(queryState) {
+  const minScore =
+    typeof queryState.score === "number" && Number.isFinite(queryState.score)
+      ? Math.max(0, Math.min(100, Math.floor(queryState.score)))
+      : 0;
+  const params = new URLSearchParams({
+    includeSpeculative: queryState.includeSpeculative ? "true" : "false",
+    limit: "24",
+    minScore: String(minScore),
+  });
+
+  if (queryState.query.length > 0) {
+    params.set("query", queryState.query);
+  }
+
+  const response = await fetch(buildApiUrl(`/v1/airdrops/opportunities?${params.toString()}`), {
+    method: "GET",
+  });
+
+  let payload = null;
+
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const message = payload?.error?.message;
+    throw new Error(typeof message === "string" ? message : "Falha ao carregar radar de airdrops");
+  }
+
+  return payload?.data ?? null;
+}
+
+function ensureAirdropChainFilterOptions(opportunities) {
+  if (!(airdropChainFilter instanceof HTMLSelectElement)) {
+    return;
+  }
+
+  const previousValue = normalizeAirdropChain(
+    airdropChainFilter.value || airdropPersistedChainPreference || "all",
+  );
+  const chainValues = [...new Set(
+    opportunities
+      .map((opportunity) => normalizeAirdropChain(opportunity?.chain))
+      .filter((chain) => chain.length > 0),
+  )].sort((left, right) => left.localeCompare(right));
+
+  airdropChainFilter.innerHTML = "";
+
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "all";
+  defaultOption.textContent = "Todas";
+  airdropChainFilter.append(defaultOption);
+
+  for (const chain of chainValues) {
+    const option = document.createElement("option");
+    option.value = chain;
+    option.textContent = formatAirdropChainLabel(chain);
+    airdropChainFilter.append(option);
+  }
+
+  if (previousValue !== "all" && chainValues.includes(previousValue)) {
+    airdropChainFilter.value = previousValue;
+    airdropPersistedChainPreference = previousValue;
+    return;
+  }
+
+  airdropChainFilter.value = "all";
+  airdropPersistedChainPreference = "all";
+}
+
+function getFilteredAirdropOpportunities(opportunities) {
+  const filterState = getAirdropFilterState();
+
+  return opportunities
+    .filter((opportunity) => {
+      if (typeof opportunity?.score !== "number" || Number.isNaN(opportunity.score)) {
+        return false;
+      }
+
+      return opportunity.score >= filterState.score;
+    })
+    .filter((opportunity) => {
+      if (filterState.confidence === "all") {
+        return true;
+      }
+
+      return opportunity?.confidence === filterState.confidence;
+    })
+    .filter((opportunity) => {
+      if (filterState.chain === "all") {
+        return true;
+      }
+
+      return normalizeAirdropChain(opportunity?.chain) === filterState.chain;
+    })
+    .sort((left, right) => right.score - left.score);
+}
+
+function renderAirdropList(opportunities) {
+  if (!(airdropListElement instanceof HTMLElement)) {
+    return;
+  }
+
+  airdropListElement.innerHTML = "";
+
+  if (opportunities.length === 0) {
+    const emptyElement = document.createElement("div");
+    emptyElement.className = "airdrop-empty";
+    emptyElement.textContent =
+      "Nenhuma oportunidade atende aos filtros atuais. Ajuste chain, score minimo ou confianca.";
+    airdropListElement.append(emptyElement);
+    return;
+  }
+
+  for (const opportunity of opportunities.slice(0, 12)) {
+    const card = document.createElement("article");
+    card.className = "airdrop-card";
+    card.dataset.confidence = opportunity.confidence;
+
+    const header = document.createElement("div");
+    header.className = "airdrop-card-header";
+
+    const title = document.createElement("h4");
+    title.textContent = opportunity.project;
+
+    const chainPill = document.createElement("span");
+    chainPill.className = "airdrop-chain-pill";
+    chainPill.textContent = formatAirdropChainLabel(opportunity.chain);
+
+    header.append(title, chainPill);
+
+    const meta = document.createElement("div");
+    meta.className = "airdrop-card-meta";
+
+    const scoreChip = document.createElement("span");
+    scoreChip.className = "airdrop-meta-chip";
+    scoreChip.textContent = `Score ${Math.round(opportunity.score)}`;
+
+    const confidenceChip = document.createElement("span");
+    confidenceChip.className = "airdrop-meta-chip";
+    confidenceChip.textContent = formatAirdropConfidenceLabel(opportunity.confidence);
+
+    const rewardChip = document.createElement("span");
+    rewardChip.className = "airdrop-meta-chip";
+    rewardChip.textContent = formatAirdropRewardTypeLabel(opportunity.rewardType);
+
+    meta.append(scoreChip, confidenceChip, rewardChip);
+
+    const description = document.createElement("p");
+    description.textContent = opportunity.description;
+
+    const tags = document.createElement("div");
+    tags.className = "airdrop-tags";
+    tags.textContent = opportunity.tags.length > 0
+      ? `Tags: ${opportunity.tags.slice(0, 5).join(" • ")}`
+      : "Tags: monitoramento geral";
+
+    const taskList = document.createElement("ul");
+    taskList.className = "airdrop-task-list";
+
+    for (const task of opportunity.tasks.slice(0, 2)) {
+      const taskItem = document.createElement("li");
+      taskItem.textContent = task;
+      taskList.append(taskItem);
+    }
+
+    const footer = document.createElement("div");
+    footer.className = "airdrop-card-footer";
+
+    const sourceLine = document.createElement("span");
+    sourceLine.className = "airdrop-source-line";
+    sourceLine.textContent = `${opportunity.sources.join(" + ")} • ${formatAirdropDate(opportunity.discoveredAt)}`;
+
+    const actions = document.createElement("div");
+    actions.className = "airdrop-card-actions";
+
+    const chatButton = document.createElement("button");
+    chatButton.type = "button";
+    chatButton.className = "airdrop-chat-button";
+    chatButton.dataset.action = "send-to-chat";
+    chatButton.dataset.project = opportunity.project;
+    chatButton.dataset.chain = formatAirdropChainLabel(opportunity.chain);
+    chatButton.dataset.score = String(Math.round(opportunity.score));
+    chatButton.dataset.confidence = opportunity.confidence;
+    chatButton.dataset.rewardType = opportunity.rewardType;
+    chatButton.dataset.tasks = opportunity.tasks.slice(0, 3).join("; ");
+    chatButton.dataset.sources = opportunity.sources.join(", ");
+    chatButton.dataset.url = opportunity.url;
+    chatButton.textContent = "Levar ao chat";
+
+    const copyButton = document.createElement("button");
+    copyButton.type = "button";
+    copyButton.className = "airdrop-copy-button";
+    copyButton.dataset.action = "copy-prompt";
+    copyButton.dataset.project = opportunity.project;
+    copyButton.dataset.chain = formatAirdropChainLabel(opportunity.chain);
+    copyButton.dataset.score = String(Math.round(opportunity.score));
+    copyButton.dataset.confidence = opportunity.confidence;
+    copyButton.dataset.rewardType = opportunity.rewardType;
+    copyButton.dataset.tasks = opportunity.tasks.slice(0, 3).join("; ");
+    copyButton.dataset.sources = opportunity.sources.join(", ");
+    copyButton.dataset.url = opportunity.url;
+    copyButton.textContent = "Copiar prompt";
+
+    const link = document.createElement("a");
+    link.href = opportunity.url;
+    link.rel = "noopener noreferrer";
+    link.target = "_blank";
+    link.textContent = "Abrir fonte";
+
+    actions.append(chatButton, copyButton, link);
+    footer.append(sourceLine, actions);
+    card.append(header, meta, description, tags, taskList, footer);
+    airdropListElement.append(card);
+  }
+}
+
+function renderAirdropRadarFromState() {
+  if (!airdropRadarPayload) {
+    renderAirdropList([]);
+    setAirdropSummary("Sem dados de radar no momento.", "error");
+    return;
+  }
+
+  const opportunities = Array.isArray(airdropRadarPayload.opportunities)
+    ? airdropRadarPayload.opportunities
+    : [];
+  const filteredOpportunities = getFilteredAirdropOpportunities(opportunities);
+  const summary = airdropRadarPayload.summary ?? {};
+  const fetchedAt = formatShortTime(airdropRadarPayload.fetchedAt);
+
+  setAirdropSummary(
+    `Fontes saudaveis ${summary.sourcesHealthy ?? 0}/${summary.totalSources ?? 0} • cobertura ${summary.sourceCoveragePercent ?? 0}% • filtradas ${filteredOpportunities.length}/${opportunities.length} • atualizado ${fetchedAt}`,
+  );
+  renderAirdropList(filteredOpportunities);
+}
+
+async function loadAirdropRadar() {
+  if (isAirdropRadarLoading) {
+    return;
+  }
+
+  isAirdropRadarLoading = true;
+  setAirdropRefreshLoadingState(true);
+  setAirdropSummary("Atualizando radar de airdrops...", "");
+
+  try {
+    const filterState = getAirdropFilterState();
+    const payload = await requestAirdropRadar({
+      includeSpeculative: filterState.includeSpeculative,
+      query: filterState.query,
+      score: filterState.score,
+    });
+
+    if (!payload || !Array.isArray(payload.opportunities)) {
+      throw new Error("Resposta de airdrops invalida");
+    }
+
+    airdropRadarPayload = payload;
+    ensureAirdropChainFilterOptions(payload.opportunities);
+    renderAirdropRadarFromState();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Falha ao atualizar radar de airdrops";
+    airdropRadarPayload = null;
+    renderAirdropList([]);
+    setAirdropSummary(message, "error");
+  } finally {
+    isAirdropRadarLoading = false;
+    setAirdropRefreshLoadingState(false);
+  }
+}
+
+function setupAirdropRadarPanel() {
+  if (!(airdropListElement instanceof HTMLElement)) {
+    return;
+  }
+
+  hydrateAirdropPreferences();
+  setAirdropScoreFilterLabel();
+
+  if (airdropRefreshButton instanceof HTMLButtonElement) {
+    airdropRefreshButton.addEventListener("click", () => {
+      void loadAirdropRadar();
+    });
+  }
+
+  if (airdropFiltersForm instanceof HTMLFormElement) {
+    airdropFiltersForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      saveAirdropPreferences();
+      void loadAirdropRadar();
+    });
+  }
+
+  if (airdropChainFilter instanceof HTMLSelectElement) {
+    airdropChainFilter.addEventListener("change", () => {
+      airdropPersistedChainPreference = normalizeAirdropChain(airdropChainFilter.value || "all");
+      saveAirdropPreferences();
+      renderAirdropRadarFromState();
+    });
+  }
+
+  if (airdropConfidenceFilter instanceof HTMLSelectElement) {
+    airdropConfidenceFilter.addEventListener("change", () => {
+      saveAirdropPreferences();
+      renderAirdropRadarFromState();
+    });
+  }
+
+  if (airdropScoreFilter instanceof HTMLInputElement) {
+    airdropScoreFilter.addEventListener("input", () => {
+      setAirdropScoreFilterLabel();
+      saveAirdropPreferences();
+      renderAirdropRadarFromState();
+    });
+  }
+
+  if (airdropIncludeSpeculativeToggle instanceof HTMLInputElement) {
+    airdropIncludeSpeculativeToggle.addEventListener("change", () => {
+      saveAirdropPreferences();
+      void loadAirdropRadar();
+    });
+  }
+
+  if (airdropQueryFilter instanceof HTMLInputElement) {
+    airdropQueryFilter.addEventListener("input", () => {
+      saveAirdropPreferences();
+
+      if (airdropQueryDebounceTimer !== null) {
+        window.clearTimeout(airdropQueryDebounceTimer);
+      }
+
+      airdropQueryDebounceTimer = window.setTimeout(() => {
+        airdropQueryDebounceTimer = null;
+        void loadAirdropRadar();
+      }, 550);
+    });
+  }
+
+  airdropListElement.addEventListener("click", (event) => {
+    const target = event.target;
+    const actionButton = target instanceof HTMLElement
+      ? target.closest("button[data-action]")
+      : null;
+
+    if (!(actionButton instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    if (!(chatInput instanceof HTMLTextAreaElement)) {
+      return;
+    }
+
+    const prompt = buildAirdropChatPrompt({
+      chain: actionButton.dataset.chain,
+      confidence: actionButton.dataset.confidence,
+      project: actionButton.dataset.project,
+      rewardType: actionButton.dataset.rewardType,
+      score: actionButton.dataset.score,
+      sources: actionButton.dataset.sources,
+      tasks: actionButton.dataset.tasks,
+      url: actionButton.dataset.url,
+    });
+
+    if (actionButton.dataset.action === "copy-prompt") {
+      void (async () => {
+        const copied = await copyTextToClipboard(prompt);
+        setStatus(copied ? "" : "Nao foi possivel copiar o prompt", copied ? "Prompt copiado" : "error");
+      })();
+      return;
+    }
+
+    if (actionButton.dataset.action !== "send-to-chat") {
+      return;
+    }
+
+    chatInput.value = prompt;
+    chatInput.focus();
+    chatInput.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+    setStatus("", "Prompt de airdrop pronto");
+  });
+
+  renderAirdropList([]);
+  void loadAirdropRadar();
+}
+
 function formatTrendLabel(trend) {
   if (trend === "bullish") {
     return "Viés de alta";
@@ -701,6 +1315,86 @@ function hydrateChartPreferences() {
   }
 }
 
+function readStoredAirdropPreferences() {
+  try {
+    const raw = localStorage.getItem(AIRDROP_PREFERENCES_STORAGE_KEY);
+
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw);
+
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveAirdropPreferences() {
+  const filterState = getAirdropFilterState();
+  const payload = {
+    chain: normalizeAirdropChain(filterState.chain || "all") || "all",
+    confidence: typeof filterState.confidence === "string" ? filterState.confidence : "all",
+    includeSpeculative: filterState.includeSpeculative,
+    query: filterState.query,
+    score: filterState.score,
+  };
+
+  airdropPersistedChainPreference = payload.chain;
+
+  try {
+    localStorage.setItem(AIRDROP_PREFERENCES_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore storage errors and keep UX stateless.
+  }
+}
+
+function hydrateAirdropPreferences() {
+  const preferences = readStoredAirdropPreferences();
+
+  if (!preferences) {
+    return;
+  }
+
+  if (typeof preferences.chain === "string") {
+    const normalizedChain = normalizeAirdropChain(preferences.chain);
+    airdropPersistedChainPreference = normalizedChain.length > 0 ? normalizedChain : "all";
+
+    if (
+      airdropChainFilter instanceof HTMLSelectElement
+      && isValueInSelect(airdropChainFilter, airdropPersistedChainPreference)
+    ) {
+      airdropChainFilter.value = airdropPersistedChainPreference;
+    }
+  }
+
+  if (
+    airdropConfidenceFilter instanceof HTMLSelectElement
+    && typeof preferences.confidence === "string"
+    && isValueInSelect(airdropConfidenceFilter, preferences.confidence)
+  ) {
+    airdropConfidenceFilter.value = preferences.confidence;
+  }
+
+  if (airdropIncludeSpeculativeToggle instanceof HTMLInputElement && typeof preferences.includeSpeculative === "boolean") {
+    airdropIncludeSpeculativeToggle.checked = preferences.includeSpeculative;
+  }
+
+  if (airdropQueryFilter instanceof HTMLInputElement && typeof preferences.query === "string") {
+    airdropQueryFilter.value = preferences.query.slice(0, 80);
+  }
+
+  if (airdropScoreFilter instanceof HTMLInputElement && typeof preferences.score === "number" && Number.isFinite(preferences.score)) {
+    const boundedScore = Math.max(0, Math.min(100, Math.floor(preferences.score)));
+    airdropScoreFilter.value = String(boundedScore);
+  }
+}
+
 function setWatchlistStatus(message, mode = "") {
   if (!(watchlistStatusElement instanceof HTMLElement)) {
     return;
@@ -713,6 +1407,97 @@ function setWatchlistStatus(message, mode = "") {
   } else {
     watchlistStatusElement.removeAttribute("data-mode");
   }
+}
+
+function resolveDiagnosticState(value, warnThreshold, errorThreshold) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "warn";
+  }
+
+  if (value >= errorThreshold) {
+    return "error";
+  }
+
+  if (value >= warnThreshold) {
+    return "warn";
+  }
+
+  return "ok";
+}
+
+function renderWatchlistDiagnostics() {
+  if (!(watchlistDiagnosticsElement instanceof HTMLElement)) {
+    return;
+  }
+
+  const successTotal = Math.max(1, TERMINAL_WATCHLIST.length);
+  const missRatePercent = Number(
+    (((watchlistDiagnostics.errorCount + watchlistDiagnostics.unavailableCount) / successTotal) * 100).toFixed(1),
+  );
+  const fallbackRatePercent = Number(
+    ((watchlistDiagnostics.fallbackCount / successTotal) * 100).toFixed(1),
+  );
+  const latencyValue =
+    typeof watchlistDiagnostics.latencyMs === "number" && Number.isFinite(watchlistDiagnostics.latencyMs)
+      ? `${watchlistDiagnostics.latencyMs.toFixed(0)} ms`
+      : "n/d";
+  const syncLabel = watchlistLastUpdatedAt.length > 0 ? formatShortTime(watchlistLastUpdatedAt) : "--:--:--";
+
+  const chips = [
+    {
+      label: "Transporte",
+      state: watchlistDiagnostics.mode === "stream" ? "ok" : "warn",
+      value: watchlistDiagnostics.mode === "stream" ? "stream ativo" : "polling",
+    },
+    {
+      label: "Latencia",
+      state: resolveDiagnosticState(
+        typeof watchlistDiagnostics.latencyMs === "number" ? watchlistDiagnostics.latencyMs : Number.NaN,
+        450,
+        900,
+      ),
+      value: latencyValue,
+    },
+    {
+      label: "Provider",
+      state: watchlistDiagnostics.providerMode === "public" ? "ok" : "warn",
+      value: `${watchlistDiagnostics.broker}/${watchlistDiagnostics.providerMode}`,
+    },
+    {
+      label: "Fallback",
+      state: resolveDiagnosticState(fallbackRatePercent, 20, 45),
+      value: `${watchlistDiagnostics.fallbackCount} (${fallbackRatePercent}%)`,
+    },
+    {
+      label: "Falhas",
+      state: resolveDiagnosticState(missRatePercent, 10, 25),
+      value: `${watchlistDiagnostics.errorCount + watchlistDiagnostics.unavailableCount} (${missRatePercent}%)`,
+    },
+    {
+      label: "Ultimo sync",
+      state: "ok",
+      value: syncLabel,
+    },
+  ];
+
+  watchlistDiagnosticsElement.innerHTML = `
+    <div class="watchlist-diagnostic-row">
+      ${chips.slice(0, 3).map((chip) => `
+        <div class="watchlist-diagnostic-chip" data-state="${chip.state}">
+          ${chip.label}
+          <strong>${chip.value}</strong>
+        </div>
+      `).join("")}
+    </div>
+    <div class="watchlist-diagnostic-row">
+      ${chips.slice(3).map((chip) => `
+        <div class="watchlist-diagnostic-chip" data-state="${chip.state}">
+          ${chip.label}
+          <strong>${chip.value}</strong>
+        </div>
+      `).join("")}
+    </div>
+  `;
 }
 
 function getSelectedTerminalSymbol() {
@@ -956,6 +1741,19 @@ async function requestBrokerLiveQuoteBatch(assetIds, broker) {
   return payload?.data ?? null;
 }
 
+function buildBrokerLiveQuoteStreamUrl(assetIds, broker, intervalMs) {
+  const normalizedAssetIds = normalizeAssetIds(assetIds);
+  const normalizedBroker = typeof broker === "string" && broker.length > 0 ? broker : "binance";
+  const safeIntervalMs = Number.isFinite(intervalMs) ? Math.max(2000, Math.min(60000, intervalMs)) : 10000;
+  const params = new URLSearchParams({
+    assetIds: normalizedAssetIds.join(","),
+    broker: normalizedBroker,
+    intervalMs: String(Math.floor(safeIntervalMs)),
+  });
+
+  return buildApiUrl(`/v1/brokers/live-quote/stream?${params.toString()}`);
+}
+
 async function requestSpotPriceBatch(assetIds) {
   const normalizedAssetIds = normalizeAssetIds(assetIds);
 
@@ -995,6 +1793,145 @@ async function requestSpotPriceBatch(assetIds) {
   return payload?.data ?? null;
 }
 
+async function applyWatchlistBatchSnapshot(brokerBatch, options = {}) {
+  const silent = options.silent === true;
+  const transportMode = options.transport === "stream" ? "stream" : "polling";
+  const measuredLatencyMs =
+    typeof options.latencyMs === "number" && Number.isFinite(options.latencyMs)
+      ? Math.max(0, options.latencyMs)
+      : null;
+
+  const nextMarketByAsset = new Map();
+  let successCount = 0;
+  let fallbackCount = 0;
+  let errorCount = 0;
+  let unavailableCount = 0;
+
+  const brokerQuotes = Array.isArray(brokerBatch?.quotes) ? brokerBatch.quotes : [];
+  const brokerQuoteByAsset = new Map(
+    brokerQuotes
+      .map((quoteItem) => {
+        const assetId = typeof quoteItem?.assetId === "string" ? quoteItem.assetId.toLowerCase() : "";
+
+        return [assetId, quoteItem];
+      })
+      .filter(([assetId]) => assetId.length > 0),
+  );
+  const fallbackAssetIds = [];
+
+  for (const watchItem of TERMINAL_WATCHLIST) {
+    const quoteItem = brokerQuoteByAsset.get(watchItem.assetId.toLowerCase()) ?? null;
+    const quoteStatus = typeof quoteItem?.status === "string" ? quoteItem.status : "error";
+    const quotePrice = quoteItem?.quote?.market?.price;
+
+    if (quoteStatus === "ok" && typeof quotePrice === "number" && Number.isFinite(quotePrice)) {
+      nextMarketByAsset.set(watchItem.assetId, {
+        changePercent24h:
+          typeof quoteItem?.quote?.market?.changePercent24h === "number"
+            ? quoteItem.quote.market.changePercent24h
+            : Number.NaN,
+        fetchedAt: typeof quoteItem?.quote?.fetchedAt === "string" ? quoteItem.quote.fetchedAt : "",
+        price: quotePrice,
+        status: "ok",
+      });
+      successCount += 1;
+      continue;
+    }
+
+    if (quoteStatus === "unavailable") {
+      nextMarketByAsset.set(watchItem.assetId, {
+        changePercent24h: Number.NaN,
+        fetchedAt: "",
+        price: Number.NaN,
+        status: "unavailable",
+      });
+      unavailableCount += 1;
+      continue;
+    }
+
+    fallbackAssetIds.push(watchItem.assetId);
+  }
+
+  if (fallbackAssetIds.length > 0) {
+    try {
+      const spotBatch = await requestSpotPriceBatch(fallbackAssetIds);
+      const spotQuotes = Array.isArray(spotBatch?.quotes) ? spotBatch.quotes : [];
+      const spotQuoteByAsset = new Map(
+        spotQuotes
+          .map((quoteItem) => {
+            const assetId = typeof quoteItem?.assetId === "string" ? quoteItem.assetId.toLowerCase() : "";
+
+            return [assetId, quoteItem];
+          })
+          .filter(([assetId]) => assetId.length > 0),
+      );
+
+      for (const assetId of fallbackAssetIds) {
+        const quoteItem = spotQuoteByAsset.get(assetId.toLowerCase()) ?? null;
+        const spotPrice = quoteItem?.quote?.price;
+
+        if (quoteItem?.status === "ok" && typeof spotPrice === "number" && Number.isFinite(spotPrice)) {
+          nextMarketByAsset.set(assetId, {
+            changePercent24h: Number.NaN,
+            fetchedAt: typeof quoteItem.quote?.fetchedAt === "string" ? quoteItem.quote.fetchedAt : "",
+            price: spotPrice,
+            status: "fallback",
+          });
+          fallbackCount += 1;
+          continue;
+        }
+
+        nextMarketByAsset.set(assetId, {
+          changePercent24h: Number.NaN,
+          fetchedAt: "",
+          price: Number.NaN,
+          status: "error",
+        });
+        errorCount += 1;
+      }
+    } catch {
+      for (const assetId of fallbackAssetIds) {
+        nextMarketByAsset.set(assetId, {
+          changePercent24h: Number.NaN,
+          fetchedAt: "",
+          price: Number.NaN,
+          status: "error",
+        });
+        errorCount += 1;
+      }
+    }
+  }
+
+  watchlistMarketByAsset = nextMarketByAsset;
+  watchlistLastUpdatedAt = new Date().toISOString();
+  renderWatchlist();
+
+  const selectedBroker = getSelectedBroker();
+  const statusLabel = `${successCount}/${TERMINAL_WATCHLIST.length} live • fb ${fallbackCount} • cfg ${unavailableCount} • err ${errorCount} • broker ${selectedBroker} • ${formatShortTime(watchlistLastUpdatedAt)}`;
+  setWatchlistStatus(statusLabel);
+
+  watchlistDiagnostics = {
+    ...watchlistDiagnostics,
+    broker: selectedBroker,
+    errorCount,
+    fallbackCount,
+    latencyMs:
+      measuredLatencyMs
+      ?? (typeof brokerBatch?.diagnostics?.latencyMs === "number" ? brokerBatch.diagnostics.latencyMs : null),
+    mode: transportMode,
+    providerMode: typeof brokerBatch?.diagnostics?.providerMode === "string"
+      ? brokerBatch.diagnostics.providerMode
+      : "public",
+    successCount,
+    unavailableCount,
+  };
+  renderWatchlistDiagnostics();
+
+  if (!silent) {
+    setChartLegend(`Watchlist sincronizada: ${statusLabel}`);
+  }
+}
+
 async function refreshWatchlistMarket(options = {}) {
   if (isWatchlistLoading) {
     return;
@@ -1004,124 +1941,25 @@ async function refreshWatchlistMarket(options = {}) {
   isWatchlistLoading = true;
   setWatchlistLoadingState(true);
 
-  const nextMarketByAsset = new Map();
-  let successCount = 0;
-  let fallbackCount = 0;
-  let errorCount = 0;
-  let unavailableCount = 0;
-
   try {
     const requestedAssetIds = TERMINAL_WATCHLIST.map((item) => item.assetId);
     const selectedBroker = getSelectedBroker();
+    const startedAt = performance.now();
     const brokerBatch = await requestBrokerLiveQuoteBatch(requestedAssetIds, selectedBroker);
-    const brokerQuotes = Array.isArray(brokerBatch?.quotes) ? brokerBatch.quotes : [];
-    const brokerQuoteByAsset = new Map(
-      brokerQuotes
-        .map((quoteItem) => {
-          const assetId = typeof quoteItem?.assetId === "string" ? quoteItem.assetId.toLowerCase() : "";
-
-          return [assetId, quoteItem];
-        })
-        .filter(([assetId]) => assetId.length > 0),
-    );
-    const fallbackAssetIds = [];
-
-    for (const watchItem of TERMINAL_WATCHLIST) {
-      const quoteItem = brokerQuoteByAsset.get(watchItem.assetId.toLowerCase()) ?? null;
-      const quoteStatus = typeof quoteItem?.status === "string" ? quoteItem.status : "error";
-      const quotePrice = quoteItem?.quote?.market?.price;
-
-      if (quoteStatus === "ok" && typeof quotePrice === "number" && Number.isFinite(quotePrice)) {
-        nextMarketByAsset.set(watchItem.assetId, {
-          changePercent24h:
-            typeof quoteItem?.quote?.market?.changePercent24h === "number"
-              ? quoteItem.quote.market.changePercent24h
-              : Number.NaN,
-          fetchedAt: typeof quoteItem?.quote?.fetchedAt === "string" ? quoteItem.quote.fetchedAt : "",
-          price: quotePrice,
-          status: "ok",
-        });
-        successCount += 1;
-        continue;
-      }
-
-      if (quoteStatus === "unavailable") {
-        nextMarketByAsset.set(watchItem.assetId, {
-          changePercent24h: Number.NaN,
-          fetchedAt: "",
-          price: Number.NaN,
-          status: "unavailable",
-        });
-        unavailableCount += 1;
-        continue;
-      }
-
-      fallbackAssetIds.push(watchItem.assetId);
-    }
-
-    if (fallbackAssetIds.length > 0) {
-      try {
-        const spotBatch = await requestSpotPriceBatch(fallbackAssetIds);
-        const spotQuotes = Array.isArray(spotBatch?.quotes) ? spotBatch.quotes : [];
-        const spotQuoteByAsset = new Map(
-          spotQuotes
-            .map((quoteItem) => {
-              const assetId = typeof quoteItem?.assetId === "string" ? quoteItem.assetId.toLowerCase() : "";
-
-              return [assetId, quoteItem];
-            })
-            .filter(([assetId]) => assetId.length > 0),
-        );
-
-        for (const assetId of fallbackAssetIds) {
-          const quoteItem = spotQuoteByAsset.get(assetId.toLowerCase()) ?? null;
-          const spotPrice = quoteItem?.quote?.price;
-
-          if (quoteItem?.status === "ok" && typeof spotPrice === "number" && Number.isFinite(spotPrice)) {
-            nextMarketByAsset.set(assetId, {
-              changePercent24h: Number.NaN,
-              fetchedAt: typeof quoteItem.quote?.fetchedAt === "string" ? quoteItem.quote.fetchedAt : "",
-              price: spotPrice,
-              status: "fallback",
-            });
-            fallbackCount += 1;
-            continue;
-          }
-
-          nextMarketByAsset.set(assetId, {
-            changePercent24h: Number.NaN,
-            fetchedAt: "",
-            price: Number.NaN,
-            status: "error",
-          });
-          errorCount += 1;
-        }
-      } catch {
-        for (const assetId of fallbackAssetIds) {
-          nextMarketByAsset.set(assetId, {
-            changePercent24h: Number.NaN,
-            fetchedAt: "",
-            price: Number.NaN,
-            status: "error",
-          });
-          errorCount += 1;
-        }
-      }
-    }
-
-    watchlistMarketByAsset = nextMarketByAsset;
-    watchlistLastUpdatedAt = new Date().toISOString();
-    renderWatchlist();
-
-    const statusLabel = `${successCount}/${TERMINAL_WATCHLIST.length} live • fb ${fallbackCount} • cfg ${unavailableCount} • err ${errorCount} • broker ${getSelectedBroker()} • ${formatShortTime(watchlistLastUpdatedAt)}`;
-    setWatchlistStatus(statusLabel);
-
-    if (!silent) {
-      setChartLegend(`Watchlist sincronizada: ${statusLabel}`);
-    }
+    await applyWatchlistBatchSnapshot(brokerBatch, {
+      latencyMs: performance.now() - startedAt,
+      silent,
+      transport: "polling",
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Falha na sincronizacao da watchlist";
     setWatchlistStatus(message, "error");
+    watchlistDiagnostics = {
+      ...watchlistDiagnostics,
+      broker: getSelectedBroker(),
+      mode: "polling",
+    };
+    renderWatchlistDiagnostics();
 
     if (!silent) {
       setChartLegend(message, "error");
@@ -1132,11 +1970,105 @@ async function refreshWatchlistMarket(options = {}) {
   }
 }
 
+function stopWatchlistStream() {
+  if (watchlistStreamBackoffTimer !== null) {
+    window.clearTimeout(watchlistStreamBackoffTimer);
+    watchlistStreamBackoffTimer = null;
+  }
+
+  if (watchlistStream) {
+    watchlistStream.close();
+    watchlistStream = null;
+  }
+}
+
 function stopWatchlistAutoRefresh() {
+  stopWatchlistStream();
+
   if (watchlistAutoRefreshTimer !== null) {
     window.clearInterval(watchlistAutoRefreshTimer);
     watchlistAutoRefreshTimer = null;
   }
+}
+
+function connectWatchlistStream(intervalMs) {
+  if (typeof EventSource !== "function") {
+    return false;
+  }
+
+  const selectedBroker = getSelectedBroker();
+  watchlistStreamBroker = selectedBroker;
+  const streamUrl = buildBrokerLiveQuoteStreamUrl(
+    TERMINAL_WATCHLIST.map((item) => item.assetId),
+    selectedBroker,
+    intervalMs,
+  );
+
+  const eventSource = new EventSource(streamUrl);
+  watchlistStream = eventSource;
+
+  eventSource.addEventListener("snapshot", (event) => {
+    let payload = null;
+
+    try {
+      payload = JSON.parse(event.data);
+    } catch {
+      payload = null;
+    }
+
+    const batch = payload?.batch ?? null;
+
+    if (!batch || !Array.isArray(batch.quotes)) {
+      return;
+    }
+
+    watchlistStreamReconnectAttempt = 0;
+    const generatedAtMs = typeof payload?.generatedAt === "string" ? Date.parse(payload.generatedAt) : Number.NaN;
+    const latencyMs = Number.isFinite(generatedAtMs) ? Date.now() - generatedAtMs : null;
+
+    void applyWatchlistBatchSnapshot(batch, {
+      latencyMs,
+      silent: true,
+      transport: "stream",
+    });
+  });
+
+  eventSource.addEventListener("stream-error", (event) => {
+    let payload = null;
+
+    try {
+      payload = JSON.parse(event.data);
+    } catch {
+      payload = null;
+    }
+
+    const message = typeof payload?.message === "string"
+      ? payload.message
+      : "Stream de watchlist reportou falha";
+    setWatchlistStatus(message, "error");
+  });
+
+  eventSource.onerror = () => {
+    if (!watchlistStream || watchlistStreamBroker !== getSelectedBroker()) {
+      return;
+    }
+
+    stopWatchlistStream();
+    watchlistDiagnostics = {
+      ...watchlistDiagnostics,
+      mode: "polling",
+    };
+    renderWatchlistDiagnostics();
+
+    watchlistStreamReconnectAttempt += 1;
+    const backoffMs = Math.min(30000, 1200 * 2 ** watchlistStreamReconnectAttempt);
+    watchlistStreamBackoffTimer = window.setTimeout(() => {
+      watchlistStreamBackoffTimer = null;
+      connectWatchlistStream(intervalMs);
+    }, backoffMs);
+  };
+
+  return true;
 }
 
 function configureWatchlistAutoRefresh() {
@@ -1145,12 +2077,32 @@ function configureWatchlistAutoRefresh() {
   const baseInterval = resolveAutoRefreshIntervalMs();
 
   if (baseInterval <= 0) {
+    watchlistDiagnostics = {
+      ...watchlistDiagnostics,
+      mode: "polling",
+    };
+    renderWatchlistDiagnostics();
     return;
   }
 
   const refreshIntervalMs = baseInterval > 0
     ? Math.max(WATCHLIST_REFRESH_MIN_INTERVAL_MS, baseInterval * 2)
     : WATCHLIST_REFRESH_MIN_INTERVAL_MS;
+
+  if (connectWatchlistStream(refreshIntervalMs)) {
+    watchlistDiagnostics = {
+      ...watchlistDiagnostics,
+      mode: "stream",
+    };
+    renderWatchlistDiagnostics();
+    return;
+  }
+
+  watchlistDiagnostics = {
+    ...watchlistDiagnostics,
+    mode: "polling",
+  };
+  renderWatchlistDiagnostics();
 
   watchlistAutoRefreshTimer = window.setInterval(() => {
     void refreshWatchlistMarket({
@@ -1955,10 +2907,11 @@ function renderChartMetrics(snapshot) {
   }
 }
 
-async function requestCryptoChartEndpoint(assetId, range, mode) {
+async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "binance") {
   const endpoint = mode === "live" ? "/v1/crypto/live-chart" : "/v1/crypto/chart";
+  const normalizedExchange = typeof exchange === "string" && exchange.length > 0 ? exchange : "binance";
   const query = mode === "live"
-    ? `assetId=${encodeURIComponent(assetId)}&range=${encodeURIComponent(range)}`
+    ? `assetId=${encodeURIComponent(assetId)}&range=${encodeURIComponent(range)}&exchange=${encodeURIComponent(normalizedExchange)}`
     : `assetId=${encodeURIComponent(assetId)}&currency=usd&range=${encodeURIComponent(range)}`;
   const response = await fetch(buildApiUrl(`${endpoint}?${query}`), {
     method: "GET",
@@ -1980,9 +2933,9 @@ async function requestCryptoChartEndpoint(assetId, range, mode) {
   return payload?.data ?? null;
 }
 
-async function requestCryptoChart(assetId, range, mode) {
+async function requestCryptoChart(assetId, range, mode, exchange) {
   try {
-    const snapshot = await requestCryptoChartEndpoint(assetId, range, mode);
+    const snapshot = await requestCryptoChartEndpoint(assetId, range, mode, exchange);
 
     return {
       fallbackReason: "",
@@ -1993,7 +2946,7 @@ async function requestCryptoChart(assetId, range, mode) {
       throw error;
     }
 
-    const fallbackSnapshot = await requestCryptoChartEndpoint(assetId, range, "delayed");
+    const fallbackSnapshot = await requestCryptoChartEndpoint(assetId, range, "delayed", exchange);
 
     return {
       fallbackReason:
@@ -2073,6 +3026,7 @@ async function loadChart(options = {}) {
   const assetId = options.assetId ?? chartAssetSelect.value;
   const requestedMode = options.mode ?? chartModeSelect?.value ?? "delayed";
   const selectedExchange = getSelectedTerminalExchange();
+  const selectedBroker = getSelectedBroker();
   const mode = requestedMode === "live" && !isNativeLiveModeSupported()
     ? "delayed"
     : requestedMode;
@@ -2094,7 +3048,7 @@ async function loadChart(options = {}) {
   }
 
   try {
-    const { fallbackReason, snapshot } = await requestCryptoChart(assetId, range, mode);
+    const { fallbackReason, snapshot } = await requestCryptoChart(assetId, range, mode, selectedBroker);
     const combinedFallbackReason = [forcedModeReason, fallbackReason].filter((item) => item.length > 0).join(" | ");
 
     if (!snapshot || !Array.isArray(snapshot.points)) {
@@ -2578,6 +3532,11 @@ function setupChartLab() {
 
   setActiveTerminalInterval(getSelectedTerminalInterval());
   renderWatchlist();
+  watchlistDiagnostics = {
+    ...watchlistDiagnostics,
+    broker: getSelectedBroker(),
+  };
+  renderWatchlistDiagnostics();
   void refreshWatchlistMarket({
     silent: true,
   });
@@ -2628,7 +3587,7 @@ function setupChartLab() {
       chartHasInitialFit = false;
 
       if (chartModeSelect.value === "live" && !isNativeLiveModeSupported()) {
-        setChartLegend("Modo live nativo disponivel para Binance. Aplicando fallback delayed com refresh continuo.", "error");
+        setChartLegend("Modo live nativo indisponivel para a corretora selecionada. Aplicando fallback delayed com refresh continuo.", "error");
       }
 
       configureChartAutoRefresh();
@@ -2669,7 +3628,7 @@ function setupChartLab() {
       }
 
       if (chartModeSelect instanceof HTMLSelectElement && chartModeSelect.value === "live" && !isNativeLiveModeSupported()) {
-        setChartLegend("Live nativo disponivel apenas para Binance nesta versao. Aplicando modo delayed resiliente.", "error");
+        setChartLegend("Live nativo indisponivel para a corretora selecionada nesta versao. Aplicando modo delayed resiliente.", "error");
       }
 
       renderWatchlist();
@@ -2939,6 +3898,11 @@ if (chatInput) {
 }
 
 window.addEventListener("beforeunload", () => {
+  if (airdropQueryDebounceTimer !== null) {
+    window.clearTimeout(airdropQueryDebounceTimer);
+    airdropQueryDebounceTimer = null;
+  }
+
   stopChartAutoRefresh();
   stopWatchlistAutoRefresh();
   destroyInteractiveChart();
@@ -2947,4 +3911,5 @@ window.addEventListener("beforeunload", () => {
 setupQuickPrompts();
 setupLocalHistoryControls();
 setupChartLab();
+setupAirdropRadarPanel();
 void initializeChatHistory();

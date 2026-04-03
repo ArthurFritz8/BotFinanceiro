@@ -123,6 +123,37 @@ curl -X DELETE "http://localhost:3000/internal/copilot/audit/history?confirm=tru
 	-H "x-internal-token: $INTERNAL_API_TOKEN"
 ```
 
+5. Saude da inteligencia de airdrops (JSON)
+
+```bash
+curl "http://localhost:3000/internal/health/airdrops" \
+	-H "x-internal-token: $INTERNAL_API_TOKEN"
+```
+
+6. Saude da inteligencia de airdrops (CSV)
+
+```bash
+curl "http://localhost:3000/internal/health/airdrops.csv" \
+	-H "x-internal-token: $INTERNAL_API_TOKEN" \
+	-o airdrops-health.csv
+```
+
+7. Saude do stream de cotacoes por corretora (CSV)
+
+```bash
+curl "http://localhost:3000/internal/health/streams/brokers.csv" \
+	-H "x-internal-token: $INTERNAL_API_TOKEN" \
+	-o brokers-stream-health.csv
+```
+
+8. Saude do live-chart por exchange (CSV)
+
+```bash
+curl "http://localhost:3000/internal/health/live-chart/crypto.csv" \
+	-H "x-internal-token: $INTERNAL_API_TOKEN" \
+	-o live-chart-health.csv
+```
+
 ## Copiloto IA (OpenRouter)
 
 Configure as variaveis no `.env`:
@@ -154,24 +185,32 @@ Tool calling read-only habilitado no Copiloto:
 2. `get_crypto_multi_spot_price`
 3. `get_crypto_market_overview`
 4. `get_crypto_chart_insights`
-5. `get_financial_market_snapshot`
-6. `get_operational_health`
-7. `get_crypto_sync_policy`
-8. `get_broker_live_quote`
+5. `get_airdrop_opportunities`
+6. `get_financial_market_snapshot`
+7. `get_operational_health`
+8. `get_crypto_sync_policy`
+9. `get_broker_live_quote`
 
 Observacao tecnica da tool de grafico:
 
 1. `get_crypto_chart_insights` aceita `mode`:
 - `delayed` (historico padrao com fallback CoinGecko -> Binance)
-- `live` (snapshot quase em tempo real via Binance)
+- `live` (snapshot quase em tempo real por exchange: Binance, Bybit, Coinbase, Kraken ou OKX)
+
+Observacao tecnica da tool de airdrops:
+
+1. `get_airdrop_opportunities` agrega multiplas fontes (`airdrops.io`, `airdropalert`, `DefiLlama`, `CoinGecko trending`) e retorna score, confianca e tarefas sugeridas.
+2. Fontes premium por API key podem ser habilitadas via env para expandir cobertura sem quebrar o fluxo base.
+3. O resultado e informativo (nao garante reward) e pode incluir oportunidades especulativas quando `includeSpeculative=true`.
 
 Quando o modelo usa ferramentas, a resposta inclui `toolCallsUsed` com a lista das tools executadas no fluxo.
 
 Cobertura de consultas apos esta evolucao:
 
 1. cripto (preco, comparativo, resumo, risco de curto prazo por fatores, analise de grafico)
-2. mercado global (indices, cambio, juros, commodities e simbolos customizaveis via Yahoo)
-3. corretoras (status de integracao e cotacao ao vivo por broker, com Binance ativa e IQ Option mapeada para configuracao)
+2. airdrops (radar multi-fonte com score, confianca e checklist de elegibilidade)
+3. mercado global (indices, cambio, juros, commodities e simbolos customizaveis via Yahoo)
+4. corretoras (status de integracao e cotacao ao vivo por broker, com Binance ativa e IQ Option mapeada para configuracao)
 
 Endpoint tecnico para grafico:
 
@@ -182,8 +221,21 @@ curl "http://localhost:3000/v1/crypto/chart?assetId=bitcoin&currency=usd&range=7
 Endpoint tecnico para grafico ao vivo:
 
 ```bash
-curl "http://localhost:3000/v1/crypto/live-chart?assetId=bitcoin&range=24h"
+curl "http://localhost:3000/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=bybit"
 ```
+
+Endpoint tecnico para radar de airdrops:
+
+```bash
+curl "http://localhost:3000/v1/airdrops/opportunities?limit=10&minScore=30&query=base&includeSpeculative=true&chain=base&confidence=high&sources=airdrops_io,defillama&sortBy=recent"
+```
+
+Filtros avancados disponiveis no radar de airdrops:
+
+1. `chain` (ex.: `base`, `zksync`, `arbitrum`)
+2. `confidence` (`high`, `medium`, `low`)
+3. `sources` (CSV com `airdrop_alert`, `airdrops_io`, `coingecko_trending`, `defillama`, `drops_tab`, `earnifi`)
+4. `sortBy` (`score` ou `recent`)
 
 Endpoints tecnicos para corretoras:
 
@@ -198,6 +250,18 @@ Variaveis de ambiente para conectores de corretora (opcional):
 1. `IQOPTION_ENABLED`
 2. `IQOPTION_API_BASE_URL`
 3. `IQOPTION_TIMEOUT_MS`
+
+Variaveis de ambiente para inteligencia de airdrops:
+
+1. `AIRDROPS_TIMEOUT_MS`
+2. `AIRDROPS_MAX_ITEMS_PER_SOURCE`
+3. `AIRDROPS_IO_SOURCE_URL`
+4. `AIRDROP_ALERT_SOURCE_URL`
+5. `DEFILLAMA_API_BASE_URL`
+6. `AIRDROPS_DROPS_TAB_SOURCE_URL` (opcional, premium)
+7. `AIRDROPS_DROPS_TAB_API_KEY` (opcional, premium)
+8. `AIRDROPS_EARNIFI_SOURCE_URL` (opcional, premium)
+9. `AIRDROPS_EARNIFI_API_KEY` (opcional, premium)
 
 ## Interface web do Copiloto
 
@@ -226,6 +290,10 @@ VITE_DEV_API_PROXY_TARGET=http://localhost:3000 npm run dev:web
 5. O frontend usa `sessionId` persistido no navegador para carregar historico remoto em `GET /v1/copilot/history` e mantém fallback local.
 6. O card "Historico local" limpa mensagens da sessao atual e inicia uma nova sessao local/remota.
 7. O card "Chart Lab" permite alternar entre modo `Delay` e `Ao vivo`, visualizar preco e sinais tecnicos avancados (EMA, RSI, MACD, ATR, suporte/resistencia, acao tatica e niveis de risco) e enviar analise automatica ao chat com um clique.
+8. O bloco "Radar de oportunidades" dentro do Chart Lab carrega `/v1/airdrops/opportunities` com filtros de chain, confianca, score minimo e busca textual.
+9. Cada card do radar possui acao "Levar ao chat" para preencher automaticamente um prompt contextual (projeto, tarefas, score, confianca e fontes), acelerando analise operacional.
+10. O radar persiste filtros no navegador (chain, confianca, score, query e includeSpeculative), mantendo contexto entre reloads.
+11. Cada card agora inclui acao "Copiar prompt" para usar o contexto em qualquer fluxo externo (chat, runbook ou checklist operacional).
 
 ## Frontend publico
 
