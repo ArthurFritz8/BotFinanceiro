@@ -31,6 +31,9 @@ import {
   type BrokerName,
 } from "../../brokers/application/broker-market-service.js";
 import {
+  CommoditiesMarketService,
+} from "../../commodities/application/commodities-market-service.js";
+import {
   CryptoChartService,
   type CryptoChartRange,
   type CryptoTrend,
@@ -53,11 +56,17 @@ import {
   FiisMarketService,
 } from "../../fiis/application/fiis-market-service.js";
 import {
+  FixedIncomeMarketService,
+} from "../../fixed_income/application/fixed-income-market-service.js";
+import {
   ForexMarketService,
 } from "../../forex/application/forex-market-service.js";
 import {
   FuturesMarketService,
 } from "../../futures/application/futures-market-service.js";
+import {
+  OptionsMarketService,
+} from "../../options/application/options-market-service.js";
 import { SystemStatusService } from "../../system/application/system-status-service.js";
 import {
   WallStreetMarketService,
@@ -76,6 +85,7 @@ const openRouterChatAdapter = new OpenRouterChatAdapter();
 const coinCapMarketDataAdapter = new CoinCapMarketDataAdapter();
 const yahooMarketDataAdapter = new YahooMarketDataAdapter();
 const brokerMarketService = new BrokerMarketService();
+const commoditiesMarketService = new CommoditiesMarketService();
 const cryptoChartService = new CryptoChartService();
 const cryptoSpotPriceService = new CryptoSpotPriceService();
 const cryptoSyncPolicyService = new CryptoSyncPolicyService();
@@ -85,8 +95,10 @@ const b3MarketService = new B3MarketService();
 const defiMarketService = new DefiMarketService();
 const equitiesMarketService = new EquitiesMarketService();
 const fiisMarketService = new FiisMarketService();
+const fixedIncomeMarketService = new FixedIncomeMarketService();
 const forexMarketService = new ForexMarketService();
 const futuresMarketService = new FuturesMarketService();
+const optionsMarketService = new OptionsMarketService();
 const wallStreetMarketService = new WallStreetMarketService();
 
 const copilotDefaultSystemPrompt = [
@@ -98,6 +110,9 @@ const copilotDefaultSystemPrompt = [
   "Quando a pergunta envolver corretoras (Binance, Bybit, Coinbase, Kraken, OKX, IQ Option), use get_broker_live_quote para informar disponibilidade e cotacao ao vivo quando possivel.",
   "Quando a pergunta envolver forex (pares de moedas, cambio), use get_forex_market_snapshot.",
   "Quando a pergunta envolver futuros (funding, open interest, contratos perp), use get_futures_market_snapshot.",
+  "Quando a pergunta envolver opcoes (volatilidade implicita, move esperado e bias), use get_options_market_snapshot.",
+  "Quando a pergunta envolver commodities (metais, energia, agro), use get_commodities_market_snapshot.",
+  "Quando a pergunta envolver renda fixa (curva de juros, bonds, duration), use get_fixed_income_market_snapshot.",
   "Quando a pergunta envolver B3 (acoes brasileiras e indices locais), use get_b3_market_snapshot.",
   "Quando a pergunta envolver FIIs (fundos imobiliarios listados), use get_fiis_market_snapshot.",
   "Quando a pergunta envolver acoes globais por ticker (AAPL, MSFT, NVDA etc), use get_equities_market_snapshot.",
@@ -179,6 +194,34 @@ const copilotFuturesMarketSnapshotToolInputSchema = z.object({
     .array(z.string().trim().min(2).max(20).transform((value) => value.toUpperCase()))
     .min(1)
     .max(8)
+    .optional(),
+});
+
+const copilotOptionsMarketSnapshotToolInputSchema = z.object({
+  daysToExpiry: z.number().int().min(1).max(365).default(30),
+  preset: z.enum(["us_indices", "us_mega_caps", "high_beta", "global"]).default("us_indices"),
+  underlyings: z
+    .array(z.string().trim().min(1).max(24).transform((value) => value.toUpperCase()))
+    .min(1)
+    .max(10)
+    .optional(),
+});
+
+const copilotCommoditiesMarketSnapshotToolInputSchema = z.object({
+  preset: z.enum(["metals", "energy", "agro", "global"]).default("global"),
+  symbols: z
+    .array(z.string().trim().min(2).max(32).transform((value) => value.toUpperCase()))
+    .min(1)
+    .max(10)
+    .optional(),
+});
+
+const copilotFixedIncomeMarketSnapshotToolInputSchema = z.object({
+  preset: z.enum(["us_curve", "credit_proxies", "rates_risk", "global_macro"]).default("us_curve"),
+  symbols: z
+    .array(z.string().trim().min(1).max(32).transform((value) => value.toUpperCase()))
+    .min(1)
+    .max(10)
     .optional(),
 });
 
@@ -1254,6 +1297,132 @@ const copilotTools: OpenRouterToolDefinition[] = [
       }
 
       return futuresMarketService.getMarketOverview({
+        limit: 8,
+        preset: input.preset,
+      });
+    },
+  },
+  {
+    description:
+      "Retorna snapshot de opcoes por ativo-base com proxy de volatilidade implicita, move esperado e bias tatico.",
+    inputSchema: copilotOptionsMarketSnapshotToolInputSchema,
+    name: "get_options_market_snapshot",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        daysToExpiry: {
+          default: 30,
+          description: "Dias ate vencimento para projeção de move esperado",
+          maximum: 365,
+          minimum: 1,
+          type: "number",
+        },
+        preset: {
+          default: "us_indices",
+          description: "Conjunto pre-definido de underlyings: us_indices, us_mega_caps, high_beta ou global",
+          enum: ["us_indices", "us_mega_caps", "high_beta", "global"],
+          type: "string",
+        },
+        underlyings: {
+          description: "Lista opcional de ativos-base (ex.: SPY, QQQ, AAPL). Quando informada, sobrescreve preset.",
+          items: {
+            type: "string",
+          },
+          maxItems: 10,
+          minItems: 1,
+          type: "array",
+        },
+      },
+      type: "object",
+    },
+    run: async (input: z.infer<typeof copilotOptionsMarketSnapshotToolInputSchema>) => {
+      if (input.underlyings && input.underlyings.length > 0) {
+        return optionsMarketService.getSnapshotBatch({
+          daysToExpiry: input.daysToExpiry,
+          underlyings: input.underlyings,
+        });
+      }
+
+      return optionsMarketService.getMarketOverview({
+        daysToExpiry: input.daysToExpiry,
+        limit: 8,
+        preset: input.preset,
+      });
+    },
+  },
+  {
+    description:
+      "Retorna snapshot de commodities com foco em metais, energia e agro, incluindo variacao e estado de mercado.",
+    inputSchema: copilotCommoditiesMarketSnapshotToolInputSchema,
+    name: "get_commodities_market_snapshot",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        preset: {
+          default: "global",
+          description: "Conjunto pre-definido de commodities: metals, energy, agro ou global",
+          enum: ["metals", "energy", "agro", "global"],
+          type: "string",
+        },
+        symbols: {
+          description: "Lista opcional de simbolos de commodities (ex.: GC=F, CL=F, ZC=F). Quando informada, sobrescreve preset.",
+          items: {
+            type: "string",
+          },
+          maxItems: 10,
+          minItems: 1,
+          type: "array",
+        },
+      },
+      type: "object",
+    },
+    run: async (input: z.infer<typeof copilotCommoditiesMarketSnapshotToolInputSchema>) => {
+      if (input.symbols && input.symbols.length > 0) {
+        return commoditiesMarketService.getSnapshotBatch({
+          symbols: input.symbols,
+        });
+      }
+
+      return commoditiesMarketService.getMarketOverview({
+        limit: 8,
+        preset: input.preset,
+      });
+    },
+  },
+  {
+    description:
+      "Retorna snapshot de renda fixa (curva de juros e proxies de crédito) com inclinação da curva e buckets de duration.",
+    inputSchema: copilotFixedIncomeMarketSnapshotToolInputSchema,
+    name: "get_fixed_income_market_snapshot",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        preset: {
+          default: "us_curve",
+          description: "Conjunto pre-definido para renda fixa: us_curve, credit_proxies, rates_risk ou global_macro",
+          enum: ["us_curve", "credit_proxies", "rates_risk", "global_macro"],
+          type: "string",
+        },
+        symbols: {
+          description: "Lista opcional de simbolos de renda fixa (ex.: ^IRX, ^FVX, ^TNX, LQD). Quando informada, sobrescreve preset.",
+          items: {
+            type: "string",
+          },
+          maxItems: 10,
+          minItems: 1,
+          type: "array",
+        },
+      },
+      type: "object",
+    },
+    run: async (input: z.infer<typeof copilotFixedIncomeMarketSnapshotToolInputSchema>) => {
+      if (input.symbols && input.symbols.length > 0) {
+        return fixedIncomeMarketService.getSnapshotBatch({
+          symbols: input.symbols,
+        });
+      }
+
+      return fixedIncomeMarketService.getMarketOverview({
         limit: 8,
         preset: input.preset,
       });
