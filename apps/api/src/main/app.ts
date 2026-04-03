@@ -17,6 +17,7 @@ import { registerFuturesRoutes } from "../modules/futures/interface/futures-rout
 import { registerGlobalSectorsRoutes } from "../modules/global_sectors/interface/global-sectors-routes.js";
 import { registerMacroRatesRoutes } from "../modules/macro_rates/interface/macro-rates-routes.js";
 import { registerOptionsRoutes } from "../modules/options/interface/options-routes.js";
+import { registerPortfoliosRoutes } from "../modules/portfolios/interface/portfolios-routes.js";
 import { registerSystemRoutes } from "../modules/system/interface/system-routes.js";
 import { registerWallStreetRoutes } from "../modules/wall_street/interface/wall-street-routes.js";
 import { env } from "../shared/config/env.js";
@@ -88,6 +89,7 @@ export function buildApp() {
       registerGlobalSectorsRoutes(instance);
       registerMacroRatesRoutes(instance);
       registerOptionsRoutes(instance);
+      registerPortfoliosRoutes(instance);
       registerWallStreetRoutes(instance);
       done();
     },

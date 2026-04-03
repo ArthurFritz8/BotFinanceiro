@@ -200,9 +200,10 @@ Tool calling read-only habilitado no Copiloto:
 17. `get_etfs_market_snapshot`
 18. `get_global_sectors_market_snapshot`
 19. `get_macro_rates_market_snapshot`
-20. `get_financial_market_snapshot`
-21. `get_operational_health`
-22. `get_crypto_sync_policy`
+20. `get_portfolio_risk_snapshot`
+21. `get_financial_market_snapshot`
+22. `get_operational_health`
+23. `get_crypto_sync_policy`
 
 Observacao tecnica da tool de grafico:
 
@@ -235,8 +236,9 @@ Cobertura de consultas apos esta evolucao:
 13. ETFs globais (broad market, tematicos, internacionais e renda fixa)
 14. setores globais (rotacao setorial, forca relativa e breadth advance/decline)
 15. macro rates (curva de juros, dolar, VIX e proxies de regime de risco)
-16. mercado global (indices, cambio, juros, commodities e simbolos customizaveis via Yahoo)
-17. corretoras (status de integracao e cotacao ao vivo por broker, com Binance ativa e IQ Option mapeada para configuracao)
+16. portfolios (diagnostico de carteira com pesos customizados, exposicao por classe, score de risco e regime)
+17. mercado global (indices, cambio, juros, commodities e simbolos customizaveis via Yahoo)
+18. corretoras (status de integracao e cotacao ao vivo por broker, com Binance ativa e IQ Option mapeada para configuracao)
 
 Endpoint tecnico para grafico:
 
@@ -318,6 +320,15 @@ Endpoints tecnicos para macro rates:
 curl "http://localhost:3000/v1/macro-rates/snapshot?symbol=%5ETNX"
 curl "http://localhost:3000/v1/macro-rates/snapshot/batch?symbols=%5EIRX,%5EFVX,%5ETNX,DX-Y.NYB"
 curl "http://localhost:3000/v1/macro-rates/market-overview?preset=usd_rates&limit=6"
+```
+
+Endpoints tecnicos para portfolios:
+
+```bash
+curl "http://localhost:3000/v1/portfolios/snapshot?preset=balanced"
+curl "http://localhost:3000/v1/portfolios/snapshot?positions=SPY:30,QQQ:20,AGG:25,GLD:15,BTC-USD:10"
+curl "http://localhost:3000/v1/portfolios/snapshot/batch?presets=conservative,balanced,growth,crypto_tilt"
+curl "http://localhost:3000/v1/portfolios/market-overview?presets=conservative,growth&limit=2"
 ```
 
 Endpoints tecnicos para B3:
@@ -429,7 +440,7 @@ VITE_DEV_API_PROXY_TARGET=http://localhost:3000 npm run dev:web
 9. Cada card do radar possui acao "Levar ao chat" para preencher automaticamente um prompt contextual (projeto, tarefas, score, confianca e fontes), acelerando analise operacional.
 10. O radar persiste filtros no navegador (chain, confianca, score, query e includeSpeculative), mantendo contexto entre reloads.
 11. Cada card agora inclui acao "Copiar prompt" para usar o contexto em qualquer fluxo externo (chat, runbook ou checklist operacional).
-12. Atalhos inteligentes incluem prompts dedicados para forex, futuros, opcoes, commodities, renda fixa, ETFs, setores globais, macro rates, B3, FIIs, equities globais, Wall Street e DeFi, acelerando consultas multi-mercado no Copiloto.
+12. Atalhos inteligentes incluem prompts dedicados para forex, futuros, opcoes, commodities, renda fixa, ETFs, setores globais, macro rates, carteira, B3, FIIs, equities globais, Wall Street e DeFi, acelerando consultas multi-mercado no Copiloto.
 
 ## Frontend publico
 

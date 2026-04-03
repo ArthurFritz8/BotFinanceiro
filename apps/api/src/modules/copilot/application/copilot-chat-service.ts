@@ -76,6 +76,9 @@ import {
 import {
   OptionsMarketService,
 } from "../../options/application/options-market-service.js";
+import {
+  PortfolioAnalyticsService,
+} from "../../portfolios/application/portfolio-analytics-service.js";
 import { SystemStatusService } from "../../system/application/system-status-service.js";
 import {
   WallStreetMarketService,
@@ -111,6 +114,7 @@ const futuresMarketService = new FuturesMarketService();
 const globalSectorsMarketService = new GlobalSectorsMarketService();
 const macroRatesMarketService = new MacroRatesMarketService();
 const optionsMarketService = new OptionsMarketService();
+const portfolioAnalyticsService = new PortfolioAnalyticsService();
 const wallStreetMarketService = new WallStreetMarketService();
 
 const copilotDefaultSystemPrompt = [
@@ -128,6 +132,7 @@ const copilotDefaultSystemPrompt = [
   "Quando a pergunta envolver ETFs (broad market, tematicos, internacionais), use get_etfs_market_snapshot.",
   "Quando a pergunta envolver rotacao setorial global (tecnologia, financeiro, energia), use get_global_sectors_market_snapshot.",
   "Quando a pergunta envolver macro rates (curva de juros, DXY, VIX, regime de risco), use get_macro_rates_market_snapshot.",
+  "Quando a pergunta envolver carteira, alocacao, diversificacao e risco ponderado, use get_portfolio_risk_snapshot.",
   "Quando a pergunta envolver B3 (acoes brasileiras e indices locais), use get_b3_market_snapshot.",
   "Quando a pergunta envolver FIIs (fundos imobiliarios listados), use get_fiis_market_snapshot.",
   "Quando a pergunta envolver acoes globais por ticker (AAPL, MSFT, NVDA etc), use get_equities_market_snapshot.",
@@ -265,6 +270,20 @@ const copilotMacroRatesMarketSnapshotToolInputSchema = z.object({
     .min(1)
     .max(10)
     .optional(),
+});
+
+const copilotPortfolioRiskSnapshotToolInputSchema = z.object({
+  positions: z
+    .array(
+      z.object({
+        symbol: z.string().trim().min(1).max(32).transform((value) => value.toUpperCase()),
+        weight: z.number().positive().max(1000),
+      }),
+    )
+    .min(1)
+    .max(10)
+    .optional(),
+  preset: z.enum(["conservative", "balanced", "growth", "crypto_tilt"]).default("balanced"),
 });
 
 const copilotB3MarketSnapshotToolInputSchema = z.object({
@@ -1583,6 +1602,58 @@ const copilotTools: OpenRouterToolDefinition[] = [
 
       return macroRatesMarketService.getMarketOverview({
         limit: 8,
+        preset: input.preset,
+      });
+    },
+  },
+  {
+    description:
+      "Retorna diagnostico de carteira com exposicao por classe, score de risco, variacao ponderada e regime tatico.",
+    inputSchema: copilotPortfolioRiskSnapshotToolInputSchema,
+    name: "get_portfolio_risk_snapshot",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        positions: {
+          description: "Lista opcional de posicoes customizadas (symbol + weight). Quando informada, sobrescreve preset.",
+          items: {
+            additionalProperties: false,
+            properties: {
+              symbol: {
+                description: "Ticker da posicao (ex.: SPY, QQQ, AGG, BTC-USD)",
+                type: "string",
+              },
+              weight: {
+                description: "Peso relativo da posicao (qualquer escala positiva, ex.: 30, 15.5)",
+                maximum: 1000,
+                minimum: 0.000001,
+                type: "number",
+              },
+            },
+            required: ["symbol", "weight"],
+            type: "object",
+          },
+          maxItems: 10,
+          minItems: 1,
+          type: "array",
+        },
+        preset: {
+          default: "balanced",
+          description: "Preset de carteira: conservative, balanced, growth ou crypto_tilt",
+          enum: ["conservative", "balanced", "growth", "crypto_tilt"],
+          type: "string",
+        },
+      },
+      type: "object",
+    },
+    run: async (input: z.infer<typeof copilotPortfolioRiskSnapshotToolInputSchema>) => {
+      if (input.positions && input.positions.length > 0) {
+        return portfolioAnalyticsService.getSnapshot({
+          positions: input.positions,
+        });
+      }
+
+      return portfolioAnalyticsService.getSnapshot({
         preset: input.preset,
       });
     },
