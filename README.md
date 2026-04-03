@@ -189,9 +189,14 @@ Tool calling read-only habilitado no Copiloto:
 6. `get_broker_live_quote`
 7. `get_forex_market_snapshot`
 8. `get_futures_market_snapshot`
-9. `get_financial_market_snapshot`
-10. `get_operational_health`
-11. `get_crypto_sync_policy`
+9. `get_b3_market_snapshot`
+10. `get_fiis_market_snapshot`
+11. `get_equities_market_snapshot`
+12. `get_wall_street_market_snapshot`
+13. `get_defi_market_snapshot`
+14. `get_financial_market_snapshot`
+15. `get_operational_health`
+16. `get_crypto_sync_policy`
 
 Observacao tecnica da tool de grafico:
 
@@ -213,8 +218,13 @@ Cobertura de consultas apos esta evolucao:
 2. airdrops (radar multi-fonte com score, confianca e checklist de elegibilidade)
 3. forex (pares spot e visao por presets: majors, latam, europe, asia e global)
 4. futuros cripto (snapshot por contrato com funding rate, open interest e mark/index price)
-5. mercado global (indices, cambio, juros, commodities e simbolos customizaveis via Yahoo)
-6. corretoras (status de integracao e cotacao ao vivo por broker, com Binance ativa e IQ Option mapeada para configuracao)
+5. B3 (acoes brasileiras e indices locais com presets e batch resiliente)
+6. FIIs (fundos imobiliarios brasileiros com snapshots por ticker e visao por cesta)
+7. equities globais (acoes por ticker com presets de mega caps, inovacao e dividendos)
+8. Wall Street (indices, setores, taxas e fatores de risco)
+9. DeFi (tokens de infraestrutura/DEX/lending com cestas tematicas)
+10. mercado global (indices, cambio, juros, commodities e simbolos customizaveis via Yahoo)
+11. corretoras (status de integracao e cotacao ao vivo por broker, com Binance ativa e IQ Option mapeada para configuracao)
 
 Endpoint tecnico para grafico:
 
@@ -248,6 +258,46 @@ Endpoints tecnicos para futuros:
 curl "http://localhost:3000/v1/futures/snapshot?symbol=BTCUSDT"
 curl "http://localhost:3000/v1/futures/snapshot/batch?symbols=BTCUSDT,ETHUSDT,SOLUSDT"
 curl "http://localhost:3000/v1/futures/market-overview?preset=crypto_majors&limit=5"
+```
+
+Endpoints tecnicos para B3:
+
+```bash
+curl "http://localhost:3000/v1/b3/snapshot?symbol=PETR4"
+curl "http://localhost:3000/v1/b3/snapshot/batch?symbols=PETR4,VALE3,ITUB4"
+curl "http://localhost:3000/v1/b3/market-overview?preset=blue_chips&limit=6"
+```
+
+Endpoints tecnicos para FIIs:
+
+```bash
+curl "http://localhost:3000/v1/fiis/snapshot?symbol=HGLG11"
+curl "http://localhost:3000/v1/fiis/snapshot/batch?symbols=HGLG11,KNRI11,XPLG11"
+curl "http://localhost:3000/v1/fiis/market-overview?preset=high_liquidity&limit=6"
+```
+
+Endpoints tecnicos para equities globais:
+
+```bash
+curl "http://localhost:3000/v1/equities/snapshot?symbol=AAPL"
+curl "http://localhost:3000/v1/equities/snapshot/batch?symbols=AAPL,MSFT,NVDA"
+curl "http://localhost:3000/v1/equities/market-overview?preset=us_mega_caps&limit=6"
+```
+
+Endpoints tecnicos para Wall Street:
+
+```bash
+curl "http://localhost:3000/v1/wall-street/snapshot?symbol=SPY"
+curl "http://localhost:3000/v1/wall-street/snapshot/batch?symbols=%5EGSPC,%5EIXIC,%5EVIX"
+curl "http://localhost:3000/v1/wall-street/market-overview?preset=indices&limit=6"
+```
+
+Endpoints tecnicos para DeFi:
+
+```bash
+curl "http://localhost:3000/v1/defi/spot-rate?assetId=aave"
+curl "http://localhost:3000/v1/defi/spot-rate/batch?assetIds=aave,uniswap,chainlink"
+curl "http://localhost:3000/v1/defi/market-overview?preset=blue_chips&limit=6"
 ```
 
 Filtros avancados disponiveis no radar de airdrops:
@@ -319,7 +369,7 @@ VITE_DEV_API_PROXY_TARGET=http://localhost:3000 npm run dev:web
 9. Cada card do radar possui acao "Levar ao chat" para preencher automaticamente um prompt contextual (projeto, tarefas, score, confianca e fontes), acelerando analise operacional.
 10. O radar persiste filtros no navegador (chain, confianca, score, query e includeSpeculative), mantendo contexto entre reloads.
 11. Cada card agora inclui acao "Copiar prompt" para usar o contexto em qualquer fluxo externo (chat, runbook ou checklist operacional).
-12. Atalhos inteligentes incluem prompts dedicados para snapshot de forex e futuros, acelerando consultas multi-mercado no Copiloto.
+12. Atalhos inteligentes incluem prompts dedicados para forex, futuros, B3, FIIs, equities globais, Wall Street e DeFi, acelerando consultas multi-mercado no Copiloto.
 
 ## Frontend publico
 

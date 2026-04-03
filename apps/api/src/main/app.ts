@@ -2,12 +2,17 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 
 import { registerAirdropsRoutes } from "../modules/airdrops/interface/airdrops-routes.js";
+import { registerB3Routes } from "../modules/b3/interface/b3-routes.js";
 import { registerBrokersRoutes } from "../modules/brokers/interface/brokers-routes.js";
 import { registerCopilotRoutes } from "../modules/copilot/interface/copilot-routes.js";
 import { registerCryptoRoutes } from "../modules/crypto/interface/crypto-routes.js";
+import { registerDefiRoutes } from "../modules/defi/interface/defi-routes.js";
+import { registerEquitiesRoutes } from "../modules/equities/interface/equities-routes.js";
+import { registerFiisRoutes } from "../modules/fiis/interface/fiis-routes.js";
 import { registerForexRoutes } from "../modules/forex/interface/forex-routes.js";
 import { registerFuturesRoutes } from "../modules/futures/interface/futures-routes.js";
 import { registerSystemRoutes } from "../modules/system/interface/system-routes.js";
+import { registerWallStreetRoutes } from "../modules/wall_street/interface/wall-street-routes.js";
 import { env } from "../shared/config/env.js";
 import { httpErrorHandler } from "../shared/errors/http-error-handler.js";
 import { logger } from "../shared/logger/logger.js";
@@ -62,11 +67,16 @@ export function buildApp() {
   void app.register(
     (instance, _, done) => {
       registerAirdropsRoutes(instance);
+      registerB3Routes(instance);
       registerBrokersRoutes(instance);
       registerCopilotRoutes(instance);
       registerCryptoRoutes(instance);
+      registerDefiRoutes(instance);
+      registerEquitiesRoutes(instance);
+      registerFiisRoutes(instance);
       registerForexRoutes(instance);
       registerFuturesRoutes(instance);
+      registerWallStreetRoutes(instance);
       done();
     },
     { prefix: "/v1" },

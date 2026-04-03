@@ -24,6 +24,9 @@ import {
   type AirdropConfidence,
 } from "../../airdrops/application/airdrop-intelligence-service.js";
 import {
+  B3MarketService,
+} from "../../b3/application/b3-market-service.js";
+import {
   BrokerMarketService,
   type BrokerName,
 } from "../../brokers/application/broker-market-service.js";
@@ -41,12 +44,24 @@ import {
   CryptoSyncPolicyService,
 } from "../../crypto/application/crypto-sync-policy-service.js";
 import {
+  DefiMarketService,
+} from "../../defi/application/defi-market-service.js";
+import {
+  EquitiesMarketService,
+} from "../../equities/application/equities-market-service.js";
+import {
+  FiisMarketService,
+} from "../../fiis/application/fiis-market-service.js";
+import {
   ForexMarketService,
 } from "../../forex/application/forex-market-service.js";
 import {
   FuturesMarketService,
 } from "../../futures/application/futures-market-service.js";
 import { SystemStatusService } from "../../system/application/system-status-service.js";
+import {
+  WallStreetMarketService,
+} from "../../wall_street/application/wall-street-market-service.js";
 import { z } from "zod";
 
 export interface CopilotChatInput {
@@ -66,8 +81,13 @@ const cryptoSpotPriceService = new CryptoSpotPriceService();
 const cryptoSyncPolicyService = new CryptoSyncPolicyService();
 const systemStatusService = new SystemStatusService();
 const airdropIntelligenceService = new AirdropIntelligenceService();
+const b3MarketService = new B3MarketService();
+const defiMarketService = new DefiMarketService();
+const equitiesMarketService = new EquitiesMarketService();
+const fiisMarketService = new FiisMarketService();
 const forexMarketService = new ForexMarketService();
 const futuresMarketService = new FuturesMarketService();
+const wallStreetMarketService = new WallStreetMarketService();
 
 const copilotDefaultSystemPrompt = [
   "Voce e um copiloto financeiro focado em dados objetivos de mercado e operacao.",
@@ -78,6 +98,11 @@ const copilotDefaultSystemPrompt = [
   "Quando a pergunta envolver corretoras (Binance, Bybit, Coinbase, Kraken, OKX, IQ Option), use get_broker_live_quote para informar disponibilidade e cotacao ao vivo quando possivel.",
   "Quando a pergunta envolver forex (pares de moedas, cambio), use get_forex_market_snapshot.",
   "Quando a pergunta envolver futuros (funding, open interest, contratos perp), use get_futures_market_snapshot.",
+  "Quando a pergunta envolver B3 (acoes brasileiras e indices locais), use get_b3_market_snapshot.",
+  "Quando a pergunta envolver FIIs (fundos imobiliarios listados), use get_fiis_market_snapshot.",
+  "Quando a pergunta envolver acoes globais por ticker (AAPL, MSFT, NVDA etc), use get_equities_market_snapshot.",
+  "Quando a pergunta envolver Wall Street (indices/setores/rates/risk-on), use get_wall_street_market_snapshot.",
+  "Quando a pergunta envolver DeFi (tokens, DEX, lending), use get_defi_market_snapshot.",
   "Quando a pergunta pedir comprar/vender, responda com sinal tatico informativo (buy/sell/wait), confianca e niveis de risco, sem tratar como recomendacao de investimento.",
   "Quando a pergunta envolver indices, acoes, cambio, juros ou commodities, use get_financial_market_snapshot.",
   "Quando a pergunta envolver risco de curto prazo, entregue analise por fatores (volatilidade, liquidez, macro e operacao), sem recomendacao de investimento.",
@@ -155,6 +180,51 @@ const copilotFuturesMarketSnapshotToolInputSchema = z.object({
     .min(1)
     .max(8)
     .optional(),
+});
+
+const copilotB3MarketSnapshotToolInputSchema = z.object({
+  preset: z.enum(["blue_chips", "indices", "dividendos", "mid_caps"]).default("blue_chips"),
+  symbols: z
+    .array(z.string().trim().min(2).max(24).transform((value) => value.toUpperCase()))
+    .min(1)
+    .max(10)
+    .optional(),
+});
+
+const copilotFiisMarketSnapshotToolInputSchema = z.object({
+  preset: z.enum(["high_liquidity", "tijolo", "papel", "global"]).default("high_liquidity"),
+  symbols: z
+    .array(z.string().trim().min(2).max(16).transform((value) => value.toUpperCase()))
+    .min(1)
+    .max(10)
+    .optional(),
+});
+
+const copilotEquitiesMarketSnapshotToolInputSchema = z.object({
+  preset: z.enum(["us_mega_caps", "global_brands", "innovation", "dividends"]).default("us_mega_caps"),
+  symbols: z
+    .array(z.string().trim().min(1).max(32).transform((value) => value.toUpperCase()))
+    .min(1)
+    .max(10)
+    .optional(),
+});
+
+const copilotWallStreetMarketSnapshotToolInputSchema = z.object({
+  preset: z.enum(["indices", "sectors", "rates", "risk_on"]).default("indices"),
+  symbols: z
+    .array(z.string().trim().min(1).max(32).transform((value) => value.toUpperCase()))
+    .min(1)
+    .max(10)
+    .optional(),
+});
+
+const copilotDefiMarketSnapshotToolInputSchema = z.object({
+  assetIds: z
+    .array(z.string().trim().min(2).max(40).transform((value) => value.toLowerCase()))
+    .min(1)
+    .max(10)
+    .optional(),
+  preset: z.enum(["blue_chips", "dex", "lending", "infrastructure"]).default("blue_chips"),
 });
 
 type FinancialMarketPreset = z.infer<typeof copilotFinancialMarketSnapshotToolInputSchema>["preset"];
@@ -1184,6 +1254,201 @@ const copilotTools: OpenRouterToolDefinition[] = [
       }
 
       return futuresMarketService.getMarketOverview({
+        limit: 8,
+        preset: input.preset,
+      });
+    },
+  },
+  {
+    description:
+      "Retorna snapshot de B3 com acoes brasileiras e indices locais, incluindo variacao de 24h e estado de mercado.",
+    inputSchema: copilotB3MarketSnapshotToolInputSchema,
+    name: "get_b3_market_snapshot",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        preset: {
+          default: "blue_chips",
+          description: "Conjunto pre-definido de simbolos B3: blue_chips, indices, dividendos ou mid_caps",
+          enum: ["blue_chips", "indices", "dividendos", "mid_caps"],
+          type: "string",
+        },
+        symbols: {
+          description: "Lista opcional de simbolos B3 (ex.: PETR4, VALE3, ITUB4). Quando informada, sobrescreve preset.",
+          items: {
+            type: "string",
+          },
+          maxItems: 10,
+          minItems: 1,
+          type: "array",
+        },
+      },
+      type: "object",
+    },
+    run: async (input: z.infer<typeof copilotB3MarketSnapshotToolInputSchema>) => {
+      if (input.symbols && input.symbols.length > 0) {
+        return b3MarketService.getSnapshotBatch({
+          symbols: input.symbols,
+        });
+      }
+
+      return b3MarketService.getMarketOverview({
+        limit: 8,
+        preset: input.preset,
+      });
+    },
+  },
+  {
+    description:
+      "Retorna snapshot de FIIs com cotacao e variacao para fundos imobiliarios listados.",
+    inputSchema: copilotFiisMarketSnapshotToolInputSchema,
+    name: "get_fiis_market_snapshot",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        preset: {
+          default: "high_liquidity",
+          description: "Conjunto pre-definido de FIIs: high_liquidity, tijolo, papel ou global",
+          enum: ["high_liquidity", "tijolo", "papel", "global"],
+          type: "string",
+        },
+        symbols: {
+          description: "Lista opcional de tickers de FIIs (ex.: HGLG11, KNRI11, XPLG11). Quando informada, sobrescreve preset.",
+          items: {
+            type: "string",
+          },
+          maxItems: 10,
+          minItems: 1,
+          type: "array",
+        },
+      },
+      type: "object",
+    },
+    run: async (input: z.infer<typeof copilotFiisMarketSnapshotToolInputSchema>) => {
+      if (input.symbols && input.symbols.length > 0) {
+        return fiisMarketService.getSnapshotBatch({
+          symbols: input.symbols,
+        });
+      }
+
+      return fiisMarketService.getMarketOverview({
+        limit: 8,
+        preset: input.preset,
+      });
+    },
+  },
+  {
+    description:
+      "Retorna snapshot de acoes globais por ticker, com foco em mercado acionario internacional.",
+    inputSchema: copilotEquitiesMarketSnapshotToolInputSchema,
+    name: "get_equities_market_snapshot",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        preset: {
+          default: "us_mega_caps",
+          description: "Conjunto pre-definido de acoes: us_mega_caps, global_brands, innovation ou dividends",
+          enum: ["us_mega_caps", "global_brands", "innovation", "dividends"],
+          type: "string",
+        },
+        symbols: {
+          description: "Lista opcional de tickers (ex.: AAPL, MSFT, NVDA, TSLA). Quando informada, sobrescreve preset.",
+          items: {
+            type: "string",
+          },
+          maxItems: 10,
+          minItems: 1,
+          type: "array",
+        },
+      },
+      type: "object",
+    },
+    run: async (input: z.infer<typeof copilotEquitiesMarketSnapshotToolInputSchema>) => {
+      if (input.symbols && input.symbols.length > 0) {
+        return equitiesMarketService.getSnapshotBatch({
+          symbols: input.symbols,
+        });
+      }
+
+      return equitiesMarketService.getMarketOverview({
+        limit: 8,
+        preset: input.preset,
+      });
+    },
+  },
+  {
+    description:
+      "Retorna snapshot de Wall Street para indices, setores, juros e fatores de risco em mercado americano.",
+    inputSchema: copilotWallStreetMarketSnapshotToolInputSchema,
+    name: "get_wall_street_market_snapshot",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        preset: {
+          default: "indices",
+          description: "Conjunto pre-definido: indices, sectors, rates ou risk_on",
+          enum: ["indices", "sectors", "rates", "risk_on"],
+          type: "string",
+        },
+        symbols: {
+          description: "Lista opcional de simbolos (ex.: ^GSPC, ^IXIC, XLF, ^TNX). Quando informada, sobrescreve preset.",
+          items: {
+            type: "string",
+          },
+          maxItems: 10,
+          minItems: 1,
+          type: "array",
+        },
+      },
+      type: "object",
+    },
+    run: async (input: z.infer<typeof copilotWallStreetMarketSnapshotToolInputSchema>) => {
+      if (input.symbols && input.symbols.length > 0) {
+        return wallStreetMarketService.getSnapshotBatch({
+          symbols: input.symbols,
+        });
+      }
+
+      return wallStreetMarketService.getMarketOverview({
+        limit: 8,
+        preset: input.preset,
+      });
+    },
+  },
+  {
+    description:
+      "Retorna snapshot de tokens DeFi (DEX, lending e infraestrutura) com preco e contexto de mercado.",
+    inputSchema: copilotDefiMarketSnapshotToolInputSchema,
+    name: "get_defi_market_snapshot",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        assetIds: {
+          description: "Lista opcional de ativos DeFi (ex.: aave, uniswap, chainlink). Quando informada, sobrescreve preset.",
+          items: {
+            type: "string",
+          },
+          maxItems: 10,
+          minItems: 1,
+          type: "array",
+        },
+        preset: {
+          default: "blue_chips",
+          description: "Conjunto pre-definido de ativos DeFi: blue_chips, dex, lending ou infrastructure",
+          enum: ["blue_chips", "dex", "lending", "infrastructure"],
+          type: "string",
+        },
+      },
+      type: "object",
+    },
+    run: async (input: z.infer<typeof copilotDefiMarketSnapshotToolInputSchema>) => {
+      if (input.assetIds && input.assetIds.length > 0) {
+        return defiMarketService.getSpotRateBatch({
+          assetIds: input.assetIds,
+        });
+      }
+
+      return defiMarketService.getMarketOverview({
         limit: 8,
         preset: input.preset,
       });
