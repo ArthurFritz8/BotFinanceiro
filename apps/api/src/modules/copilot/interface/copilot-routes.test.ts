@@ -176,6 +176,104 @@ void it("POST /v1/copilot/chat retorna resposta da IA quando OpenRouter esta con
   assert.equal(body.data.usage.totalTokens, 32);
 });
 
+void it("POST /v1/copilot/chat aplica fallback geral para pergunta nao financeira", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let openRouterCalls = 0;
+  const capturedRequestBodies: string[] = [];
+
+  globalThis.fetch = ((input, init) => {
+    const requestUrl = String(input);
+
+    if (!requestUrl.includes("/chat/completions")) {
+      return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+    }
+
+    openRouterCalls += 1;
+    capturedRequestBodies.push(typeof init?.body === "string" ? init.body : "");
+
+    if (openRouterCalls === 1) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    "Sou um copiloto financeiro focado em dados e operacao. Nao consigo responder perguntas fora desse escopo.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-general-fallback-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 16,
+              prompt_tokens: 24,
+              total_tokens: 40,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content:
+                  "Procrastinacao e o habito de adiar tarefas importantes, mesmo sabendo que isso traz prejuizo depois. Uma forma simples de reduzir e quebrar a tarefa em passos pequenos e comecar por 5 minutos.",
+                role: "assistant",
+              },
+            },
+          ],
+          id: "gen-general-fallback-002",
+          model: "google/gemini-1.5-flash",
+          usage: {
+            completion_tokens: 27,
+            prompt_tokens: 18,
+            total_tokens: 45,
+          },
+        }),
+        {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 200,
+        },
+      ),
+    );
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Explique procrastinacao de forma simples",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.ok(openRouterCalls >= 2);
+  assert.ok(capturedRequestBodies.some((body) => /"tools":\[/.test(body)));
+  assert.ok(capturedRequestBodies.some((body) => !/"tools":\[/.test(body)));
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.deepEqual(body.data.toolCallsUsed, []);
+  assert.match(body.data.answer, /Procrastinacao e o habito de adiar tarefas importantes/);
+  assert.doesNotMatch(body.data.answer, /copiloto financeiro focado/);
+});
+
 void it("POST /v1/copilot/chat aplica fallback local para resumo de mercado quando IA recusa", async () => {
   mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
 

@@ -118,7 +118,8 @@ const portfolioAnalyticsService = new PortfolioAnalyticsService();
 const wallStreetMarketService = new WallStreetMarketService();
 
 const copilotDefaultSystemPrompt = [
-  "Voce e um copiloto financeiro focado em dados objetivos de mercado e operacao.",
+  "Voce e um assistente geral util, com especialidade em dados objetivos de mercado e operacao.",
+  "Se a pergunta for geral e nao envolver mercado financeiro, responda normalmente de forma clara e direta, sem forcar contexto de mercado ou uso de tools.",
   "Quando a pergunta envolver resumo, panorama ou contexto do mercado cripto, priorize a tool get_crypto_market_overview.",
   "Quando a pergunta envolver preco ou comparacao entre ativos, use get_crypto_spot_price ou get_crypto_multi_spot_price.",
   "Quando a pergunta envolver grafico, tendencia, suporte/resistencia ou analise tecnica de cripto, use get_crypto_chart_insights.",
@@ -144,6 +145,13 @@ const copilotDefaultSystemPrompt = [
   "Nao recuse genericamente se houver dados disponiveis nas tools; entregue resposta concisa com numeros e contexto.",
   "Se algum dado estiver indisponivel, explicite a limitacao e continue com os dados que conseguiu coletar.",
   "Nao forneca recomendacao de investimento; mantenha tom analitico e neutro.",
+].join(" ");
+
+const copilotGeneralAssistantSystemPrompt = [
+  "Voce e um assistente geral util, claro e objetivo.",
+  "Responda em portugues do Brasil, com linguagem natural e direta.",
+  "Nao force contexto financeiro se a pergunta for de outro assunto.",
+  "Se nao souber algum fato, sinalize a limitacao de forma transparente e sugira como verificar.",
 ].join(" ");
 
 const copilotSpotPriceToolInputSchema = z.object({
@@ -445,6 +453,117 @@ function normalizeText(value: string): string {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
+const financialIntentKeywords = [
+  "mercado",
+  "cripto",
+  "crypto",
+  "bitcoin",
+  "ethereum",
+  "solana",
+  "xrp",
+  "bnb",
+  "dogecoin",
+  "cardano",
+  "chainlink",
+  "trade",
+  "trading",
+  "ticker",
+  "cotacao",
+  "preco",
+  "ativo",
+  "ativos",
+  "acao",
+  "acoes",
+  "bolsa",
+  "b3",
+  "fii",
+  "fiis",
+  "etf",
+  "etfs",
+  "forex",
+  "cambio",
+  "dolar",
+  "juros",
+  "yield",
+  "bond",
+  "renda fixa",
+  "futuro",
+  "futuros",
+  "opcao",
+  "opcoes",
+  "volatilidade",
+  "carteira",
+  "portfolio",
+  "alocacao",
+  "diversificacao",
+  "wall street",
+  "commodities",
+  "commodity",
+  "ouro",
+  "petroleo",
+  "airdrop",
+  "defi",
+  "macro rates",
+];
+
+const financeFramingMarkers = [
+  "copiloto financeiro",
+  "mercado",
+  "cripto",
+  "cotacao",
+  "carteira",
+  "trade",
+  "analise tecnica",
+  "suporte",
+  "resistencia",
+  "spot",
+  "futuros",
+  "renda fixa",
+  "etf",
+  "airdrop",
+  "recomendacao de investimento",
+];
+
+function hasKeywordAsWord(normalizedMessage: string, keyword: string): boolean {
+  if (keyword.includes(" ")) {
+    return normalizedMessage.includes(keyword);
+  }
+
+  const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const keywordPattern = new RegExp(`(^|[^a-z0-9])${escapedKeyword}([^a-z0-9]|$)`);
+
+  return keywordPattern.test(normalizedMessage);
+}
+
+function hasFinancialIntent(message: string): boolean {
+  const normalizedMessage = normalizeText(message);
+  const hasKeyword = financialIntentKeywords.some((keyword) => hasKeywordAsWord(normalizedMessage, keyword));
+
+  if (hasKeyword) {
+    return true;
+  }
+
+  const uppercaseMessage = message.toUpperCase();
+  return /\b([A-Z]{2,6}-USD|[A-Z]{3,12}USDT|\^[A-Z]{2,5}|[A-Z]{2,4}=X|[A-Z]{1,3}=F)\b/.test(uppercaseMessage);
+}
+
+function hasFinanceFramingAnswer(answer: string): boolean {
+  const normalizedAnswer = normalizeText(answer);
+  let matchedMarkers = 0;
+
+  for (const marker of financeFramingMarkers) {
+    if (normalizedAnswer.includes(marker)) {
+      matchedMarkers += 1;
+
+      if (matchedMarkers >= 2) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 function hasMarketSummaryIntent(message: string): boolean {
   const normalizedMessage = normalizeText(message);
   const asksForSummary =
@@ -713,10 +832,12 @@ function hasGenericLimitationAnswer(answer: string): boolean {
   const normalizedAnswer = normalizeText(answer);
 
   return (
+    normalizedAnswer.includes("copiloto financeiro") ||
     normalizedAnswer.includes("nao tenho a capacidade") ||
     normalizedAnswer.includes("nao tenho capacidade") ||
     normalizedAnswer.includes("nao tenho informacoes") ||
     normalizedAnswer.includes("nao consigo fornecer") ||
+    normalizedAnswer.includes("fora desse escopo") ||
     normalizedAnswer.includes("nao posso fornecer") ||
     normalizedAnswer.includes("nao posso fornecer analise de risco") ||
     normalizedAnswer.includes("sou um copiloto financeiro focado em dados e operacao") ||
@@ -753,6 +874,26 @@ function shouldForceChartFallback(message: string, completion: OpenRouterChatCom
     !normalizedAnswer.includes("resistencia");
 
   return !usedChartTool || !hasTechnicalMarkers || isRiskOnlyAnswer;
+}
+
+function shouldForceGeneralAssistantFallback(message: string, completion: OpenRouterChatCompletion): boolean {
+  const hasSpecializedFinancialIntent =
+    hasMarketSummaryIntent(message) ||
+    hasAirdropIntent(message) ||
+    hasMonitoringPlanIntent(message) ||
+    hasChartAnalysisIntent(message) ||
+    hasBrokerIntegrationIntent(message) ||
+    hasRiskAnalysisIntent(message);
+
+  if (hasFinancialIntent(message) || hasSpecializedFinancialIntent) {
+    return false;
+  }
+
+  if (hasGenericLimitationAnswer(completion.answer)) {
+    return true;
+  }
+
+  return hasFinanceFramingAnswer(completion.answer);
 }
 
 function formatSpotPrice(price: number, currency: string): string {
@@ -2025,6 +2166,24 @@ export class CopilotChatService {
       }
     }
 
+    if (shouldForceGeneralAssistantFallback(input.message, completion)) {
+      try {
+        const fallbackAnswer = await this.buildGeneralAssistantFallback(input);
+
+        return {
+          ...completion,
+          answer: fallbackAnswer,
+        };
+      } catch (error) {
+        logger.warn(
+          {
+            err: error,
+          },
+          "Failed to build general assistant fallback",
+        );
+      }
+    }
+
     if (!hasGenericLimitationAnswer(completion.answer)) {
       return completion;
     }
@@ -2140,6 +2299,17 @@ export class CopilotChatService {
     }
 
     return completion;
+  }
+
+  private async buildGeneralAssistantFallback(input: CopilotChatInput): Promise<string> {
+    const fallbackCompletion = await openRouterChatAdapter.createCompletion({
+      maxTokens: input.maxTokens,
+      message: input.message,
+      systemPrompt: copilotGeneralAssistantSystemPrompt,
+      temperature: typeof input.temperature === "number" ? Math.max(0.2, input.temperature) : 0.3,
+    });
+
+    return fallbackCompletion.answer;
   }
 
   private async buildMarketSummaryFallback(): Promise<string> {
