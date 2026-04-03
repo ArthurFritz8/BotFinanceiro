@@ -40,6 +40,12 @@ import {
 import {
   CryptoSyncPolicyService,
 } from "../../crypto/application/crypto-sync-policy-service.js";
+import {
+  ForexMarketService,
+} from "../../forex/application/forex-market-service.js";
+import {
+  FuturesMarketService,
+} from "../../futures/application/futures-market-service.js";
 import { SystemStatusService } from "../../system/application/system-status-service.js";
 import { z } from "zod";
 
@@ -60,6 +66,8 @@ const cryptoSpotPriceService = new CryptoSpotPriceService();
 const cryptoSyncPolicyService = new CryptoSyncPolicyService();
 const systemStatusService = new SystemStatusService();
 const airdropIntelligenceService = new AirdropIntelligenceService();
+const forexMarketService = new ForexMarketService();
+const futuresMarketService = new FuturesMarketService();
 
 const copilotDefaultSystemPrompt = [
   "Voce e um copiloto financeiro focado em dados objetivos de mercado e operacao.",
@@ -68,6 +76,8 @@ const copilotDefaultSystemPrompt = [
   "Quando a pergunta envolver grafico, tendencia, suporte/resistencia ou analise tecnica de cripto, use get_crypto_chart_insights.",
   "Quando a pergunta envolver airdrops, retroativos, testnet, quests ou farming, use get_airdrop_opportunities.",
   "Quando a pergunta envolver corretoras (Binance, Bybit, Coinbase, Kraken, OKX, IQ Option), use get_broker_live_quote para informar disponibilidade e cotacao ao vivo quando possivel.",
+  "Quando a pergunta envolver forex (pares de moedas, cambio), use get_forex_market_snapshot.",
+  "Quando a pergunta envolver futuros (funding, open interest, contratos perp), use get_futures_market_snapshot.",
   "Quando a pergunta pedir comprar/vender, responda com sinal tatico informativo (buy/sell/wait), confianca e niveis de risco, sem tratar como recomendacao de investimento.",
   "Quando a pergunta envolver indices, acoes, cambio, juros ou commodities, use get_financial_market_snapshot.",
   "Quando a pergunta envolver risco de curto prazo, entregue analise por fatores (volatilidade, liquidez, macro e operacao), sem recomendacao de investimento.",
@@ -127,6 +137,24 @@ const copilotFinancialMarketSnapshotToolInputSchema = z.object({
 const copilotBrokerLiveQuoteToolInputSchema = z.object({
   assetId: z.string().trim().min(1).default("bitcoin"),
   broker: z.enum(["binance", "bybit", "coinbase", "kraken", "okx", "iqoption"]).default("binance"),
+});
+
+const copilotForexMarketSnapshotToolInputSchema = z.object({
+  pairs: z
+    .array(z.string().trim().min(3).max(12).transform((value) => value.toUpperCase()))
+    .min(1)
+    .max(10)
+    .optional(),
+  preset: z.enum(["majors", "latam", "europe", "asia", "global"]).default("majors"),
+});
+
+const copilotFuturesMarketSnapshotToolInputSchema = z.object({
+  preset: z.enum(["crypto_majors", "layer1", "defi"]).default("crypto_majors"),
+  symbols: z
+    .array(z.string().trim().min(2).max(20).transform((value) => value.toUpperCase()))
+    .min(1)
+    .max(8)
+    .optional(),
 });
 
 type FinancialMarketPreset = z.infer<typeof copilotFinancialMarketSnapshotToolInputSchema>["preset"];
@@ -1081,6 +1109,84 @@ const copilotTools: OpenRouterToolDefinition[] = [
     },
     run: (input: z.infer<typeof copilotBrokerLiveQuoteToolInputSchema>) => {
       return brokerMarketService.getLiveQuote(input);
+    },
+  },
+  {
+    description:
+      "Retorna snapshot de forex (pares de moedas) com cotacao, variacao 24h e estado de mercado. Use para perguntas de cambio, pares FX e dolar/real.",
+    inputSchema: copilotForexMarketSnapshotToolInputSchema,
+    name: "get_forex_market_snapshot",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        pairs: {
+          description: "Lista opcional de pares (ex.: EURUSD, USDBRL, USDJPY). Quando informada, sobrescreve preset.",
+          items: {
+            type: "string",
+          },
+          maxItems: 10,
+          minItems: 1,
+          type: "array",
+        },
+        preset: {
+          default: "majors",
+          description: "Conjunto pre-definido de pares: majors, latam, europe, asia ou global",
+          enum: ["majors", "latam", "europe", "asia", "global"],
+          type: "string",
+        },
+      },
+      type: "object",
+    },
+    run: async (input: z.infer<typeof copilotForexMarketSnapshotToolInputSchema>) => {
+      if (input.pairs && input.pairs.length > 0) {
+        return forexMarketService.getSpotRateBatch({
+          pairs: input.pairs,
+        });
+      }
+
+      return forexMarketService.getMarketOverview({
+        limit: 8,
+        preset: input.preset,
+      });
+    },
+  },
+  {
+    description:
+      "Retorna snapshot de futuros (perpetuos) com preco, funding, open interest e metricas de derivativos. Use para perguntas de futuros cripto.",
+    inputSchema: copilotFuturesMarketSnapshotToolInputSchema,
+    name: "get_futures_market_snapshot",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        preset: {
+          default: "crypto_majors",
+          description: "Conjunto pre-definido de contratos: crypto_majors, layer1 ou defi",
+          enum: ["crypto_majors", "layer1", "defi"],
+          type: "string",
+        },
+        symbols: {
+          description: "Lista opcional de contratos (ex.: BTCUSDT, ETHUSDT, SOLUSDT). Quando informada, sobrescreve preset.",
+          items: {
+            type: "string",
+          },
+          maxItems: 8,
+          minItems: 1,
+          type: "array",
+        },
+      },
+      type: "object",
+    },
+    run: async (input: z.infer<typeof copilotFuturesMarketSnapshotToolInputSchema>) => {
+      if (input.symbols && input.symbols.length > 0) {
+        return futuresMarketService.getSnapshotBatch({
+          symbols: input.symbols,
+        });
+      }
+
+      return futuresMarketService.getMarketOverview({
+        limit: 8,
+        preset: input.preset,
+      });
     },
   },
   {

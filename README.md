@@ -186,10 +186,12 @@ Tool calling read-only habilitado no Copiloto:
 3. `get_crypto_market_overview`
 4. `get_crypto_chart_insights`
 5. `get_airdrop_opportunities`
-6. `get_financial_market_snapshot`
-7. `get_operational_health`
-8. `get_crypto_sync_policy`
-9. `get_broker_live_quote`
+6. `get_broker_live_quote`
+7. `get_forex_market_snapshot`
+8. `get_futures_market_snapshot`
+9. `get_financial_market_snapshot`
+10. `get_operational_health`
+11. `get_crypto_sync_policy`
 
 Observacao tecnica da tool de grafico:
 
@@ -209,8 +211,10 @@ Cobertura de consultas apos esta evolucao:
 
 1. cripto (preco, comparativo, resumo, risco de curto prazo por fatores, analise de grafico)
 2. airdrops (radar multi-fonte com score, confianca e checklist de elegibilidade)
-3. mercado global (indices, cambio, juros, commodities e simbolos customizaveis via Yahoo)
-4. corretoras (status de integracao e cotacao ao vivo por broker, com Binance ativa e IQ Option mapeada para configuracao)
+3. forex (pares spot e visao por presets: majors, latam, europe, asia e global)
+4. futuros cripto (snapshot por contrato com funding rate, open interest e mark/index price)
+5. mercado global (indices, cambio, juros, commodities e simbolos customizaveis via Yahoo)
+6. corretoras (status de integracao e cotacao ao vivo por broker, com Binance ativa e IQ Option mapeada para configuracao)
 
 Endpoint tecnico para grafico:
 
@@ -228,6 +232,22 @@ Endpoint tecnico para radar de airdrops:
 
 ```bash
 curl "http://localhost:3000/v1/airdrops/opportunities?limit=10&minScore=30&query=base&includeSpeculative=true&chain=base&confidence=high&sources=airdrops_io,defillama&sortBy=recent"
+```
+
+Endpoints tecnicos para forex:
+
+```bash
+curl "http://localhost:3000/v1/forex/spot-rate?pair=EURUSD"
+curl "http://localhost:3000/v1/forex/spot-rate/batch?pairs=EURUSD,USDBRL,USDJPY"
+curl "http://localhost:3000/v1/forex/market-overview?preset=latam&limit=6"
+```
+
+Endpoints tecnicos para futuros:
+
+```bash
+curl "http://localhost:3000/v1/futures/snapshot?symbol=BTCUSDT"
+curl "http://localhost:3000/v1/futures/snapshot/batch?symbols=BTCUSDT,ETHUSDT,SOLUSDT"
+curl "http://localhost:3000/v1/futures/market-overview?preset=crypto_majors&limit=5"
 ```
 
 Filtros avancados disponiveis no radar de airdrops:
@@ -250,6 +270,11 @@ Variaveis de ambiente para conectores de corretora (opcional):
 1. `IQOPTION_ENABLED`
 2. `IQOPTION_API_BASE_URL`
 3. `IQOPTION_TIMEOUT_MS`
+
+Variaveis de ambiente para futuros:
+
+1. `BINANCE_FUTURES_API_BASE_URL`
+2. `BINANCE_FUTURES_TIMEOUT_MS`
 
 Variaveis de ambiente para inteligencia de airdrops:
 
@@ -294,6 +319,7 @@ VITE_DEV_API_PROXY_TARGET=http://localhost:3000 npm run dev:web
 9. Cada card do radar possui acao "Levar ao chat" para preencher automaticamente um prompt contextual (projeto, tarefas, score, confianca e fontes), acelerando analise operacional.
 10. O radar persiste filtros no navegador (chain, confianca, score, query e includeSpeculative), mantendo contexto entre reloads.
 11. Cada card agora inclui acao "Copiar prompt" para usar o contexto em qualquer fluxo externo (chat, runbook ou checklist operacional).
+12. Atalhos inteligentes incluem prompts dedicados para snapshot de forex e futuros, acelerando consultas multi-mercado no Copiloto.
 
 ## Frontend publico
 

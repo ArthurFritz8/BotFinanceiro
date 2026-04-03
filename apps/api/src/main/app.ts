@@ -5,6 +5,8 @@ import { registerAirdropsRoutes } from "../modules/airdrops/interface/airdrops-r
 import { registerBrokersRoutes } from "../modules/brokers/interface/brokers-routes.js";
 import { registerCopilotRoutes } from "../modules/copilot/interface/copilot-routes.js";
 import { registerCryptoRoutes } from "../modules/crypto/interface/crypto-routes.js";
+import { registerForexRoutes } from "../modules/forex/interface/forex-routes.js";
+import { registerFuturesRoutes } from "../modules/futures/interface/futures-routes.js";
 import { registerSystemRoutes } from "../modules/system/interface/system-routes.js";
 import { env } from "../shared/config/env.js";
 import { httpErrorHandler } from "../shared/errors/http-error-handler.js";
@@ -63,6 +65,8 @@ export function buildApp() {
       registerBrokersRoutes(instance);
       registerCopilotRoutes(instance);
       registerCryptoRoutes(instance);
+      registerForexRoutes(instance);
+      registerFuturesRoutes(instance);
       done();
     },
     { prefix: "/v1" },

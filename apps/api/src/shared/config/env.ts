@@ -133,6 +133,8 @@ const environmentSchema = z
     YAHOO_FINANCE_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
     BINANCE_API_BASE_URL: z.string().url().default("https://api.binance.com"),
     BINANCE_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+    BINANCE_FUTURES_API_BASE_URL: z.string().url().default("https://fapi.binance.com"),
+    BINANCE_FUTURES_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
     AIRDROPS_TIMEOUT_MS: z.coerce.number().int().positive().default(6000),
     AIRDROPS_MAX_ITEMS_PER_SOURCE: z.coerce.number().int().min(5).max(100).default(30),
     AIRDROPS_IO_SOURCE_URL: z.string().url().default("https://airdrops.io"),
