@@ -9,10 +9,13 @@ import { registerCopilotRoutes } from "../modules/copilot/interface/copilot-rout
 import { registerCryptoRoutes } from "../modules/crypto/interface/crypto-routes.js";
 import { registerDefiRoutes } from "../modules/defi/interface/defi-routes.js";
 import { registerEquitiesRoutes } from "../modules/equities/interface/equities-routes.js";
+import { registerEtfsRoutes } from "../modules/etfs/interface/etfs-routes.js";
 import { registerFiisRoutes } from "../modules/fiis/interface/fiis-routes.js";
 import { registerFixedIncomeRoutes } from "../modules/fixed_income/interface/fixed-income-routes.js";
 import { registerForexRoutes } from "../modules/forex/interface/forex-routes.js";
 import { registerFuturesRoutes } from "../modules/futures/interface/futures-routes.js";
+import { registerGlobalSectorsRoutes } from "../modules/global_sectors/interface/global-sectors-routes.js";
+import { registerMacroRatesRoutes } from "../modules/macro_rates/interface/macro-rates-routes.js";
 import { registerOptionsRoutes } from "../modules/options/interface/options-routes.js";
 import { registerSystemRoutes } from "../modules/system/interface/system-routes.js";
 import { registerWallStreetRoutes } from "../modules/wall_street/interface/wall-street-routes.js";
@@ -77,10 +80,13 @@ export function buildApp() {
       registerCryptoRoutes(instance);
       registerDefiRoutes(instance);
       registerEquitiesRoutes(instance);
+      registerEtfsRoutes(instance);
       registerFiisRoutes(instance);
       registerFixedIncomeRoutes(instance);
       registerForexRoutes(instance);
       registerFuturesRoutes(instance);
+      registerGlobalSectorsRoutes(instance);
+      registerMacroRatesRoutes(instance);
       registerOptionsRoutes(instance);
       registerWallStreetRoutes(instance);
       done();

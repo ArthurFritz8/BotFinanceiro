@@ -53,6 +53,9 @@ import {
   EquitiesMarketService,
 } from "../../equities/application/equities-market-service.js";
 import {
+  EtfsMarketService,
+} from "../../etfs/application/etfs-market-service.js";
+import {
   FiisMarketService,
 } from "../../fiis/application/fiis-market-service.js";
 import {
@@ -64,6 +67,12 @@ import {
 import {
   FuturesMarketService,
 } from "../../futures/application/futures-market-service.js";
+import {
+  GlobalSectorsMarketService,
+} from "../../global_sectors/application/global-sectors-market-service.js";
+import {
+  MacroRatesMarketService,
+} from "../../macro_rates/application/macro-rates-market-service.js";
 import {
   OptionsMarketService,
 } from "../../options/application/options-market-service.js";
@@ -94,10 +103,13 @@ const airdropIntelligenceService = new AirdropIntelligenceService();
 const b3MarketService = new B3MarketService();
 const defiMarketService = new DefiMarketService();
 const equitiesMarketService = new EquitiesMarketService();
+const etfsMarketService = new EtfsMarketService();
 const fiisMarketService = new FiisMarketService();
 const fixedIncomeMarketService = new FixedIncomeMarketService();
 const forexMarketService = new ForexMarketService();
 const futuresMarketService = new FuturesMarketService();
+const globalSectorsMarketService = new GlobalSectorsMarketService();
+const macroRatesMarketService = new MacroRatesMarketService();
 const optionsMarketService = new OptionsMarketService();
 const wallStreetMarketService = new WallStreetMarketService();
 
@@ -113,6 +125,9 @@ const copilotDefaultSystemPrompt = [
   "Quando a pergunta envolver opcoes (volatilidade implicita, move esperado e bias), use get_options_market_snapshot.",
   "Quando a pergunta envolver commodities (metais, energia, agro), use get_commodities_market_snapshot.",
   "Quando a pergunta envolver renda fixa (curva de juros, bonds, duration), use get_fixed_income_market_snapshot.",
+  "Quando a pergunta envolver ETFs (broad market, tematicos, internacionais), use get_etfs_market_snapshot.",
+  "Quando a pergunta envolver rotacao setorial global (tecnologia, financeiro, energia), use get_global_sectors_market_snapshot.",
+  "Quando a pergunta envolver macro rates (curva de juros, DXY, VIX, regime de risco), use get_macro_rates_market_snapshot.",
   "Quando a pergunta envolver B3 (acoes brasileiras e indices locais), use get_b3_market_snapshot.",
   "Quando a pergunta envolver FIIs (fundos imobiliarios listados), use get_fiis_market_snapshot.",
   "Quando a pergunta envolver acoes globais por ticker (AAPL, MSFT, NVDA etc), use get_equities_market_snapshot.",
@@ -218,6 +233,33 @@ const copilotCommoditiesMarketSnapshotToolInputSchema = z.object({
 
 const copilotFixedIncomeMarketSnapshotToolInputSchema = z.object({
   preset: z.enum(["us_curve", "credit_proxies", "rates_risk", "global_macro"]).default("us_curve"),
+  symbols: z
+    .array(z.string().trim().min(1).max(32).transform((value) => value.toUpperCase()))
+    .min(1)
+    .max(10)
+    .optional(),
+});
+
+const copilotEtfsMarketSnapshotToolInputSchema = z.object({
+  preset: z.enum(["broad_market", "thematic", "international", "fixed_income"]).default("broad_market"),
+  symbols: z
+    .array(z.string().trim().min(1).max(32).transform((value) => value.toUpperCase()))
+    .min(1)
+    .max(10)
+    .optional(),
+});
+
+const copilotGlobalSectorsMarketSnapshotToolInputSchema = z.object({
+  preset: z.enum(["us_sectors", "global_cyclicals", "defensives", "growth"]).default("us_sectors"),
+  symbols: z
+    .array(z.string().trim().min(1).max(32).transform((value) => value.toUpperCase()))
+    .min(1)
+    .max(10)
+    .optional(),
+});
+
+const copilotMacroRatesMarketSnapshotToolInputSchema = z.object({
+  preset: z.enum(["usd_rates", "global_rates", "inflation_proxies", "risk_regime"]).default("usd_rates"),
   symbols: z
     .array(z.string().trim().min(1).max(32).transform((value) => value.toUpperCase()))
     .min(1)
@@ -1423,6 +1465,123 @@ const copilotTools: OpenRouterToolDefinition[] = [
       }
 
       return fixedIncomeMarketService.getMarketOverview({
+        limit: 8,
+        preset: input.preset,
+      });
+    },
+  },
+  {
+    description:
+      "Retorna snapshot de ETFs globais (broad market, tematicos, internacionais e renda fixa) com variacao e contexto de mercado.",
+    inputSchema: copilotEtfsMarketSnapshotToolInputSchema,
+    name: "get_etfs_market_snapshot",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        preset: {
+          default: "broad_market",
+          description: "Conjunto pre-definido de ETFs: broad_market, thematic, international ou fixed_income",
+          enum: ["broad_market", "thematic", "international", "fixed_income"],
+          type: "string",
+        },
+        symbols: {
+          description: "Lista opcional de ETFs (ex.: SPY, VTI, QQQ, EEM). Quando informada, sobrescreve preset.",
+          items: {
+            type: "string",
+          },
+          maxItems: 10,
+          minItems: 1,
+          type: "array",
+        },
+      },
+      type: "object",
+    },
+    run: async (input: z.infer<typeof copilotEtfsMarketSnapshotToolInputSchema>) => {
+      if (input.symbols && input.symbols.length > 0) {
+        return etfsMarketService.getSnapshotBatch({
+          symbols: input.symbols,
+        });
+      }
+
+      return etfsMarketService.getMarketOverview({
+        limit: 8,
+        preset: input.preset,
+      });
+    },
+  },
+  {
+    description:
+      "Retorna snapshot de rotacao setorial global com leitura de forca relativa por setor e breadth (advance/decline).",
+    inputSchema: copilotGlobalSectorsMarketSnapshotToolInputSchema,
+    name: "get_global_sectors_market_snapshot",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        preset: {
+          default: "us_sectors",
+          description: "Conjunto pre-definido setorial: us_sectors, global_cyclicals, defensives ou growth",
+          enum: ["us_sectors", "global_cyclicals", "defensives", "growth"],
+          type: "string",
+        },
+        symbols: {
+          description: "Lista opcional de simbolos setoriais (ex.: XLK, XLF, XLE, XLV). Quando informada, sobrescreve preset.",
+          items: {
+            type: "string",
+          },
+          maxItems: 10,
+          minItems: 1,
+          type: "array",
+        },
+      },
+      type: "object",
+    },
+    run: async (input: z.infer<typeof copilotGlobalSectorsMarketSnapshotToolInputSchema>) => {
+      if (input.symbols && input.symbols.length > 0) {
+        return globalSectorsMarketService.getSnapshotBatch({
+          symbols: input.symbols,
+        });
+      }
+
+      return globalSectorsMarketService.getMarketOverview({
+        limit: 8,
+        preset: input.preset,
+      });
+    },
+  },
+  {
+    description:
+      "Retorna snapshot de macro rates com curva de juros, dolar, VIX e proxies de regime de risco.",
+    inputSchema: copilotMacroRatesMarketSnapshotToolInputSchema,
+    name: "get_macro_rates_market_snapshot",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        preset: {
+          default: "usd_rates",
+          description: "Conjunto pre-definido macro: usd_rates, global_rates, inflation_proxies ou risk_regime",
+          enum: ["usd_rates", "global_rates", "inflation_proxies", "risk_regime"],
+          type: "string",
+        },
+        symbols: {
+          description: "Lista opcional de simbolos macro (ex.: ^TNX, ^FVX, DX-Y.NYB, ^VIX). Quando informada, sobrescreve preset.",
+          items: {
+            type: "string",
+          },
+          maxItems: 10,
+          minItems: 1,
+          type: "array",
+        },
+      },
+      type: "object",
+    },
+    run: async (input: z.infer<typeof copilotMacroRatesMarketSnapshotToolInputSchema>) => {
+      if (input.symbols && input.symbols.length > 0) {
+        return macroRatesMarketService.getSnapshotBatch({
+          symbols: input.symbols,
+        });
+      }
+
+      return macroRatesMarketService.getMarketOverview({
         limit: 8,
         preset: input.preset,
       });
