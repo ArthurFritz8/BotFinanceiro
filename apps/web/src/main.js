@@ -43,6 +43,12 @@ const watchlistDiagnosticsElement = document.querySelector("#watchlist-diagnosti
 const chartViewport = document.querySelector("#chart-viewport");
 const chartMetricsElement = document.querySelector("#chart-metrics");
 const chartAnalyzeButton = document.querySelector("#chart-analyze-button");
+const analysisPanel = document.querySelector("#analysis-panel");
+const analysisStatusElement = document.querySelector("#analysis-status");
+const analysisSignalCardElement = document.querySelector("#analysis-signal-card");
+const analysisContextCardElement = document.querySelector("#analysis-context-card");
+const analysisTabsElement = document.querySelector("#analysis-tabs");
+const analysisTabContentElement = document.querySelector("#analysis-tab-content");
 const airdropRefreshButton = document.querySelector("#airdrop-refresh-button");
 const airdropFiltersForm = document.querySelector("#airdrop-filters");
 const airdropChainFilter = document.querySelector("#airdrop-chain-filter");
@@ -91,6 +97,48 @@ const CHART_STYLE_LABELS = {
   heikin: "heikin ashi",
   line: "linha",
 };
+const ANALYSIS_TAB_DEFINITIONS = [
+  {
+    id: "resumo",
+    label: "Resumo",
+  },
+  {
+    id: "tecnica",
+    label: "Tecnica",
+  },
+  {
+    id: "smc",
+    label: "SMC",
+  },
+  {
+    id: "harmonicos",
+    label: "Harmonicos",
+  },
+  {
+    id: "wegd",
+    label: "WEGD",
+  },
+  {
+    id: "probabilistica",
+    label: "Probabilistica",
+  },
+  {
+    id: "calculadora",
+    label: "Calculadora",
+  },
+  {
+    id: "timing",
+    label: "Timing",
+  },
+  {
+    id: "visual_ia",
+    label: "Visual IA",
+  },
+  {
+    id: "noticias",
+    label: "Noticias",
+  },
+];
 const TERMINAL_STYLE_TO_TV = {
   area: "3",
   bars: "0",
@@ -240,6 +288,7 @@ let watchlistDiagnostics = {
   successCount: 0,
   unavailableCount: 0,
 };
+let activeAnalysisTabId = "resumo";
 let airdropRadarPayload = null;
 let isAirdropRadarLoading = false;
 let airdropQueryDebounceTimer = null;
@@ -1144,6 +1193,735 @@ function formatTradeActionLabel(action) {
   }
 
   return "Aguardar";
+}
+
+function clampNumber(value, minimum, maximum) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return minimum;
+  }
+
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function toFiniteNumber(value, fallback = 0) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return fallback;
+  }
+
+  return value;
+}
+
+function roundNumber(value, precision = 2) {
+  const factor = 10 ** precision;
+  return Math.round(value * factor) / factor;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function computeRiskReward(entry, stopLoss, takeProfit, side) {
+  const risk = side === "buy" ? entry - stopLoss : stopLoss - entry;
+  const reward = side === "buy" ? takeProfit - entry : entry - takeProfit;
+
+  if (risk <= 0 || reward <= 0) {
+    return null;
+  }
+
+  return roundNumber(reward / risk, 2);
+}
+
+function labelFearGreed(score) {
+  if (score <= 20) {
+    return "Medo extremo";
+  }
+
+  if (score <= 40) {
+    return "Medo";
+  }
+
+  if (score < 60) {
+    return "Neutro";
+  }
+
+  if (score < 80) {
+    return "Ganancia";
+  }
+
+  return "Ganancia extrema";
+}
+
+function labelMarketZone(position) {
+  if (position <= 0.33) {
+    return "Zona de desconto";
+  }
+
+  if (position >= 0.67) {
+    return "Zona premium";
+  }
+
+  return "Zona de equilibrio";
+}
+
+function resolveNearestHarmonicPattern(position) {
+  const candidates = [
+    {
+      label: "AB=CD simetrico (0.50)",
+      ratio: 0.5,
+    },
+    {
+      label: "Bat / 0.618 classico",
+      ratio: 0.618,
+    },
+    {
+      label: "Gartley / 0.786",
+      ratio: 0.786,
+    },
+    {
+      label: "Deep retracement / 0.886",
+      ratio: 0.886,
+    },
+  ];
+
+  let best = candidates[0] ?? {
+    label: "AB=CD simetrico (0.50)",
+    ratio: 0.5,
+  };
+  let shortestDistance = Number.POSITIVE_INFINITY;
+
+  for (const candidate of candidates) {
+    const distance = Math.abs(position - candidate.ratio);
+
+    if (distance < shortestDistance) {
+      shortestDistance = distance;
+      best = candidate;
+    }
+  }
+
+  return {
+    confidence: clampNumber(roundNumber(100 - shortestDistance * 240, 1), 30, 92),
+    distance: shortestDistance,
+    pattern: best.label,
+    ratio: best.ratio,
+  };
+}
+
+function buildQuantitativeAnalysis(snapshot) {
+  const insights = snapshot?.insights;
+
+  if (!insights) {
+    return null;
+  }
+
+  const currentPrice = toFiniteNumber(insights.currentPrice, 0);
+  const supportLevel = toFiniteNumber(insights.supportLevel, currentPrice);
+  const resistanceLevel = toFiniteNumber(insights.resistanceLevel, currentPrice);
+  const lowPrice = toFiniteNumber(insights.lowPrice, currentPrice);
+  const highPrice = toFiniteNumber(insights.highPrice, currentPrice);
+  const rangeAmplitude = Math.max(1e-6, highPrice - lowPrice);
+  const rangePosition = clampNumber((currentPrice - lowPrice) / rangeAmplitude, 0, 1);
+
+  const trendBias = insights.trend === "bullish" ? 1 : insights.trend === "bearish" ? -1 : 0;
+  const actionBias = insights.tradeAction === "buy" ? 0.9 : insights.tradeAction === "sell" ? -0.9 : 0;
+  const emaBias = insights.emaFast >= insights.emaSlow ? 0.9 : -0.9;
+  const macdBias = insights.macdHistogram > 0 ? 0.8 : insights.macdHistogram < 0 ? -0.8 : 0;
+  const momentumBias = clampNumber(insights.momentumPercent / 4, -1, 1);
+  const rsiValue = typeof insights.rsi14 === "number" ? insights.rsi14 : 50;
+  const rsiBias = rsiValue <= 35 ? 0.65 : rsiValue >= 65 ? -0.65 : (50 - rsiValue) / 40;
+  const volatilityPenalty = clampNumber((insights.volatilityPercent - 3) / 4, 0, 1);
+
+  const compositeScore = clampNumber(
+    roundNumber(
+      50
+        + trendBias * 12
+        + actionBias * 9
+        + emaBias * 10
+        + macdBias * 8
+        + momentumBias * 10
+        + rsiBias * 6
+        - volatilityPenalty * 10,
+      1,
+    ),
+    5,
+    95,
+  );
+
+  const neutralRaw = clampNumber(24 + volatilityPenalty * 18 - Math.abs(compositeScore - 50) * 0.24, 5, 38);
+  const buyRaw = clampNumber(compositeScore + (insights.tradeAction === "buy" ? 8 : 0), 5, 95);
+  const sellRaw = clampNumber(100 - compositeScore + (insights.tradeAction === "sell" ? 8 : 0), 5, 95);
+  const rawTotal = buyRaw + sellRaw + neutralRaw;
+  let buyProbability = roundNumber((buyRaw / rawTotal) * 100, 1);
+  let sellProbability = roundNumber((sellRaw / rawTotal) * 100, 1);
+  let neutralProbability = roundNumber(100 - buyProbability - sellProbability, 1);
+
+  if (neutralProbability < 0) {
+    neutralProbability = 0;
+    const normalization = buyProbability + sellProbability;
+    buyProbability = roundNumber((buyProbability / normalization) * 100, 1);
+    sellProbability = roundNumber(100 - buyProbability, 1);
+  }
+
+  const fearGreedScore = clampNumber(
+    roundNumber(
+      50
+        + insights.changePercent * 1.4
+        + insights.momentumPercent * 1.8
+        + (rsiValue - 50) * 0.55
+        + trendBias * 7
+        - insights.volatilityPercent * 1.7,
+      1,
+    ),
+    5,
+    95,
+  );
+  const fearGreedDelta7d = roundNumber(insights.changePercent - insights.volatilityPercent * 0.35, 2);
+  const fearGreedAvg7d = clampNumber(roundNumber(fearGreedScore - fearGreedDelta7d / 2, 1), 5, 95);
+
+  const harmonic = resolveNearestHarmonicPattern(rangePosition);
+  const equilibriumPrice = roundNumber(lowPrice + rangeAmplitude * 0.5, 2);
+  const signalTone = insights.tradeAction === "buy"
+    ? "buy"
+    : insights.tradeAction === "sell"
+      ? "sell"
+      : "neutral";
+  const signalTitle =
+    insights.tradeAction === "buy"
+      ? compositeScore >= 66
+        ? "COMPRA FORTE"
+        : "COMPRA TATICA"
+      : insights.tradeAction === "sell"
+        ? compositeScore <= 34
+          ? "VENDA FORTE"
+          : "VENDA TATICA"
+        : "ESPERA QUALIFICADA";
+
+  const buyRiskReward = computeRiskReward(
+    insights.tradeLevels.entryZoneLow,
+    insights.tradeLevels.stopLoss,
+    insights.tradeLevels.takeProfit2,
+    "buy",
+  );
+  const sellRiskReward = computeRiskReward(
+    insights.tradeLevels.entryZoneHigh,
+    insights.tradeLevels.stopLoss,
+    insights.tradeLevels.takeProfit2,
+    "sell",
+  );
+
+  const smcStructure = insights.trend === "bullish"
+    ? "Estrutura HH/HL (maximos e minimos ascendentes)"
+    : insights.trend === "bearish"
+      ? "Estrutura LH/LL (maximos e minimos descendentes)"
+      : "Estrutura lateral (range com equilibrio de fluxo)";
+  const sweepRisk =
+    rangePosition <= 0.18 || rangePosition >= 0.82
+      ? "Alto risco de sweep em extremos"
+      : rangePosition <= 0.28 || rangePosition >= 0.72
+        ? "Risco moderado de sweep"
+        : "Risco baixo de sweep imediato";
+  const liquidityNarrative =
+    rangePosition >= 0.68
+      ? "Preco operando proximo da liquidez de topo"
+      : rangePosition <= 0.32
+        ? "Preco operando proximo da liquidez de fundo"
+        : "Preco no miolo do range, liquidez bilateral";
+
+  const wegdGradient = roundNumber(((insights.emaFast - insights.emaSlow) / Math.max(currentPrice, 1e-6)) * 100, 3);
+  const wegdEnergy = clampNumber(
+    roundNumber(Math.abs(insights.momentumPercent) * 6 + Math.abs(insights.macdHistogram) * 11 + Math.abs(insights.changePercent) * 3.5, 1),
+    6,
+    99,
+  );
+  const wegdPressure = roundNumber(buyProbability - sellProbability, 1);
+
+  const proxyNews = [];
+
+  if (Math.abs(insights.changePercent) >= 4) {
+    proxyNews.push("Movimento direcional forte no periodo, monitorar eventos de fluxo e macro");
+  }
+
+  if (insights.volatilityPercent >= 5) {
+    proxyNews.push("Regime de volatilidade elevado; reduzir tamanho e exigir confirmacao extra");
+  }
+
+  if (typeof insights.rsi14 === "number" && insights.rsi14 >= 70) {
+    proxyNews.push("RSI em sobrecompra: risco de exaustao local em topos intraday");
+  }
+
+  if (typeof insights.rsi14 === "number" && insights.rsi14 <= 30) {
+    proxyNews.push("RSI em sobrevenda: chance de repique tecnico em suporte relevante");
+  }
+
+  if (snapshot.mode === "live" && typeof snapshot.live?.changePercent24h === "number" && Math.abs(snapshot.live.changePercent24h) >= 3) {
+    proxyNews.push("Fluxo de 24h no live acima da media: monitorar aceleracao e falsa ruptura");
+  }
+
+  if (proxyNews.length === 0) {
+    proxyNews.push("Fluxo tecnico estavel sem anomalias de risco extremo no momento");
+  }
+
+  return {
+    buyProbability,
+    confluences: [
+      {
+        detail: `EMA9 ${formatPrice(insights.emaFast)} x EMA21 ${formatPrice(insights.emaSlow)}`,
+        label: "Estrutura de medias",
+        score: emaBias > 0 ? "+" : "-",
+        value: emaBias > 0 ? "bullish" : "bearish",
+      },
+      {
+        detail: `RSI14 ${typeof insights.rsi14 === "number" ? insights.rsi14.toFixed(2) : "n/d"}`,
+        label: "Momentum oscilador",
+        score: rsiBias >= 0 ? "+" : "-",
+        value: rsiBias >= 0 ? "favoravel" : "cautela",
+      },
+      {
+        detail: `Hist ${formatPercent(insights.macdHistogram)} • Mom ${formatPercent(insights.momentumPercent)}`,
+        label: "MACD e impulso",
+        score: macdBias >= 0 ? "+" : "-",
+        value: macdBias >= 0 ? "expansao" : "compressao",
+      },
+      {
+        detail: `Vol ${formatPercent(insights.volatilityPercent)} • ATR ${formatPercent(insights.atrPercent)}`,
+        label: "Regime de risco",
+        score: volatilityPenalty < 0.45 ? "+" : "-",
+        value: volatilityPenalty < 0.45 ? "controlado" : "elevado",
+      },
+    ],
+    compositeScore,
+    context: {
+      equilibriumPrice,
+      rangeHigh: highPrice,
+      rangeLow: lowPrice,
+      resistanceLevel,
+      supportLevel,
+      trend: formatTrendLabel(insights.trend),
+      zone: labelMarketZone(rangePosition),
+      zonePositionPercent: roundNumber(rangePosition * 100, 1),
+    },
+    fearGreed: {
+      average7d: fearGreedAvg7d,
+      delta7d: fearGreedDelta7d,
+      label: labelFearGreed(fearGreedScore),
+      score: fearGreedScore,
+    },
+    harmonic: {
+      confidence: harmonic.confidence,
+      pattern: harmonic.pattern,
+      ratio: harmonic.ratio,
+    },
+    neutralProbability,
+    newsProxy: proxyNews,
+    scenarios: {
+      buy: {
+        probability: buyProbability,
+        riskReward: buyRiskReward,
+        stopLoss: insights.tradeLevels.stopLoss,
+        targets: [
+          insights.tradeLevels.takeProfit1,
+          insights.tradeLevels.takeProfit2,
+          roundNumber(insights.tradeLevels.takeProfit2 * 1.018, 2),
+        ],
+        trigger: insights.tradeLevels.entryZoneLow,
+      },
+      sell: {
+        probability: sellProbability,
+        riskReward: sellRiskReward,
+        stopLoss: insights.tradeLevels.stopLoss,
+        targets: [
+          roundNumber(insights.tradeLevels.takeProfit1 * 0.985, 2),
+          roundNumber(insights.tradeLevels.takeProfit2 * 0.97, 2),
+          roundNumber(insights.tradeLevels.takeProfit2 * 0.955, 2),
+        ],
+        trigger: insights.tradeLevels.entryZoneHigh,
+      },
+    },
+    sellProbability,
+    signal: {
+      confidence: insights.confidenceScore,
+      entryHigh: insights.tradeLevels.entryZoneHigh,
+      entryLow: insights.tradeLevels.entryZoneLow,
+      riskReward:
+        signalTone === "buy"
+          ? buyRiskReward
+          : signalTone === "sell"
+            ? sellRiskReward
+            : null,
+      stopLoss: insights.tradeLevels.stopLoss,
+      takeProfit1: insights.tradeLevels.takeProfit1,
+      takeProfit2: insights.tradeLevels.takeProfit2,
+      title: signalTitle,
+      tone: signalTone,
+    },
+    smc: {
+      liquidity: liquidityNarrative,
+      structure: smcStructure,
+      sweepRisk,
+    },
+    timing: {
+      executionWindow:
+        insights.volatilityPercent >= 5
+          ? "Operar somente em janelas de maior liquidez (abertura EUA/Londres)"
+          : "Janela intraday regular, com confirmacao em fechamento de candle",
+      invalidationLevel: insights.tradeLevels.stopLoss,
+      note:
+        signalTone === "buy"
+          ? "Priorize pullback para zona de entrada e confirme com candle de continuidade"
+          : signalTone === "sell"
+            ? "Priorize falha de rompimento e candle de rejeicao para entrada"
+            : "Aguardar rompimento limpo ou retorno a zonas extremas para melhorar assimetria",
+    },
+    visualChecklist: [
+      `Trend: ${formatTrendLabel(insights.trend)}`,
+      `RSI14: ${typeof insights.rsi14 === "number" ? insights.rsi14.toFixed(2) : "n/d"}`,
+      `MACD hist: ${formatPercent(insights.macdHistogram)}`,
+      `Zona: ${labelMarketZone(rangePosition)} (${roundNumber(rangePosition * 100, 1)}%)`,
+      `Confianca do setup: ${Math.round(insights.confidenceScore)}%`,
+    ],
+    wegd: {
+      direction:
+        wegdGradient > 0
+          ? "gradiente comprador"
+          : wegdGradient < 0
+            ? "gradiente vendedor"
+            : "gradiente neutro",
+      energy: wegdEnergy,
+      gradient: wegdGradient,
+      pressure: wegdPressure,
+    },
+  };
+}
+
+function renderAnalysisTabs() {
+  if (!(analysisTabsElement instanceof HTMLElement)) {
+    return;
+  }
+
+  analysisTabsElement.innerHTML = "";
+
+  for (const tab of ANALYSIS_TAB_DEFINITIONS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `analysis-tab-button${activeAnalysisTabId === tab.id ? " is-active" : ""}`;
+    button.dataset.tab = tab.id;
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-selected", activeAnalysisTabId === tab.id ? "true" : "false");
+    button.textContent = tab.label;
+    analysisTabsElement.append(button);
+  }
+}
+
+function buildScenarioHtml(label, scenario, currency) {
+  const riskRewardLabel = typeof scenario.riskReward === "number"
+    ? `${scenario.riskReward.toFixed(2)}:1`
+    : "n/d";
+
+  return `
+    <article class="analysis-scenario-card">
+      <h5>${escapeHtml(label)} • ${scenario.probability.toFixed(1)}%</h5>
+      <p>Gatilho: ${escapeHtml(formatPrice(scenario.trigger, currency))}</p>
+      <p>Stop: ${escapeHtml(formatPrice(scenario.stopLoss, currency))}</p>
+      <p>Alvos: ${escapeHtml(scenario.targets.map((target) => formatPrice(target, currency)).join(" • "))}</p>
+      <p>Risco/Retorno: ${escapeHtml(riskRewardLabel)}</p>
+    </article>
+  `;
+}
+
+function renderAnalysisTabContent(analysis, snapshot) {
+  if (!(analysisTabContentElement instanceof HTMLElement)) {
+    return;
+  }
+
+  const currency = snapshot?.currency ?? "usd";
+
+  if (activeAnalysisTabId === "resumo") {
+    analysisTabContentElement.innerHTML = `
+      <div class="analysis-grid">
+        <article class="analysis-block">
+          <h4>Leitura executiva</h4>
+          <p>Score de confluencia ${analysis.compositeScore.toFixed(1)} / 100 com ${analysis.signal.title.toLowerCase()}.</p>
+          <p>Probabilidade atual: compra ${analysis.buyProbability.toFixed(1)}%, venda ${analysis.sellProbability.toFixed(1)}%, neutro ${analysis.neutralProbability.toFixed(1)}%.</p>
+          <p>${escapeHtml(analysis.timing.note)}</p>
+        </article>
+        <article class="analysis-block">
+          <h4>Confluencias ativas</h4>
+          <ul class="analysis-list">
+            ${analysis.confluences.map((item) => `<li><strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(item.value)} (${escapeHtml(item.detail)})</li>`).join("")}
+          </ul>
+        </article>
+      </div>
+    `;
+    return;
+  }
+
+  if (activeAnalysisTabId === "tecnica") {
+    analysisTabContentElement.innerHTML = `
+      <div class="analysis-grid">
+        <article class="analysis-block">
+          <h4>Estrutura tecnica</h4>
+          <p>Zona de mercado: ${escapeHtml(analysis.context.zone)} (${analysis.context.zonePositionPercent.toFixed(1)}% do range).</p>
+          <p>Suporte: ${escapeHtml(formatPrice(analysis.context.supportLevel, currency))}</p>
+          <p>Resistencia: ${escapeHtml(formatPrice(analysis.context.resistanceLevel, currency))}</p>
+          <p>Equilibrio: ${escapeHtml(formatPrice(analysis.context.equilibriumPrice, currency))}</p>
+        </article>
+        <article class="analysis-block">
+          <h4>Indicadores-chave</h4>
+          <p>Fear & Greed quant: ${analysis.fearGreed.score.toFixed(1)} (${escapeHtml(analysis.fearGreed.label)})</p>
+          <p>Delta 7d: ${escapeHtml(formatPercent(analysis.fearGreed.delta7d))}</p>
+          <p>Media 7d: ${analysis.fearGreed.average7d.toFixed(1)}</p>
+          <p>Direcao dominante: ${escapeHtml(analysis.context.trend)}</p>
+        </article>
+      </div>
+    `;
+    return;
+  }
+
+  if (activeAnalysisTabId === "smc") {
+    analysisTabContentElement.innerHTML = `
+      <div class="analysis-grid">
+        <article class="analysis-block">
+          <h4>Estrutura e liquidez (SMC)</h4>
+          <p>${escapeHtml(analysis.smc.structure)}</p>
+          <p>${escapeHtml(analysis.smc.liquidity)}</p>
+          <p>${escapeHtml(analysis.smc.sweepRisk)}</p>
+        </article>
+        <article class="analysis-block">
+          <h4>Invalidação estrutural</h4>
+          <p>Nivel de invalidacao: ${escapeHtml(formatPrice(analysis.timing.invalidationLevel, currency))}</p>
+          <p>Se houver fechamento alem desse nivel, o setup atual perde validade.</p>
+        </article>
+      </div>
+    `;
+    return;
+  }
+
+  if (activeAnalysisTabId === "harmonicos") {
+    analysisTabContentElement.innerHTML = `
+      <div class="analysis-grid">
+        <article class="analysis-block">
+          <h4>Leitura harmonica</h4>
+          <p>Padrao mais proximo: ${escapeHtml(analysis.harmonic.pattern)}</p>
+          <p>Razao candidata: ${analysis.harmonic.ratio.toFixed(3)}</p>
+          <p>Confianca harmonica: ${analysis.harmonic.confidence.toFixed(1)}%</p>
+        </article>
+        <article class="analysis-block">
+          <h4>Como interpretar</h4>
+          <p>Use padrao harmonico apenas com confirmacao de candle e volume. Sem confirmacao, tratar como contexto e nao gatilho.</p>
+        </article>
+      </div>
+    `;
+    return;
+  }
+
+  if (activeAnalysisTabId === "wegd") {
+    analysisTabContentElement.innerHTML = `
+      <div class="analysis-grid">
+        <article class="analysis-block">
+          <h4>WEGD (Weighted Edge Gradient Direction)</h4>
+          <p>Direcao: ${escapeHtml(analysis.wegd.direction)}</p>
+          <p>Gradiente: ${escapeHtml(formatPercent(analysis.wegd.gradient))}</p>
+          <p>Energia: ${analysis.wegd.energy.toFixed(1)} / 99</p>
+          <p>Pressao liquida: ${escapeHtml(formatPercent(analysis.wegd.pressure))}</p>
+        </article>
+        <article class="analysis-block">
+          <h4>Regra operacional</h4>
+          <p>Gradiente alto + energia alta reforca continuidade. Gradiente invertendo com energia baixa sinaliza exaustao e possivel lateralizacao.</p>
+        </article>
+      </div>
+    `;
+    return;
+  }
+
+  if (activeAnalysisTabId === "probabilistica") {
+    analysisTabContentElement.innerHTML = `
+      <div class="analysis-block">
+        <h4>Cenarios probabilisticos</h4>
+        <div class="analysis-probability-rows">
+          <div class="analysis-probability-row">
+            <span>Compra</span>
+            <div class="analysis-probability-track"><div class="analysis-probability-fill buy" style="width: ${analysis.buyProbability.toFixed(1)}%"></div></div>
+            <strong>${analysis.buyProbability.toFixed(1)}%</strong>
+          </div>
+          <div class="analysis-probability-row">
+            <span>Venda</span>
+            <div class="analysis-probability-track"><div class="analysis-probability-fill sell" style="width: ${analysis.sellProbability.toFixed(1)}%"></div></div>
+            <strong>${analysis.sellProbability.toFixed(1)}%</strong>
+          </div>
+          <div class="analysis-probability-row">
+            <span>Neutro</span>
+            <div class="analysis-probability-track"><div class="analysis-probability-fill neutral" style="width: ${analysis.neutralProbability.toFixed(1)}%"></div></div>
+            <strong>${analysis.neutralProbability.toFixed(1)}%</strong>
+          </div>
+        </div>
+      </div>
+      <div class="analysis-grid">
+        ${buildScenarioHtml("Cenario compra", analysis.scenarios.buy, currency)}
+        ${buildScenarioHtml("Cenario venda", analysis.scenarios.sell, currency)}
+      </div>
+    `;
+    return;
+  }
+
+  if (activeAnalysisTabId === "calculadora") {
+    const capitalRef = 10000;
+    const riskBudget = capitalRef * 0.01;
+    const stopDistancePercent = clampNumber(
+      Math.abs((analysis.signal.entryLow - analysis.signal.stopLoss) / Math.max(analysis.signal.entryLow, 1e-6)) * 100,
+      0.01,
+      100,
+    );
+    const suggestedNotional = roundNumber(riskBudget / (stopDistancePercent / 100), 2);
+
+    analysisTabContentElement.innerHTML = `
+      <div class="analysis-grid">
+        <article class="analysis-block">
+          <h4>Calculadora de risco (referencia)</h4>
+          <p>Capital de referencia: ${escapeHtml(formatPrice(capitalRef, "usd"))}</p>
+          <p>Risco por trade (1%): ${escapeHtml(formatPrice(riskBudget, "usd"))}</p>
+          <p>Distancia ao stop: ${escapeHtml(formatPercent(stopDistancePercent))}</p>
+          <p>Notional sugerido: ${escapeHtml(formatPrice(suggestedNotional, "usd"))}</p>
+        </article>
+        <article class="analysis-block">
+          <h4>Parametros atuais</h4>
+          <p>Entrada: ${escapeHtml(formatPrice(analysis.signal.entryLow, currency))} - ${escapeHtml(formatPrice(analysis.signal.entryHigh, currency))}</p>
+          <p>Stop: ${escapeHtml(formatPrice(analysis.signal.stopLoss, currency))}</p>
+          <p>TP1/TP2: ${escapeHtml(formatPrice(analysis.signal.takeProfit1, currency))} • ${escapeHtml(formatPrice(analysis.signal.takeProfit2, currency))}</p>
+        </article>
+      </div>
+    `;
+    return;
+  }
+
+  if (activeAnalysisTabId === "timing") {
+    analysisTabContentElement.innerHTML = `
+      <div class="analysis-grid">
+        <article class="analysis-block">
+          <h4>Janela de execucao</h4>
+          <p>${escapeHtml(analysis.timing.executionWindow)}</p>
+          <p>Invalidação: ${escapeHtml(formatPrice(analysis.timing.invalidationLevel, currency))}</p>
+          <p>${escapeHtml(analysis.timing.note)}</p>
+        </article>
+        <article class="analysis-block">
+          <h4>Ritmo operacional</h4>
+          <ul class="analysis-list">
+            <li>Confirmar direcao no fechamento da vela do timeframe selecionado.</li>
+            <li>Executar apenas quando risco/retorno minimo estiver acima de 1.5:1.</li>
+            <li>Evitar perseguir movimento apos candle de extensao acima da media.</li>
+          </ul>
+        </article>
+      </div>
+    `;
+    return;
+  }
+
+  if (activeAnalysisTabId === "visual_ia") {
+    analysisTabContentElement.innerHTML = `
+      <article class="analysis-block">
+        <h4>Checklist visual inteligente</h4>
+        <ul class="analysis-list">
+          ${analysis.visualChecklist.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+      </article>
+    `;
+    return;
+  }
+
+  analysisTabContentElement.innerHTML = `
+    <article class="analysis-block">
+      <h4>Noticias e eventos (proxy quantitativo)</h4>
+      <p>Sem feed externo oficial integrado no momento. Bloco abaixo usa sinais quantitativos reais do ativo para alertas operacionais:</p>
+      <ul class="analysis-list">
+        ${analysis.newsProxy.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+      </ul>
+    </article>
+  `;
+}
+
+function renderDeepAnalysisPanel(snapshot) {
+  if (!(analysisPanel instanceof HTMLElement)) {
+    return;
+  }
+
+  const analysis = buildQuantitativeAnalysis(snapshot);
+
+  if (!analysis) {
+    if (analysisStatusElement instanceof HTMLElement) {
+      analysisStatusElement.textContent = "Aguardando dados de grafico para montar analise profunda.";
+    }
+
+    if (analysisSignalCardElement instanceof HTMLElement) {
+      analysisSignalCardElement.innerHTML = "";
+      analysisSignalCardElement.removeAttribute("data-tone");
+    }
+
+    if (analysisContextCardElement instanceof HTMLElement) {
+      analysisContextCardElement.innerHTML = "";
+    }
+
+    if (analysisTabsElement instanceof HTMLElement) {
+      analysisTabsElement.innerHTML = "";
+    }
+
+    if (analysisTabContentElement instanceof HTMLElement) {
+      analysisTabContentElement.innerHTML = "";
+    }
+
+    return;
+  }
+
+  if (analysisStatusElement instanceof HTMLElement) {
+    analysisStatusElement.textContent =
+      "Modelagem quantitativa desbloqueada: tecnica + SMC + harmonicos + WEGD + probabilidades + timing, sem bloqueio de plano.";
+  }
+
+  if (analysisSignalCardElement instanceof HTMLElement) {
+    const riskRewardLabel = typeof analysis.signal.riskReward === "number"
+      ? `${analysis.signal.riskReward.toFixed(2)}:1`
+      : "n/d";
+
+    analysisSignalCardElement.dataset.tone = analysis.signal.tone;
+    analysisSignalCardElement.innerHTML = `
+      <div class="analysis-signal-head">
+        <span class="analysis-signal-kicker">Sinal identificado</span>
+        <strong>${escapeHtml(analysis.signal.title)}</strong>
+      </div>
+      <div class="analysis-level-grid">
+        <article><span>Entrada</span><strong>${escapeHtml(formatPrice(analysis.signal.entryLow, snapshot.currency))} - ${escapeHtml(formatPrice(analysis.signal.entryHigh, snapshot.currency))}</strong></article>
+        <article><span>Stop</span><strong>${escapeHtml(formatPrice(analysis.signal.stopLoss, snapshot.currency))}</strong></article>
+        <article><span>TP1</span><strong>${escapeHtml(formatPrice(analysis.signal.takeProfit1, snapshot.currency))}</strong></article>
+        <article><span>TP2</span><strong>${escapeHtml(formatPrice(analysis.signal.takeProfit2, snapshot.currency))}</strong></article>
+        <article><span>Risco/Retorno</span><strong>${escapeHtml(riskRewardLabel)}</strong></article>
+        <article><span>Confianca</span><strong>${Math.round(analysis.signal.confidence)}%</strong></article>
+      </div>
+    `;
+  }
+
+  if (analysisContextCardElement instanceof HTMLElement) {
+    analysisContextCardElement.innerHTML = `
+      <div class="analysis-context-grid">
+        <article>
+          <h4>Contexto de mercado</h4>
+          <p>${escapeHtml(analysis.context.zone)} • ${analysis.context.zonePositionPercent.toFixed(1)}% do range</p>
+          <p>Min ${escapeHtml(formatPrice(analysis.context.rangeLow, snapshot.currency))} • Max ${escapeHtml(formatPrice(analysis.context.rangeHigh, snapshot.currency))}</p>
+          <p>Suporte ${escapeHtml(formatPrice(analysis.context.supportLevel, snapshot.currency))} • Resistencia ${escapeHtml(formatPrice(analysis.context.resistanceLevel, snapshot.currency))}</p>
+        </article>
+        <article>
+          <h4>Fear & Greed quant</h4>
+          <p>${analysis.fearGreed.score.toFixed(1)} • ${escapeHtml(analysis.fearGreed.label)}</p>
+          <p>Delta 7d ${escapeHtml(formatPercent(analysis.fearGreed.delta7d))} • Media 7d ${analysis.fearGreed.average7d.toFixed(1)}</p>
+          <p>Tendencia dominante: ${escapeHtml(analysis.context.trend)}</p>
+        </article>
+      </div>
+    `;
+  }
+
+  renderAnalysisTabs();
+  renderAnalysisTabContent(analysis, snapshot);
 }
 
 function setChartStatus(message, mode = "") {
@@ -2799,6 +3577,7 @@ function renderInteractiveChart(snapshot) {
 
 function renderChartMetrics(snapshot) {
   if (!chartMetricsElement) {
+    renderDeepAnalysisPanel(snapshot);
     return;
   }
 
@@ -2806,6 +3585,7 @@ function renderChartMetrics(snapshot) {
 
   if (!insights) {
     chartMetricsElement.innerHTML = "";
+    renderDeepAnalysisPanel(null);
     return;
   }
 
@@ -2905,6 +3685,8 @@ function renderChartMetrics(snapshot) {
     metricElement.append(labelElement, valueElement);
     chartMetricsElement.append(metricElement);
   }
+
+  renderDeepAnalysisPanel(snapshot);
 }
 
 async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "binance") {
@@ -3825,12 +4607,31 @@ function setupChartLab() {
         ? formatTrendLabel(currentChartSnapshot.insights.trend).toLowerCase()
         : "viés indefinido";
 
-      chatInput.value = `Analise tecnicamente o grafico de ${assetId} em ${rangeLabel}, corretora ${exchange}, modo ${modeLabel}. Quero leitura completa de tendencia, momentum, volatilidade, RSI, MACD, ATR, suporte/resistencia e plano tatico (buy/sell/wait) com confianca e niveis de entrada/stop/take-profit. Se algum dado estiver indisponivel, use fallback tecnico com o que houver e deixe claro o grau de confianca. Contexto atual: ${trend}.`;
+      chatInput.value = `Analise tecnicamente o grafico de ${assetId} em ${rangeLabel}, corretora ${exchange}, modo ${modeLabel}. Quero um report completo com todos os blocos: resumo executivo, tecnica, SMC, harmonicos, WEGD, probabilistica, calculo de risco/retorno, timing, visual IA e noticias operacionais. Traga cenario de compra e venda com probabilidades, gatilho, invalidacao, TP1/TP2/TP3, confluencias e plano de gestao de risco. Se faltar dado, declare a limitacao e mantenha a analise objetiva com grau de confianca. Contexto atual: ${trend}.`;
       chatInput.focus();
 
       if (chatForm && !isSending) {
         chatForm.requestSubmit();
       }
+    });
+  }
+
+  if (analysisTabsElement instanceof HTMLElement) {
+    analysisTabsElement.addEventListener("click", (event) => {
+      const target = event.target;
+
+      if (!(target instanceof HTMLButtonElement)) {
+        return;
+      }
+
+      const tabId = target.dataset.tab;
+
+      if (!tabId || !ANALYSIS_TAB_DEFINITIONS.some((item) => item.id === tabId)) {
+        return;
+      }
+
+      activeAnalysisTabId = tabId;
+      renderDeepAnalysisPanel(currentChartSnapshot);
     });
   }
 
