@@ -11,7 +11,6 @@
   --user-bubble: #18334f;
   --assistant-bubble: #f2ece0;
   --shadow: 0 12px 28px rgba(18, 32, 46, 0.12);
-  --workspace-panel-height: clamp(620px, calc(100vh - 170px), 900px);
 }
 
 * {
@@ -23,12 +22,6 @@ body {
   height: 100%;
   margin: 0;
   min-height: 100%;
-}
-
-@supports (height: 100dvh) {
-  :root {
-    --workspace-panel-height: clamp(620px, calc(100dvh - 170px), 900px);
-  }
 }
 
 body {
@@ -67,16 +60,11 @@ body {
 }
 
 .app-shell {
-  align-items: start;
   display: grid;
   gap: 1rem;
-  grid-template-areas:
-    "hero hero"
-    "chart side";
-  grid-template-columns: minmax(0, 1.45fr) minmax(380px, 0.95fr);
   margin: 0 auto;
-  max-width: 1620px;
-  padding: 2.2rem 1.1rem 2rem;
+  max-width: 1720px;
+  padding: 2rem 1.1rem 2.2rem;
   position: relative;
   z-index: 1;
 }
@@ -90,8 +78,26 @@ body {
 }
 
 .hero {
-  grid-area: hero;
-  margin-bottom: 1.3rem;
+  margin-bottom: 0.4rem;
+}
+
+.workspace-stage {
+  align-items: start;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1.5fr) minmax(430px, 1fr);
+}
+
+.workspace-stage > *,
+.intelligence-stage > * {
+  min-width: 0;
+}
+
+.intelligence-stage {
+  align-items: start;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
 }
 
 .eyebrow {
@@ -136,22 +142,17 @@ body {
 }
 
 .layout-grid {
-  align-items: stretch;
   display: grid;
   gap: 1rem;
-  grid-area: side;
-  grid-template-columns: minmax(0, 1.3fr) minmax(250px, 0.7fr);
-  height: var(--workspace-panel-height);
+  grid-template-columns: 1fr;
   min-height: 0;
 }
 
 .layout-grid .chat-panel {
-  grid-column: 1;
   order: 1;
 }
 
 .layout-grid .insights-card {
-  grid-column: 2;
   order: 2;
   position: static;
 }
@@ -167,6 +168,7 @@ body {
 .insights-card {
   display: flex;
   flex-direction: column;
+  max-height: clamp(320px, 44vh, 520px);
   min-height: 0;
   overflow: auto;
   padding: 1.05rem;
@@ -295,7 +297,6 @@ body {
   border-radius: 20px;
   box-shadow: 0 16px 44px rgba(7, 17, 30, 0.44);
   color: #e6f0ff;
-  grid-area: chart;
   margin-bottom: 0;
   overflow: hidden;
   padding: 0.95rem;
@@ -878,7 +879,6 @@ body {
   background: rgba(5, 16, 30, 0.76);
   border: 1px solid rgba(120, 164, 220, 0.36);
   border-radius: 14px;
-  margin-top: 0.76rem;
   padding: 0.68rem;
 }
 
@@ -1209,7 +1209,6 @@ body {
   background: rgba(5, 16, 30, 0.72);
   border: 1px solid rgba(120, 164, 220, 0.36);
   border-radius: 14px;
-  margin-top: 0.74rem;
   padding: 0.62rem;
 }
 
@@ -1495,8 +1494,7 @@ body {
 .chat-panel {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 0;
+  min-height: clamp(560px, 68vh, 900px);
   overflow: hidden;
 }
 
@@ -1692,42 +1690,41 @@ body {
   }
 }
 
-@media (max-width: 1320px) {
+@media (max-width: 1440px) {
   .app-shell {
-    display: block;
-    max-width: 1180px;
+    max-width: 1240px;
+  }
+
+  .workspace-stage,
+  .intelligence-stage {
+    grid-template-columns: 1fr;
   }
 
   .layout-grid {
-    grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+  }
+
+  .layout-grid .chat-panel {
+    grid-column: 1;
   }
 
   .layout-grid .insights-card {
-    position: static;
-  }
-
-  .chart-desk {
-    margin-bottom: 1rem;
+    grid-column: 2;
+    max-height: none;
   }
 }
 
 @media (max-width: 980px) {
+  .workspace-stage,
+  .intelligence-stage,
   .layout-grid {
-    height: auto;
     grid-template-columns: 1fr;
   }
 
   .layout-grid .chat-panel,
   .layout-grid .insights-card {
-    grid-column: 1;
-  }
-
-  .layout-grid .chat-panel {
-    order: 1;
-  }
-
-  .layout-grid .insights-card {
-    order: 2;
+    grid-column: auto;
   }
 
   .insights-card {
@@ -1813,8 +1810,7 @@ body {
   }
 
   .chat-panel {
-    height: clamp(500px, 70vh, 640px);
-    max-height: 640px;
+    min-height: clamp(500px, 70vh, 680px);
   }
 }
 
@@ -1899,8 +1895,7 @@ body {
   }
 
   .chat-panel {
-    height: clamp(430px, 68vh, 560px);
-    max-height: 560px;
+    min-height: clamp(430px, 68vh, 560px);
   }
 
   .chart-metrics {

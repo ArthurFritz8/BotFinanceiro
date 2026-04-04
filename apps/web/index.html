@@ -35,7 +35,8 @@
         </div>
       </section>
 
-      <section class="chart-desk reveal reveal-delay-1" aria-labelledby="chart-lab-title">
+      <section class="workspace-stage reveal reveal-delay-1">
+        <section class="chart-desk" aria-labelledby="chart-lab-title">
         <div class="chart-desk-top">
           <div>
             <p class="eyebrow chart-eyebrow">Trading Workspace</p>
@@ -231,95 +232,9 @@
             Pedir analise tecnica no chat
           </button>
         </div>
-
-        <section class="analysis-panel" id="analysis-panel" aria-labelledby="analysis-panel-title">
-          <div class="analysis-panel-head">
-            <div>
-              <p class="eyebrow analysis-eyebrow">Intelligence Desk</p>
-              <h3 id="analysis-panel-title">Analise Profunda 360</h3>
-              <p id="analysis-status" class="analysis-status">
-                Carregando estrutura quantitativa de analise...
-              </p>
-            </div>
-          </div>
-
-          <div id="analysis-signal-card" class="analysis-signal-card"></div>
-          <div id="analysis-context-card" class="analysis-context-card"></div>
-
-          <div
-            id="analysis-tabs"
-            class="analysis-tabs"
-            role="tablist"
-            aria-label="Blocos de analise desbloqueados"
-          ></div>
-
-          <div id="analysis-tab-content" class="analysis-tab-content"></div>
         </section>
 
-        <section class="airdrop-radar" aria-labelledby="airdrop-radar-title">
-          <div class="airdrop-radar-top">
-            <div>
-              <p class="eyebrow airdrop-radar-eyebrow">Airdrops Intelligence</p>
-              <h3 id="airdrop-radar-title">Radar de oportunidades</h3>
-            </div>
-            <button type="button" id="airdrop-refresh-button">Atualizar radar</button>
-          </div>
-
-          <form id="airdrop-filters" class="airdrop-filters">
-            <label class="airdrop-filter-field" for="airdrop-chain-filter">
-              Chain
-              <select id="airdrop-chain-filter" name="chain">
-                <option value="all">Todas</option>
-              </select>
-            </label>
-
-            <label class="airdrop-filter-field" for="airdrop-confidence-filter">
-              Confianca
-              <select id="airdrop-confidence-filter" name="confidence">
-                <option value="all">Todas</option>
-                <option value="high">Alta</option>
-                <option value="medium">Media</option>
-                <option value="low">Baixa</option>
-              </select>
-            </label>
-
-            <label class="airdrop-filter-field" for="airdrop-score-filter">
-              Score minimo
-              <input
-                id="airdrop-score-filter"
-                name="score"
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                value="35"
-              />
-              <span id="airdrop-score-filter-value">35</span>
-            </label>
-
-            <label class="airdrop-filter-field" for="airdrop-query-filter">
-              Busca
-              <input
-                id="airdrop-query-filter"
-                name="query"
-                type="text"
-                maxlength="80"
-                placeholder="Ex.: base, zksync, testnet"
-              />
-            </label>
-
-            <label class="airdrop-filter-toggle" for="airdrop-include-speculative">
-              <input id="airdrop-include-speculative" name="includeSpeculative" type="checkbox" checked />
-              Incluir oportunidades especulativas
-            </label>
-          </form>
-
-          <div id="airdrop-summary" class="airdrop-summary">Carregando radar...</div>
-          <div id="airdrop-list" class="airdrop-list"></div>
-        </section>
-      </section>
-
-      <section class="layout-grid reveal reveal-delay-2">
+        <section class="layout-grid">
         <aside class="insights-card">
           <h2>Atalhos Inteligentes</h2>
           <p>
@@ -487,6 +402,96 @@
               <button id="send-button" type="submit">Enviar ao Copiloto</button>
             </div>
           </form>
+        </section>
+      </section>
+
+      </section>
+
+      <section class="intelligence-stage reveal reveal-delay-2">
+        <section class="analysis-panel" id="analysis-panel" aria-labelledby="analysis-panel-title">
+          <div class="analysis-panel-head">
+            <div>
+              <p class="eyebrow analysis-eyebrow">Intelligence Desk</p>
+              <h3 id="analysis-panel-title">Analise Profunda 360</h3>
+              <p id="analysis-status" class="analysis-status">
+                Carregando estrutura quantitativa de analise...
+              </p>
+            </div>
+          </div>
+
+          <div id="analysis-signal-card" class="analysis-signal-card"></div>
+          <div id="analysis-context-card" class="analysis-context-card"></div>
+
+          <div
+            id="analysis-tabs"
+            class="analysis-tabs"
+            role="tablist"
+            aria-label="Blocos de analise desbloqueados"
+          ></div>
+
+          <div id="analysis-tab-content" class="analysis-tab-content"></div>
+        </section>
+
+        <section class="airdrop-radar" aria-labelledby="airdrop-radar-title">
+          <div class="airdrop-radar-top">
+            <div>
+              <p class="eyebrow airdrop-radar-eyebrow">Airdrops Intelligence</p>
+              <h3 id="airdrop-radar-title">Radar de oportunidades</h3>
+            </div>
+            <button type="button" id="airdrop-refresh-button">Atualizar radar</button>
+          </div>
+
+          <form id="airdrop-filters" class="airdrop-filters">
+            <label class="airdrop-filter-field" for="airdrop-chain-filter">
+              Chain
+              <select id="airdrop-chain-filter" name="chain">
+                <option value="all">Todas</option>
+              </select>
+            </label>
+
+            <label class="airdrop-filter-field" for="airdrop-confidence-filter">
+              Confianca
+              <select id="airdrop-confidence-filter" name="confidence">
+                <option value="all">Todas</option>
+                <option value="high">Alta</option>
+                <option value="medium">Media</option>
+                <option value="low">Baixa</option>
+              </select>
+            </label>
+
+            <label class="airdrop-filter-field" for="airdrop-score-filter">
+              Score minimo
+              <input
+                id="airdrop-score-filter"
+                name="score"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value="35"
+              />
+              <span id="airdrop-score-filter-value">35</span>
+            </label>
+
+            <label class="airdrop-filter-field" for="airdrop-query-filter">
+              Busca
+              <input
+                id="airdrop-query-filter"
+                name="query"
+                type="text"
+                maxlength="80"
+                placeholder="Ex.: base, zksync, testnet"
+              />
+            </label>
+
+            <label class="airdrop-filter-toggle" for="airdrop-include-speculative">
+              <input id="airdrop-include-speculative" name="includeSpeculative" type="checkbox" checked />
+              Incluir oportunidades especulativas
+            </label>
+          </form>
+
+          <div id="airdrop-summary" class="airdrop-summary">Carregando radar...</div>
+          <div id="airdrop-list" class="airdrop-list"></div>
         </section>
       </section>
     </main>
