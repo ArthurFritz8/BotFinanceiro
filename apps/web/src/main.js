@@ -69,11 +69,16 @@ const marketActivePresetTitleElement = document.querySelector("#market-active-pr
 const marketNavigatorDescriptionElement = document.querySelector("#market-navigator-description");
 const marketFeedStatusElement = document.querySelector("#market-feed-status");
 const marketFeedMetaElement = document.querySelector("#market-feed-meta");
+const marketSearchInput = document.querySelector("#market-search-input");
+const marketRegionFilter = document.querySelector("#market-region-filter");
+const marketFavoritesOnlyToggle = document.querySelector("#market-favorites-only");
+const marketSearchFeedbackElement = document.querySelector("#market-search-feedback");
 
 const CHAT_HISTORY_STORAGE_KEY = "botfinanceiro.copilot.history.v1";
 const CHAT_SESSION_STORAGE_KEY = "botfinanceiro.copilot.session.v1";
 const CHART_PREFERENCES_STORAGE_KEY = "botfinanceiro.chart.preferences.v1";
 const AIRDROP_PREFERENCES_STORAGE_KEY = "botfinanceiro.airdrop.preferences.v1";
+const MARKET_NAVIGATOR_FAVORITES_STORAGE_KEY = "botfinanceiro.marketNavigator.favorites.v1";
 const MAX_STORED_MESSAGES = 60;
 const MAX_RECENT_HISTORY_ITEMS = 8;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
@@ -122,6 +127,36 @@ const MARKET_NAVIGATOR_SCOPE_OPTIONS = [
     description: "Eventos e manchetes",
     id: "news",
     label: "Noticias",
+  },
+];
+const MARKET_NAVIGATOR_REGION_OPTIONS = [
+  {
+    id: "all",
+    label: "Todas",
+  },
+  {
+    id: "global",
+    label: "Global",
+  },
+  {
+    id: "americas",
+    label: "Americas",
+  },
+  {
+    id: "latam",
+    label: "Latam",
+  },
+  {
+    id: "europe",
+    label: "Europa",
+  },
+  {
+    id: "asia",
+    label: "Asia",
+  },
+  {
+    id: "mea",
+    label: "Oriente Medio/Africa",
   },
 ];
 const MARKET_NAVIGATOR_CATEGORY_DEFINITIONS = [
@@ -735,6 +770,17 @@ let activeMarketCategoryId = MARKET_NAVIGATOR_DEFAULT_CATEGORY_ID;
 let activeMarketViewId = "";
 let isMarketNavigatorLoading = false;
 let marketNavigatorRequestToken = 0;
+let activeMarketNavigatorItems = [];
+let marketNavigatorViewCache = new Map();
+let marketNavigatorViewStats = new Map();
+let marketNavigatorSearchQuery = "";
+let marketNavigatorSearchRemoteItems = [];
+let marketNavigatorSearchToken = 0;
+let marketNavigatorSearchDebounceTimer = null;
+let marketNavigatorSearchInFlight = false;
+let marketNavigatorRegionFilter = "all";
+let marketNavigatorFavoritesOnly = false;
+let marketNavigatorFavoriteKeys = new Set();
 
 function mapSymbolToExchange(symbol, exchange) {
   const normalizedSymbol = sanitizeTerminalSymbol(symbol);
@@ -1613,6 +1659,621 @@ function setupAirdropRadarPanel() {
   void loadAirdropRadar();
 }
 
+function normalizeMarketSearchText(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function buildMarketNavigatorFavoriteKey(item) {
+  const moduleName = typeof item?.module === "string" && item.module.length > 0
+    ? item.module
+    : "market";
+  const itemId = typeof item?.id === "string" && item.id.length > 0
+    ? item.id
+    : (typeof item?.ticker === "string" ? item.ticker : "item");
+
+  return `${moduleName}:${itemId}`.toLowerCase();
+}
+
+function hydrateMarketNavigatorFavorites() {
+  try {
+    const raw = localStorage.getItem(MARKET_NAVIGATOR_FAVORITES_STORAGE_KEY);
+
+    if (!raw) {
+      return;
+    }
+
+    const parsed = JSON.parse(raw);
+
+    if (!Array.isArray(parsed)) {
+      return;
+    }
+
+    marketNavigatorFavoriteKeys = new Set(
+      parsed
+        .filter((item) => typeof item === "string")
+        .map((item) => item.trim().toLowerCase())
+        .filter((item) => item.length > 0),
+    );
+  } catch {
+    marketNavigatorFavoriteKeys = new Set();
+  }
+}
+
+function saveMarketNavigatorFavorites() {
+  try {
+    localStorage.setItem(
+      MARKET_NAVIGATOR_FAVORITES_STORAGE_KEY,
+      JSON.stringify([...marketNavigatorFavoriteKeys]),
+    );
+  } catch {
+    // Ignore storage errors and keep favorite behavior in memory.
+  }
+}
+
+function isMarketNavigatorFavorite(item) {
+  return marketNavigatorFavoriteKeys.has(buildMarketNavigatorFavoriteKey(item));
+}
+
+function toggleMarketNavigatorFavorite(item) {
+  const key = buildMarketNavigatorFavoriteKey(item);
+
+  if (marketNavigatorFavoriteKeys.has(key)) {
+    marketNavigatorFavoriteKeys.delete(key);
+  } else {
+    marketNavigatorFavoriteKeys.add(key);
+  }
+
+  saveMarketNavigatorFavorites();
+}
+
+function setMarketSearchFeedback(message) {
+  if (!(marketSearchFeedbackElement instanceof HTMLElement)) {
+    return;
+  }
+
+  marketSearchFeedbackElement.textContent = message;
+}
+
+function inferMarketRegionFromSymbol(symbol) {
+  if (typeof symbol !== "string" || symbol.length === 0) {
+    return "global";
+  }
+
+  const normalizedSymbol = symbol.toUpperCase();
+
+  if (normalizedSymbol.includes(".SA")
+    || /(BRL|MXN|CLP|COP|ARS|PEN)/.test(normalizedSymbol)) {
+    return "latam";
+  }
+
+  if (/(EUR|GBP|CHF|FTSE|DAX|CAC|STOXX)/.test(normalizedSymbol)) {
+    return "europe";
+  }
+
+  if (/(JPY|CNH|CNY|HKD|KRW|INR|N225|NIKKEI|ASX|SGD|THB)/.test(normalizedSymbol)) {
+    return "asia";
+  }
+
+  if (/(AED|SAR|QAR|ILS|BHD|ZAR|EGP)/.test(normalizedSymbol)) {
+    return "mea";
+  }
+
+  return "global";
+}
+
+function inferMarketRegionForItem(view, item) {
+  if (view?.type === "news") {
+    return "global";
+  }
+
+  if (view?.module === "b3" || view?.module === "fiis") {
+    return "latam";
+  }
+
+  if (view?.module === "wall-street" || view?.module === "equities" || view?.module === "options") {
+    return "americas";
+  }
+
+  if (view?.module === "forex") {
+    if (view?.preset === "latam") {
+      return "latam";
+    }
+
+    if (view?.preset === "europe") {
+      return "europe";
+    }
+
+    if (view?.preset === "asia") {
+      return "asia";
+    }
+  }
+
+  if (view?.module === "futures" || view?.module === "crypto" || view?.module === "defi") {
+    return "global";
+  }
+
+  if (view?.module === "etfs" && view?.preset !== "international") {
+    return "americas";
+  }
+
+  const symbol = typeof item?.symbol === "string" && item.symbol.length > 0
+    ? item.symbol
+    : (typeof item?.ticker === "string" ? item.ticker : "");
+
+  const inferredRegion = inferMarketRegionFromSymbol(symbol);
+
+  if (inferredRegion !== "global") {
+    return inferredRegion;
+  }
+
+  return "global";
+}
+
+function buildMarketNavigatorSearchText(item) {
+  const chunks = [
+    item?.id,
+    item?.ticker,
+    item?.symbol,
+    item?.name,
+    item?.assetId,
+    item?.source,
+    item?.tags,
+    item?.viewLabel,
+    item?.module,
+  ]
+    .filter((value) => typeof value === "string" && value.length > 0)
+    .join(" ");
+
+  return normalizeMarketSearchText(chunks);
+}
+
+function createMarketNavigatorItem(input, view) {
+  const moduleName = view?.type === "news"
+    ? "news"
+    : (typeof view?.module === "string" ? view.module : "market");
+  const result = {
+    ...input,
+    module: moduleName,
+    viewId: typeof view?.id === "string" ? view.id : "",
+    viewLabel: typeof view?.label === "string" ? view.label : "Visao",
+  };
+
+  result.favoriteKey = buildMarketNavigatorFavoriteKey(result);
+  result.region = inferMarketRegionForItem(view, result);
+  result.searchText = buildMarketNavigatorSearchText(result);
+  return result;
+}
+
+function fillMarketRegionFilterOptions() {
+  if (!(marketRegionFilter instanceof HTMLSelectElement)) {
+    return;
+  }
+
+  marketRegionFilter.innerHTML = "";
+
+  for (const optionData of MARKET_NAVIGATOR_REGION_OPTIONS) {
+    const option = document.createElement("option");
+    option.value = optionData.id;
+    option.textContent = optionData.label;
+    marketRegionFilter.append(option);
+  }
+
+  marketRegionFilter.value = marketNavigatorRegionFilter;
+}
+
+function doesMarketNavigatorItemMatchQuery(item, query) {
+  if (typeof query !== "string" || query.length === 0) {
+    return true;
+  }
+
+  const searchableText = typeof item?.searchText === "string"
+    ? item.searchText
+    : buildMarketNavigatorSearchText(item);
+  const tokens = query.split(" ").filter((token) => token.length > 0);
+
+  if (tokens.length === 0) {
+    return true;
+  }
+
+  return tokens.every((token) => searchableText.includes(token));
+}
+
+function dedupeMarketNavigatorItems(items) {
+  const map = new Map();
+
+  for (const item of items) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const key = typeof item.favoriteKey === "string" && item.favoriteKey.length > 0
+      ? item.favoriteKey
+      : buildMarketNavigatorFavoriteKey(item);
+
+    if (!map.has(key)) {
+      map.set(key, item);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function getMarketNavigatorCachedItemsByViewId(viewId) {
+  if (typeof viewId !== "string" || viewId.length === 0) {
+    return [];
+  }
+
+  const cachedItems = marketNavigatorViewCache.get(viewId);
+  return Array.isArray(cachedItems) ? cachedItems : [];
+}
+
+function getMarketNavigatorSearchPool(activeViewId) {
+  const pool = [];
+
+  for (const [viewId, viewItems] of marketNavigatorViewCache.entries()) {
+    if (!Array.isArray(viewItems)) {
+      continue;
+    }
+
+    if (viewId === activeViewId) {
+      pool.unshift(...viewItems);
+      continue;
+    }
+
+    pool.push(...viewItems);
+  }
+
+  if (Array.isArray(marketNavigatorSearchRemoteItems) && marketNavigatorSearchRemoteItems.length > 0) {
+    pool.push(...marketNavigatorSearchRemoteItems);
+  }
+
+  return dedupeMarketNavigatorItems(pool);
+}
+
+function applyMarketNavigatorFilters(items, options = {}) {
+  const searchQuery = normalizeMarketSearchText(marketNavigatorSearchQuery);
+  const regionFilter = marketNavigatorRegionFilter;
+  const favoritesOnly = marketNavigatorFavoritesOnly;
+  const forceSearch = options.forceSearch === true;
+
+  return items
+    .filter((item) => {
+      if (regionFilter === "all") {
+        return true;
+      }
+
+      const itemRegion = typeof item?.region === "string" ? item.region : "global";
+      return itemRegion === regionFilter;
+    })
+    .filter((item) => {
+      if (!favoritesOnly) {
+        return true;
+      }
+
+      return isMarketNavigatorFavorite(item);
+    })
+    .filter((item) => {
+      if (!forceSearch && searchQuery.length === 0) {
+        return true;
+      }
+
+      return doesMarketNavigatorItemMatchQuery(item, searchQuery);
+    });
+}
+
+function queueMarketNavigatorSearchProbe() {
+  const trimmedQuery = marketNavigatorSearchQuery.trim();
+  marketNavigatorSearchToken += 1;
+  const searchToken = marketNavigatorSearchToken;
+
+  if (marketNavigatorSearchDebounceTimer !== null) {
+    window.clearTimeout(marketNavigatorSearchDebounceTimer);
+    marketNavigatorSearchDebounceTimer = null;
+  }
+
+  if (trimmedQuery.length < 2) {
+    marketNavigatorSearchRemoteItems = [];
+    marketNavigatorSearchInFlight = false;
+    renderMarketNavigatorFromState();
+    return;
+  }
+
+  marketNavigatorSearchInFlight = true;
+  renderMarketNavigatorFromState();
+
+  marketNavigatorSearchDebounceTimer = window.setTimeout(() => {
+    marketNavigatorSearchDebounceTimer = null;
+
+    void probeMarketNavigatorSearch(trimmedQuery, searchToken)
+      .catch(() => {
+        if (searchToken !== marketNavigatorSearchToken) {
+          return;
+        }
+
+        marketNavigatorSearchRemoteItems = [];
+        marketNavigatorSearchInFlight = false;
+      })
+      .finally(() => {
+        if (searchToken !== marketNavigatorSearchToken) {
+          return;
+        }
+
+        renderMarketNavigatorFromState();
+      });
+  }, 420);
+}
+
+function renderMarketNavigatorFromState() {
+  const activeView = getActiveMarketNavigatorView();
+
+  if (!activeView) {
+    renderMarketNavigatorFeed([], null);
+    setMarketNavigatorStatus("Sem dados", "error");
+    setMarketNavigatorMeta("Selecione uma visao para carregar ativos.");
+    setMarketSearchFeedback("");
+    return;
+  }
+
+  if (marketActivePresetTitleElement instanceof HTMLElement) {
+    marketActivePresetTitleElement.textContent = activeView.label;
+  }
+
+  const normalizedQuery = normalizeMarketSearchText(marketNavigatorSearchQuery);
+  const isSearchMode = normalizedQuery.length > 0;
+  const baseItems = getMarketNavigatorCachedItemsByViewId(activeView.id);
+  const sourceItems = isSearchMode ? getMarketNavigatorSearchPool(activeView.id) : baseItems;
+  const filteredItems = applyMarketNavigatorFilters(sourceItems, {
+    forceSearch: isSearchMode,
+  });
+  const visibleItems = filteredItems.slice(0, isSearchMode ? 24 : 16);
+
+  renderMarketNavigatorFeed(visibleItems, activeView);
+
+  const viewStats = marketNavigatorViewStats.get(activeView.id);
+  const baseStatusLabel = typeof viewStats?.statusLabel === "string"
+    ? viewStats.statusLabel
+    : (baseItems.length > 0 ? "Carregado" : "Sem dados");
+  const baseStatusMode = typeof viewStats?.statusMode === "string"
+    ? viewStats.statusMode
+    : (baseItems.length > 0 ? "" : "error");
+  const baseMeta = typeof viewStats?.meta === "string" && viewStats.meta.length > 0
+    ? viewStats.meta
+    : "Selecione uma visao para carregar ativos.";
+  const regionSuffix = marketNavigatorRegionFilter !== "all"
+    ? ` • regiao ${formatMarketNavigatorRegionLabel(marketNavigatorRegionFilter)}`
+    : "";
+  const favoritesSuffix = marketNavigatorFavoritesOnly ? " • somente favoritos" : "";
+
+  if (isSearchMode) {
+    const queryLabel = marketNavigatorSearchQuery.trim();
+    const remoteCount = marketNavigatorSearchRemoteItems.length;
+    const statusLabel = marketNavigatorSearchInFlight
+      ? "Buscando"
+      : (filteredItems.length > 0 ? "Busca ativa" : "Sem resultados");
+    const statusMode = marketNavigatorSearchInFlight
+      ? "loading"
+      : (filteredItems.length > 0 ? "" : "error");
+
+    setMarketNavigatorStatus(statusLabel, statusMode);
+    setMarketNavigatorMeta(
+      `Busca "${queryLabel}" • exibindo ${visibleItems.length}/${filteredItems.length} • universo ${sourceItems.length} • remotos ${remoteCount}${regionSuffix}${favoritesSuffix}`,
+    );
+
+    if (marketNavigatorSearchInFlight) {
+      setMarketSearchFeedback(`Buscando "${queryLabel}" em fontes locais e remotas...`);
+    } else if (filteredItems.length > 0) {
+      setMarketSearchFeedback(`${filteredItems.length} resultado(s) para "${queryLabel}".`);
+    } else {
+      setMarketSearchFeedback(`Nenhum resultado para "${queryLabel}".`);
+    }
+
+    return;
+  }
+
+  setMarketNavigatorStatus(baseStatusLabel, baseStatusMode);
+
+  if (marketNavigatorRegionFilter !== "all" || marketNavigatorFavoritesOnly) {
+    setMarketNavigatorMeta(
+      `${baseMeta} • exibindo ${visibleItems.length}/${baseItems.length}${regionSuffix}${favoritesSuffix}`,
+    );
+  } else {
+    setMarketNavigatorMeta(baseMeta);
+  }
+
+  setMarketSearchFeedback("");
+}
+
+function formatMarketNavigatorRegionLabel(regionId) {
+  const option = MARKET_NAVIGATOR_REGION_OPTIONS.find((item) => item.id === regionId);
+  return option?.label ?? "Regiao";
+}
+
+function buildMarketNavigatorProbeItem(moduleName, sourceData, fallbackName, fallbackTicker) {
+  if (!sourceData || typeof sourceData !== "object") {
+    return null;
+  }
+
+  const marketData = sourceData.market && typeof sourceData.market === "object" ? sourceData.market : null;
+  const id = typeof sourceData.assetId === "string"
+    ? sourceData.assetId
+    : typeof sourceData.pair === "string"
+      ? sourceData.pair
+      : typeof sourceData.symbol === "string"
+        ? sourceData.symbol
+        : typeof sourceData.underlying === "string"
+          ? sourceData.underlying
+          : fallbackTicker;
+  const ticker = typeof sourceData.symbol === "string"
+    ? sourceData.symbol
+    : typeof sourceData.pair === "string"
+      ? sourceData.pair
+      : typeof sourceData.underlying === "string"
+        ? sourceData.underlying
+        : fallbackTicker;
+  const price = pickFirstFiniteNumber([
+    sourceData.price,
+    sourceData.rate,
+    sourceData.priceUsd,
+    sourceData.spotPrice,
+    marketData?.lastPrice,
+    sourceData.yieldPercent,
+  ]);
+
+  if (price === null) {
+    return null;
+  }
+
+  const changePercent = pickFirstFiniteNumber([
+    sourceData.changePercent24h,
+    sourceData.underlyingChangePercent24h,
+    marketData?.changePercent24h,
+  ]);
+  const currency = normalizeMarketNavigatorCurrency(sourceData.currency ?? sourceData.quoteCurrency ?? "")
+    || (moduleName === "crypto" || moduleName === "defi" || moduleName === "futures" || moduleName === "options"
+      ? "usd"
+      : "");
+  const details = [];
+
+  if (typeof sourceData.provider === "string" && sourceData.provider.length > 0) {
+    details.push(sourceData.provider);
+  }
+
+  if (typeof sourceData.optionsBias === "string" && sourceData.optionsBias.length > 0) {
+    details.push(`bias ${sourceData.optionsBias}`);
+  }
+
+  if (typeof sourceData.impliedVolatility === "number" && Number.isFinite(sourceData.impliedVolatility)) {
+    details.push(`iv ${(sourceData.impliedVolatility * 100).toFixed(2)}%`);
+  }
+
+  if (typeof sourceData.yieldPercent === "number" && Number.isFinite(sourceData.yieldPercent)) {
+    details.push(`yield ${sourceData.yieldPercent.toFixed(2)}%`);
+  }
+
+  if (marketData && typeof marketData.openInterest === "number" && Number.isFinite(marketData.openInterest)) {
+    details.push(`oi ${marketData.openInterest.toFixed(0)}`);
+  }
+
+  return createMarketNavigatorItem(
+    {
+      assetId: typeof sourceData.assetId === "string" ? sourceData.assetId : "",
+      changePercent,
+      currency,
+      extraLabel: details.join(" • "),
+      id,
+      kind: "overview",
+      name: typeof sourceData.name === "string" && sourceData.name.length > 0 ? sourceData.name : fallbackName,
+      price,
+      symbol: ticker,
+      ticker,
+    },
+    {
+      id: `search-${moduleName}`,
+      label: `Busca ${moduleName}`,
+      module: moduleName,
+    },
+  );
+}
+
+async function probeMarketNavigatorSearch(query, token) {
+  const normalizedQuery = query.trim();
+
+  if (normalizedQuery.length < 2) {
+    marketNavigatorSearchRemoteItems = [];
+    marketNavigatorSearchInFlight = false;
+    return;
+  }
+
+  const queryLower = normalizedQuery.toLowerCase().replace(/[^a-z0-9-]/g, "");
+  const queryUpper = normalizedQuery.toUpperCase();
+  const queryPair = queryUpper.replace(/[^A-Z]/g, "");
+  const querySymbol = queryUpper.replace(/[^A-Z0-9.=^/-]/g, "");
+  const requests = [];
+
+  const pushProbeRequest = (url, mapper) => {
+    requests.push(
+      fetch(buildApiUrl(url), {
+        method: "GET",
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            return null;
+          }
+
+          const payload = await response.json();
+          return mapper(payload?.data ?? null);
+        })
+        .catch(() => null),
+    );
+  };
+
+  if (queryLower.length >= 2) {
+    pushProbeRequest(`/v1/crypto/spot-price?assetId=${encodeURIComponent(queryLower)}&currency=usd`, (data) =>
+      buildMarketNavigatorProbeItem("crypto", data, "Crypto", queryUpper)
+    );
+    pushProbeRequest(`/v1/defi/spot-rate?assetId=${encodeURIComponent(queryLower)}`, (data) =>
+      buildMarketNavigatorProbeItem("defi", data, "DeFi", queryUpper)
+    );
+  }
+
+  if (queryPair.length === 6) {
+    pushProbeRequest(`/v1/forex/spot-rate?pair=${encodeURIComponent(queryPair)}`, (data) =>
+      buildMarketNavigatorProbeItem("forex", data, "Forex", queryPair)
+    );
+  }
+
+  if (querySymbol.length >= 1) {
+    pushProbeRequest(`/v1/futures/snapshot?symbol=${encodeURIComponent(querySymbol)}`, (data) =>
+      buildMarketNavigatorProbeItem("futures", data, "Futuros", querySymbol)
+    );
+    pushProbeRequest(`/v1/options/snapshot?underlying=${encodeURIComponent(querySymbol)}&daysToExpiry=30`, (data) =>
+      buildMarketNavigatorProbeItem("options", data, "Opcoes", querySymbol)
+    );
+    pushProbeRequest(`/v1/equities/snapshot?symbol=${encodeURIComponent(querySymbol)}`, (data) =>
+      buildMarketNavigatorProbeItem("equities", data, "Acoes", querySymbol)
+    );
+    pushProbeRequest(`/v1/wall-street/snapshot?symbol=${encodeURIComponent(querySymbol)}`, (data) =>
+      buildMarketNavigatorProbeItem("wall-street", data, "Wall Street", querySymbol)
+    );
+    pushProbeRequest(`/v1/etfs/snapshot?symbol=${encodeURIComponent(querySymbol)}`, (data) =>
+      buildMarketNavigatorProbeItem("etfs", data, "ETF", querySymbol)
+    );
+    pushProbeRequest(`/v1/b3/snapshot?symbol=${encodeURIComponent(querySymbol)}`, (data) =>
+      buildMarketNavigatorProbeItem("b3", data, "B3", querySymbol)
+    );
+    pushProbeRequest(`/v1/fiis/snapshot?symbol=${encodeURIComponent(querySymbol)}`, (data) =>
+      buildMarketNavigatorProbeItem("fiis", data, "FII", querySymbol)
+    );
+    pushProbeRequest(`/v1/commodities/snapshot?symbol=${encodeURIComponent(querySymbol)}`, (data) =>
+      buildMarketNavigatorProbeItem("commodities", data, "Commodity", querySymbol)
+    );
+    pushProbeRequest(`/v1/fixed-income/snapshot?symbol=${encodeURIComponent(querySymbol)}`, (data) =>
+      buildMarketNavigatorProbeItem("fixed-income", data, "Renda fixa", querySymbol)
+    );
+    pushProbeRequest(`/v1/macro-rates/snapshot?symbol=${encodeURIComponent(querySymbol)}`, (data) =>
+      buildMarketNavigatorProbeItem("macro-rates", data, "Macro rates", querySymbol)
+    );
+  }
+
+  const results = await Promise.all(requests);
+
+  if (token !== marketNavigatorSearchToken) {
+    return;
+  }
+
+  marketNavigatorSearchRemoteItems = dedupeMarketNavigatorItems(results.filter((item) => item !== null));
+  marketNavigatorSearchInFlight = false;
+}
+
 function getMarketNavigatorScopeById(scopeId) {
   return MARKET_NAVIGATOR_SCOPE_OPTIONS.find((scope) => scope.id === scopeId)
     ?? MARKET_NAVIGATOR_SCOPE_OPTIONS[0]
@@ -1772,7 +2433,7 @@ function normalizeOverviewItems(view, data) {
         continue;
       }
 
-      normalizedItems.push({
+      normalizedItems.push(createMarketNavigatorItem({
         assetId: typeof asset.assetId === "string" ? asset.assetId : "",
         changePercent: pickFirstFiniteNumber([asset.changePercent24h]),
         currency: "usd",
@@ -1786,7 +2447,7 @@ function normalizeOverviewItems(view, data) {
         price,
         symbol: typeof asset.symbol === "string" ? asset.symbol : "",
         ticker: typeof asset.symbol === "string" ? asset.symbol : (typeof asset.assetId === "string" ? asset.assetId : "ATIVO"),
-      });
+      }, view));
     }
   }
 
@@ -1906,7 +2567,7 @@ function normalizeOverviewItems(view, data) {
       extraDetails.push(`oi ${marketDetails.openInterest.toFixed(0)}`);
     }
 
-    normalizedItems.push({
+    normalizedItems.push(createMarketNavigatorItem({
       assetId,
       changePercent,
       currency,
@@ -1917,7 +2578,7 @@ function normalizeOverviewItems(view, data) {
       price,
       symbol: ticker,
       ticker,
-    });
+    }, view));
   }
 
   return normalizedItems.slice(0, 16);
@@ -1936,7 +2597,7 @@ function normalizeNewsItems(view, data) {
       const sentimentLabel = formatMarketNavigatorSentiment(item.sentiment);
       const tags = Array.isArray(item.tags) ? item.tags.slice(0, 4).join(" • ") : "";
 
-      return {
+      return createMarketNavigatorItem({
         assetId: typeof data.assetId === "string" ? data.assetId : (typeof view.assetId === "string" ? view.assetId : ""),
         changePercent: null,
         currency: "",
@@ -1956,7 +2617,7 @@ function normalizeNewsItems(view, data) {
         tags,
         ticker: typeof item.source === "string" ? item.source : "NEWS",
         url: typeof item.url === "string" ? item.url : "",
-      };
+      }, view);
     })
     .slice(0, 12);
 }
@@ -2065,6 +2726,10 @@ function sendMarketItemToChat(item, view) {
     return;
   }
 
+  const viewLabel = typeof item?.viewLabel === "string" && item.viewLabel.length > 0
+    ? item.viewLabel
+    : (view?.label ?? "visao de mercado");
+
   if (item.kind === "news") {
     chatInput.value = [
       `Analise esta noticia para ${item.assetId || "cripto"} em formato operacional:`,
@@ -2077,7 +2742,7 @@ function sendMarketItemToChat(item, view) {
     ].join("\n");
   } else {
     chatInput.value = [
-      `Monte uma leitura profissional para ${item.ticker} (${view?.label ?? "visao de mercado"}).`,
+      `Monte uma leitura profissional para ${item.ticker} (${viewLabel}).`,
       `Nome: ${item.name}`,
       `Preco atual: ${formatMarketNavigatorPrice(item)}`,
       `Variacao 24h: ${formatPercent(item.changePercent)}`,
@@ -2093,8 +2758,6 @@ function sendMarketItemToChat(item, view) {
   });
   setStatus("", "Insight pronto no chat");
 }
-
-let activeMarketNavigatorItems = [];
 
 function renderMarketNavigatorScopes() {
   if (!(marketScopeListElement instanceof HTMLElement)) {
@@ -2192,7 +2855,17 @@ function renderMarketNavigatorFeed(items, view) {
   if (items.length === 0) {
     const empty = document.createElement("div");
     empty.className = "airdrop-empty";
-    empty.textContent = "Sem ativos disponiveis para esta visao no momento.";
+    const hasSearch = normalizeMarketSearchText(marketNavigatorSearchQuery).length > 0;
+    const hasSecondaryFilters = marketNavigatorRegionFilter !== "all" || marketNavigatorFavoritesOnly;
+
+    if (hasSearch) {
+      empty.textContent = "Nenhum resultado encontrado para a busca atual.";
+    } else if (hasSecondaryFilters) {
+      empty.textContent = "Nenhum ativo atende aos filtros selecionados.";
+    } else {
+      empty.textContent = "Sem ativos disponiveis para esta visao no momento.";
+    }
+
     marketFeedListElement.append(empty);
     return;
   }
@@ -2239,7 +2912,14 @@ function renderMarketNavigatorFeed(items, view) {
 
     const extra = document.createElement("p");
     extra.className = "market-feed-extra";
-    extra.textContent = item.extraLabel || "Sem metrica adicional para esta visao.";
+    const originLabel =
+      marketNavigatorSearchQuery.length > 0
+      && typeof item.viewLabel === "string"
+      && item.viewLabel.length > 0
+      && item.viewLabel !== view?.label
+        ? `origem ${item.viewLabel.toLowerCase()} • `
+        : "";
+    extra.textContent = `${originLabel}${item.extraLabel || "Sem metrica adicional para esta visao."}`;
 
     const actions = document.createElement("div");
     actions.className = "market-feed-actions";
@@ -2263,7 +2943,20 @@ function renderMarketNavigatorFeed(items, view) {
     chatButton.dataset.index = String(index);
     chatButton.textContent = "Levar ao chat";
 
-    actions.append(openButton, chatButton);
+    const favoriteButton = document.createElement("button");
+    favoriteButton.type = "button";
+    favoriteButton.className = "market-favorite-button";
+    favoriteButton.dataset.action = "toggle-favorite";
+    favoriteButton.dataset.index = String(index);
+
+    if (isMarketNavigatorFavorite(item)) {
+      favoriteButton.classList.add("is-active");
+      favoriteButton.textContent = "Favorito";
+    } else {
+      favoriteButton.textContent = "Favoritar";
+    }
+
+    actions.append(openButton, chatButton, favoriteButton);
 
     if (item.kind === "news" && typeof item.url === "string" && item.url.length > 0) {
       const newsLink = document.createElement("a");
@@ -2281,14 +2974,18 @@ function renderMarketNavigatorFeed(items, view) {
 }
 
 function renderMarketNavigatorPayload(view, payloadData) {
-  if (marketActivePresetTitleElement instanceof HTMLElement) {
-    marketActivePresetTitleElement.textContent = view.label;
+  if (!view || typeof view.id !== "string" || view.id.length === 0) {
+    return;
   }
 
   if (!payloadData || typeof payloadData !== "object") {
-    renderMarketNavigatorFeed([], view);
-    setMarketNavigatorStatus("Erro", "error");
-    setMarketNavigatorMeta("Nao foi possivel interpretar a resposta da API para esta visao.");
+    marketNavigatorViewCache.set(view.id, []);
+    marketNavigatorViewStats.set(view.id, {
+      meta: "Nao foi possivel interpretar a resposta da API para esta visao.",
+      statusLabel: "Erro",
+      statusMode: "error",
+    });
+    renderMarketNavigatorFromState();
     return;
   }
 
@@ -2297,11 +2994,13 @@ function renderMarketNavigatorPayload(view, payloadData) {
     const summary = payloadData.summary ?? {};
     const fetchedAt = formatShortTime(payloadData.fetchedAt);
 
-    renderMarketNavigatorFeed(newsItems, view);
-    setMarketNavigatorStatus(newsItems.length > 0 ? "Noticias" : "Sem dados", newsItems.length > 0 ? "" : "error");
-    setMarketNavigatorMeta(
-      `Cobertura ${summary.sourcesHealthy ?? 0}/${summary.totalSources ?? 0} • impacto medio ${summary.averageImpactScore ?? 0} • relevancia media ${summary.averageRelevanceScore ?? 0} • atualizado ${fetchedAt}`,
-    );
+    marketNavigatorViewCache.set(view.id, newsItems);
+    marketNavigatorViewStats.set(view.id, {
+      meta: `Cobertura ${summary.sourcesHealthy ?? 0}/${summary.totalSources ?? 0} • impacto medio ${summary.averageImpactScore ?? 0} • relevancia media ${summary.averageRelevanceScore ?? 0} • atualizado ${fetchedAt}`,
+      statusLabel: newsItems.length > 0 ? "Noticias" : "Sem dados",
+      statusMode: newsItems.length > 0 ? "" : "error",
+    });
+    renderMarketNavigatorFromState();
     return;
   }
 
@@ -2313,11 +3012,13 @@ function renderMarketNavigatorPayload(view, payloadData) {
   const fetchedAt = formatShortTime(payloadData.fetchedAt);
   const statusLabel = failureCount > 0 ? "Parcial" : "Carregado";
 
-  renderMarketNavigatorFeed(normalizedItems, view);
-  setMarketNavigatorStatus(statusLabel, failureCount > 0 ? "loading" : "");
-  setMarketNavigatorMeta(
-    `Ativos ${normalizedItems.length} • ok ${successCount} • falhas ${failureCount} • atualizado ${fetchedAt}`,
-  );
+  marketNavigatorViewCache.set(view.id, normalizedItems);
+  marketNavigatorViewStats.set(view.id, {
+    meta: `Ativos ${normalizedItems.length} • ok ${successCount} • falhas ${failureCount} • atualizado ${fetchedAt}`,
+    statusLabel,
+    statusMode: failureCount > 0 ? "loading" : "",
+  });
+  renderMarketNavigatorFromState();
 }
 
 async function loadMarketNavigator() {
@@ -2348,9 +3049,18 @@ async function loadMarketNavigator() {
     }
 
     const message = error instanceof Error ? error.message : "Falha ao carregar visao de mercado";
-    renderMarketNavigatorFeed([], activeView);
-    setMarketNavigatorStatus("Erro", "error");
-    setMarketNavigatorMeta(message);
+    const cachedItems = getMarketNavigatorCachedItemsByViewId(activeView.id);
+
+    if (cachedItems.length === 0) {
+      marketNavigatorViewCache.set(activeView.id, []);
+    }
+
+    marketNavigatorViewStats.set(activeView.id, {
+      meta: message,
+      statusLabel: "Erro",
+      statusMode: "error",
+    });
+    renderMarketNavigatorFromState();
   } finally {
     if (requestToken === marketNavigatorRequestToken) {
       isMarketNavigatorLoading = false;
@@ -2370,6 +3080,7 @@ function setMarketNavigatorCategory(categoryId) {
   activeMarketViewId = category.views[0]?.id ?? "";
   renderMarketNavigatorCategories();
   renderMarketNavigatorViews();
+  renderMarketNavigatorFromState();
   void loadMarketNavigator();
 }
 
@@ -2399,6 +3110,7 @@ function setMarketNavigatorScope(scopeId) {
   renderMarketNavigatorScopes();
   renderMarketNavigatorCategories();
   renderMarketNavigatorViews();
+  renderMarketNavigatorFromState();
   void loadMarketNavigator();
 }
 
@@ -2412,10 +3124,44 @@ function setupMarketNavigator() {
 
   const defaultCategory = getMarketNavigatorCategoryById(activeMarketCategoryId);
   activeMarketViewId = defaultCategory?.views?.[0]?.id ?? "";
+  hydrateMarketNavigatorFavorites();
+  fillMarketRegionFilterOptions();
+
+  if (marketSearchInput instanceof HTMLInputElement) {
+    marketSearchInput.value = marketNavigatorSearchQuery;
+    marketSearchInput.addEventListener("input", () => {
+      marketNavigatorSearchQuery = marketSearchInput.value;
+      queueMarketNavigatorSearchProbe();
+    });
+  }
+
+  if (marketRegionFilter instanceof HTMLSelectElement) {
+    marketRegionFilter.value = marketNavigatorRegionFilter;
+    marketRegionFilter.addEventListener("change", () => {
+      const nextRegion = marketRegionFilter.value;
+      const isValidRegion = MARKET_NAVIGATOR_REGION_OPTIONS.some((option) => option.id === nextRegion);
+      marketNavigatorRegionFilter = isValidRegion ? nextRegion : "all";
+
+      if (marketRegionFilter.value !== marketNavigatorRegionFilter) {
+        marketRegionFilter.value = marketNavigatorRegionFilter;
+      }
+
+      renderMarketNavigatorFromState();
+    });
+  }
+
+  if (marketFavoritesOnlyToggle instanceof HTMLInputElement) {
+    marketFavoritesOnlyToggle.checked = marketNavigatorFavoritesOnly;
+    marketFavoritesOnlyToggle.addEventListener("change", () => {
+      marketNavigatorFavoritesOnly = marketFavoritesOnlyToggle.checked;
+      renderMarketNavigatorFromState();
+    });
+  }
 
   renderMarketNavigatorScopes();
   renderMarketNavigatorCategories();
   renderMarketNavigatorViews();
+  renderMarketNavigatorFromState();
 
   marketScopeListElement.addEventListener("click", (event) => {
     const target = event.target;
@@ -2467,6 +3213,7 @@ function setupMarketNavigator() {
 
     activeMarketViewId = viewId;
     renderMarketNavigatorViews();
+    renderMarketNavigatorFromState();
     void loadMarketNavigator();
   });
 
@@ -2490,6 +3237,14 @@ function setupMarketNavigator() {
       return;
     }
 
+    if (button.dataset.action === "toggle-favorite") {
+      toggleMarketNavigatorFavorite(item);
+      const isFavorite = isMarketNavigatorFavorite(item);
+      setStatus("", isFavorite ? "Ativo adicionado aos favoritos" : "Ativo removido dos favoritos");
+      renderMarketNavigatorFromState();
+      return;
+    }
+
     if (button.dataset.action === "open-chart") {
       const opened = openMarketItemInChart(item);
       setStatus(opened ? "" : "error", opened ? "Ativo carregado no chart" : "Este ativo nao e compativel com o chart atual");
@@ -2507,6 +3262,7 @@ function setupMarketNavigator() {
     });
   }
 
+  renderMarketNavigatorFromState();
   void loadMarketNavigator();
 }
 

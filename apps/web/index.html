@@ -71,6 +71,35 @@
               <span id="market-feed-status" class="market-feed-status">Pronto</span>
             </div>
             <p id="market-feed-meta" class="market-feed-meta">Selecione uma visao para carregar ativos.</p>
+
+            <div class="market-feed-controls">
+              <label class="market-search-field" for="market-search-input">
+                Busca universal de simbolo
+                <input
+                  id="market-search-input"
+                  type="search"
+                  maxlength="80"
+                  placeholder="Ex.: BTC, PETR4, EURUSD, ^TNX"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+              </label>
+
+              <div class="market-feed-filters-row">
+                <label class="market-region-field" for="market-region-filter">
+                  Regiao
+                  <select id="market-region-filter"></select>
+                </label>
+
+                <label class="market-favorites-toggle" for="market-favorites-only">
+                  <input id="market-favorites-only" type="checkbox" />
+                  Somente favoritos
+                </label>
+              </div>
+
+              <p id="market-search-feedback" class="market-search-feedback"></p>
+            </div>
+
             <div id="market-feed-list" class="market-feed-list"></div>
           </section>
         </div>
