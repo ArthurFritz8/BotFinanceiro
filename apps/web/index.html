@@ -35,7 +35,48 @@
         </div>
       </section>
 
-      <section class="workspace-stage reveal reveal-delay-1">
+      <section class="market-navigator reveal reveal-delay-1" aria-labelledby="market-navigator-title">
+        <div class="market-navigator-head">
+          <div>
+            <p class="eyebrow market-navigator-eyebrow">Global Market Navigator</p>
+            <h2 id="market-navigator-title">Mesa de Mercados Multi-Classe</h2>
+            <p id="market-navigator-description" class="market-navigator-description">
+              Descubra ativos por classe, preset e regime em um fluxo unificado de leitura tatico-operacional.
+            </p>
+          </div>
+          <button type="button" id="market-navigator-refresh">Atualizar painel</button>
+        </div>
+
+        <div class="market-navigator-grid">
+          <aside class="market-nav-column" aria-label="Escopo e classes">
+            <p class="market-column-label">Escopo</p>
+            <div id="market-scope-list" class="market-scope-list"></div>
+
+            <p class="market-column-label">Ativos</p>
+            <div id="market-category-list" class="market-category-list"></div>
+          </aside>
+
+          <section class="market-view-column" aria-label="Visoes por classe">
+            <p class="market-column-label">Visoes disponiveis</p>
+            <h3 id="market-active-category-title">Carregando categorias...</h3>
+            <div id="market-preset-list" class="market-preset-list"></div>
+          </section>
+
+          <section class="market-feed-column" aria-live="polite" aria-label="Radar de ativos">
+            <div class="market-feed-header">
+              <div>
+                <p class="market-column-label">Radar ao vivo</p>
+                <h3 id="market-active-preset-title">Carregando visao...</h3>
+              </div>
+              <span id="market-feed-status" class="market-feed-status">Pronto</span>
+            </div>
+            <p id="market-feed-meta" class="market-feed-meta">Selecione uma visao para carregar ativos.</p>
+            <div id="market-feed-list" class="market-feed-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="workspace-stage reveal reveal-delay-2">
         <section class="chart-desk" aria-labelledby="chart-lab-title">
         <div class="chart-desk-top">
           <div>

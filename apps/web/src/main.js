@@ -59,6 +59,16 @@ const airdropQueryFilter = document.querySelector("#airdrop-query-filter");
 const airdropIncludeSpeculativeToggle = document.querySelector("#airdrop-include-speculative");
 const airdropSummaryElement = document.querySelector("#airdrop-summary");
 const airdropListElement = document.querySelector("#airdrop-list");
+const marketNavigatorRefreshButton = document.querySelector("#market-navigator-refresh");
+const marketScopeListElement = document.querySelector("#market-scope-list");
+const marketCategoryListElement = document.querySelector("#market-category-list");
+const marketPresetListElement = document.querySelector("#market-preset-list");
+const marketFeedListElement = document.querySelector("#market-feed-list");
+const marketActiveCategoryTitleElement = document.querySelector("#market-active-category-title");
+const marketActivePresetTitleElement = document.querySelector("#market-active-preset-title");
+const marketNavigatorDescriptionElement = document.querySelector("#market-navigator-description");
+const marketFeedStatusElement = document.querySelector("#market-feed-status");
+const marketFeedMetaElement = document.querySelector("#market-feed-meta");
 
 const CHAT_HISTORY_STORAGE_KEY = "botfinanceiro.copilot.history.v1";
 const CHAT_SESSION_STORAGE_KEY = "botfinanceiro.copilot.session.v1";
@@ -97,6 +107,428 @@ const CHART_STYLE_LABELS = {
   heikin: "heikin ashi",
   line: "linha",
 };
+const MARKET_NAVIGATOR_SCOPE_OPTIONS = [
+  {
+    description: "Leitura cross-asset",
+    id: "global",
+    label: "Todo o mundo",
+  },
+  {
+    description: "Recorte geografico",
+    id: "countries",
+    label: "Paises",
+  },
+  {
+    description: "Eventos e manchetes",
+    id: "news",
+    label: "Noticias",
+  },
+];
+const MARKET_NAVIGATOR_CATEGORY_DEFINITIONS = [
+  {
+    description: "Indices globais, setores e regime de risco.",
+    id: "indices",
+    label: "Indices",
+    views: [
+      {
+        id: "indices-global",
+        label: "Todos os indices",
+        limit: 8,
+        module: "wall-street",
+        preset: "indices",
+      },
+      {
+        id: "indices-setores",
+        label: "Setores S&P",
+        limit: 8,
+        module: "wall-street",
+        preset: "sectors",
+      },
+      {
+        id: "indices-brasil",
+        label: "Indices Brasil",
+        limit: 8,
+        module: "b3",
+        preset: "indices",
+      },
+      {
+        id: "indices-moedas",
+        label: "Indices de moedas",
+        limit: 8,
+        module: "macro-rates",
+        preset: "global_rates",
+      },
+    ],
+  },
+  {
+    description: "Acoes globais, Brasil e FIIs em uma unica mesa.",
+    id: "acoes",
+    label: "Acoes",
+    views: [
+      {
+        id: "acoes-todas",
+        label: "Todas as acoes",
+        limit: 8,
+        module: "equities",
+        preset: "us_mega_caps",
+      },
+      {
+        id: "acoes-large-cap",
+        label: "Large-cap",
+        limit: 8,
+        module: "equities",
+        preset: "global_brands",
+      },
+      {
+        id: "acoes-brasil",
+        label: "Acoes Brasil",
+        limit: 8,
+        module: "b3",
+        preset: "blue_chips",
+      },
+      {
+        id: "acoes-fii",
+        label: "FIIs liquidos",
+        limit: 8,
+        module: "fiis",
+        preset: "high_liquidity",
+      },
+    ],
+  },
+  {
+    description: "Cripto spot, DeFi e derivativos de maior liquidez.",
+    id: "cripto",
+    label: "Cripto",
+    views: [
+      {
+        id: "cripto-spot",
+        label: "Spot principal",
+        limit: 10,
+        module: "crypto",
+      },
+      {
+        id: "cripto-layer1",
+        label: "Layer 1 futuros",
+        limit: 8,
+        module: "futures",
+        preset: "layer1",
+      },
+      {
+        id: "cripto-defi",
+        label: "Tokens DeFi",
+        limit: 8,
+        module: "defi",
+        preset: "blue_chips",
+      },
+      {
+        id: "cripto-noticias",
+        label: "Noticias cripto",
+        limit: 8,
+        type: "news",
+        assetId: "bitcoin",
+      },
+    ],
+  },
+  {
+    description: "Futuros cripto e contratos de commodities.",
+    id: "futuros",
+    label: "Futuros",
+    views: [
+      {
+        id: "futuros-cripto",
+        label: "Todos os futuros",
+        limit: 8,
+        module: "futures",
+        preset: "crypto_majors",
+      },
+      {
+        id: "futuros-agro",
+        label: "Agricolas",
+        limit: 8,
+        module: "commodities",
+        preset: "agro",
+      },
+      {
+        id: "futuros-energia",
+        label: "Energia",
+        limit: 8,
+        module: "commodities",
+        preset: "energy",
+      },
+      {
+        id: "futuros-metais",
+        label: "Metais",
+        limit: 8,
+        module: "commodities",
+        preset: "metals",
+      },
+    ],
+  },
+  {
+    description: "Pares de moedas por bloco geografico.",
+    id: "forex",
+    label: "Forex",
+    views: [
+      {
+        id: "forex-global",
+        label: "Todos os pares",
+        limit: 8,
+        module: "forex",
+        preset: "global",
+      },
+      {
+        id: "forex-principal",
+        label: "Principal",
+        limit: 8,
+        module: "forex",
+        preset: "majors",
+      },
+      {
+        id: "forex-latam",
+        label: "Latam",
+        limit: 8,
+        module: "forex",
+        preset: "latam",
+      },
+      {
+        id: "forex-europa",
+        label: "Europa",
+        limit: 8,
+        module: "forex",
+        preset: "europe",
+      },
+      {
+        id: "forex-asia",
+        label: "Asia",
+        limit: 8,
+        module: "forex",
+        preset: "asia",
+      },
+    ],
+  },
+  {
+    description: "Curva de juros soberana e term structure.",
+    id: "titulos_governo",
+    label: "Titulos do Governo",
+    views: [
+      {
+        id: "gov-curve",
+        label: "Curva EUA",
+        limit: 8,
+        module: "fixed-income",
+        preset: "us_curve",
+      },
+      {
+        id: "gov-global",
+        label: "Rates globais",
+        limit: 8,
+        module: "macro-rates",
+        preset: "global_rates",
+      },
+      {
+        id: "gov-risco",
+        label: "Regime de risco",
+        limit: 8,
+        module: "macro-rates",
+        preset: "risk_regime",
+      },
+    ],
+  },
+  {
+    description: "Credito corporativo e proxies de spread/risco.",
+    id: "titulos_corporativos",
+    label: "Titulos corporativos",
+    views: [
+      {
+        id: "corp-credito",
+        label: "Credito global",
+        limit: 8,
+        module: "fixed-income",
+        preset: "credit_proxies",
+      },
+      {
+        id: "corp-risco",
+        label: "Taxas x risco",
+        limit: 8,
+        module: "fixed-income",
+        preset: "rates_risk",
+      },
+      {
+        id: "corp-macro",
+        label: "Proxies inflacao",
+        limit: 8,
+        module: "macro-rates",
+        preset: "inflation_proxies",
+      },
+    ],
+  },
+  {
+    description: "ETFs de beta, tema, internacional e renda fixa.",
+    id: "etfs",
+    label: "ETFs",
+    views: [
+      {
+        id: "etf-broad",
+        label: "Broad market",
+        limit: 8,
+        module: "etfs",
+        preset: "broad_market",
+      },
+      {
+        id: "etf-thematic",
+        label: "Tematicos",
+        limit: 8,
+        module: "etfs",
+        preset: "thematic",
+      },
+      {
+        id: "etf-international",
+        label: "Internacional",
+        limit: 8,
+        module: "etfs",
+        preset: "international",
+      },
+      {
+        id: "etf-renda-fixa",
+        label: "Renda fixa",
+        limit: 8,
+        module: "etfs",
+        preset: "fixed_income",
+      },
+    ],
+  },
+  {
+    description: "Macro global com commodities, FX e risco.",
+    id: "economia_mundial",
+    label: "Economia mundial",
+    views: [
+      {
+        id: "eco-macro",
+        label: "Macro rates",
+        limit: 8,
+        module: "macro-rates",
+        preset: "global_rates",
+      },
+      {
+        id: "eco-commodities",
+        label: "Commodities globais",
+        limit: 8,
+        module: "commodities",
+        preset: "global",
+      },
+      {
+        id: "eco-metais",
+        label: "Metais e ouro",
+        limit: 8,
+        module: "commodities",
+        preset: "metals",
+      },
+      {
+        id: "eco-energia",
+        label: "Petroleo e energia",
+        limit: 8,
+        module: "commodities",
+        preset: "energy",
+      },
+    ],
+  },
+  {
+    description: "Volatilidade implicita e vies tatico de opcoes.",
+    id: "opcoes",
+    label: "Opcoes",
+    views: [
+      {
+        id: "opcoes-indices",
+        label: "Indices EUA",
+        limit: 8,
+        module: "options",
+        preset: "us_indices",
+        daysToExpiry: 30,
+      },
+      {
+        id: "opcoes-mega-caps",
+        label: "Mega caps",
+        limit: 8,
+        module: "options",
+        preset: "us_mega_caps",
+        daysToExpiry: 30,
+      },
+      {
+        id: "opcoes-high-beta",
+        label: "High beta",
+        limit: 8,
+        module: "options",
+        preset: "high_beta",
+        daysToExpiry: 30,
+      },
+    ],
+  },
+  {
+    description: "Radar DeFi por vertical de protocolo.",
+    id: "defi",
+    label: "DeFi",
+    views: [
+      {
+        id: "defi-blue-chips",
+        label: "Blue chips",
+        limit: 8,
+        module: "defi",
+        preset: "blue_chips",
+      },
+      {
+        id: "defi-lending",
+        label: "Lending",
+        limit: 8,
+        module: "defi",
+        preset: "lending",
+      },
+      {
+        id: "defi-dex",
+        label: "DEX",
+        limit: 8,
+        module: "defi",
+        preset: "dex",
+      },
+      {
+        id: "defi-infra",
+        label: "Infra",
+        limit: 8,
+        module: "defi",
+        preset: "infrastructure",
+      },
+    ],
+  },
+  {
+    description: "Noticias estruturadas com score de relevancia e impacto.",
+    id: "noticias",
+    label: "Noticias",
+    views: [
+      {
+        id: "noticias-btc",
+        label: "Noticias BTC",
+        limit: 8,
+        type: "news",
+        assetId: "bitcoin",
+      },
+      {
+        id: "noticias-eth",
+        label: "Noticias ETH",
+        limit: 8,
+        type: "news",
+        assetId: "ethereum",
+      },
+      {
+        id: "noticias-sol",
+        label: "Noticias SOL",
+        limit: 8,
+        type: "news",
+        assetId: "solana",
+      },
+    ],
+  },
+];
+const MARKET_NAVIGATOR_DEFAULT_SCOPE_ID = "global";
+const MARKET_NAVIGATOR_DEFAULT_CATEGORY_ID = "indices";
 const NEWS_INTELLIGENCE_REFRESH_INTERVAL_MS = 180000;
 const ANALYSIS_TAB_DEFINITIONS = [
   {
@@ -298,6 +730,11 @@ let airdropRadarPayload = null;
 let isAirdropRadarLoading = false;
 let airdropQueryDebounceTimer = null;
 let airdropPersistedChainPreference = "all";
+let activeMarketScopeId = MARKET_NAVIGATOR_DEFAULT_SCOPE_ID;
+let activeMarketCategoryId = MARKET_NAVIGATOR_DEFAULT_CATEGORY_ID;
+let activeMarketViewId = "";
+let isMarketNavigatorLoading = false;
+let marketNavigatorRequestToken = 0;
 
 function mapSymbolToExchange(symbol, exchange) {
   const normalizedSymbol = sanitizeTerminalSymbol(symbol);
@@ -1174,6 +1611,903 @@ function setupAirdropRadarPanel() {
 
   renderAirdropList([]);
   void loadAirdropRadar();
+}
+
+function getMarketNavigatorScopeById(scopeId) {
+  return MARKET_NAVIGATOR_SCOPE_OPTIONS.find((scope) => scope.id === scopeId)
+    ?? MARKET_NAVIGATOR_SCOPE_OPTIONS[0]
+    ?? null;
+}
+
+function getMarketNavigatorCategoryById(categoryId) {
+  return MARKET_NAVIGATOR_CATEGORY_DEFINITIONS.find((category) => category.id === categoryId)
+    ?? MARKET_NAVIGATOR_CATEGORY_DEFINITIONS[0]
+    ?? null;
+}
+
+function getMarketNavigatorViewById(category, viewId) {
+  if (!category || !Array.isArray(category.views) || category.views.length === 0) {
+    return null;
+  }
+
+  return category.views.find((view) => view.id === viewId) ?? category.views[0] ?? null;
+}
+
+function getActiveMarketNavigatorCategory() {
+  return getMarketNavigatorCategoryById(activeMarketCategoryId);
+}
+
+function getActiveMarketNavigatorView() {
+  const category = getActiveMarketNavigatorCategory();
+  return getMarketNavigatorViewById(category, activeMarketViewId);
+}
+
+function setMarketNavigatorStatus(label, mode = "") {
+  if (!(marketFeedStatusElement instanceof HTMLElement)) {
+    return;
+  }
+
+  marketFeedStatusElement.textContent = label;
+
+  if (mode.length > 0) {
+    marketFeedStatusElement.setAttribute("data-mode", mode);
+  } else {
+    marketFeedStatusElement.removeAttribute("data-mode");
+  }
+}
+
+function setMarketNavigatorMeta(message) {
+  if (!(marketFeedMetaElement instanceof HTMLElement)) {
+    return;
+  }
+
+  marketFeedMetaElement.textContent = message;
+}
+
+function setMarketNavigatorLoadingState(isLoading) {
+  if (!(marketNavigatorRefreshButton instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  marketNavigatorRefreshButton.disabled = isLoading;
+  marketNavigatorRefreshButton.textContent = isLoading ? "Atualizando..." : "Atualizar painel";
+}
+
+function pickFirstFiniteNumber(candidates) {
+  for (const candidate of candidates) {
+    if (typeof candidate === "number" && Number.isFinite(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function normalizeMarketNavigatorCurrency(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().toLowerCase();
+}
+
+function formatMarketNavigatorSentiment(value) {
+  if (value === "positive") {
+    return "sentimento positivo";
+  }
+
+  if (value === "negative") {
+    return "sentimento negativo";
+  }
+
+  return "sentimento neutro";
+}
+
+function buildMarketNavigatorUrl(view) {
+  const limit = typeof view?.limit === "number" && Number.isFinite(view.limit)
+    ? Math.max(1, Math.min(20, Math.floor(view.limit)))
+    : 8;
+
+  if (view?.type === "news") {
+    const assetId = typeof view.assetId === "string" && view.assetId.length > 0
+      ? view.assetId
+      : "bitcoin";
+    const params = new URLSearchParams({
+      assetId,
+      limit: String(limit),
+    });
+
+    return buildApiUrl(`/v1/crypto/news-intelligence?${params.toString()}`);
+  }
+
+  const moduleName = typeof view?.module === "string" ? view.module : "crypto";
+  const params = new URLSearchParams({
+    limit: String(limit),
+  });
+
+  if (typeof view?.preset === "string" && view.preset.length > 0) {
+    params.set("preset", view.preset);
+  }
+
+  if (typeof view?.daysToExpiry === "number" && Number.isFinite(view.daysToExpiry)) {
+    params.set("daysToExpiry", String(Math.max(1, Math.min(365, Math.floor(view.daysToExpiry)))));
+  }
+
+  return buildApiUrl(`/v1/${moduleName}/market-overview?${params.toString()}`);
+}
+
+async function requestMarketNavigatorPayload(view) {
+  const response = await fetch(buildMarketNavigatorUrl(view), {
+    method: "GET",
+  });
+
+  let payload = null;
+
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const message = payload?.error?.message;
+    throw new Error(typeof message === "string" ? message : "Falha ao carregar visao de mercado");
+  }
+
+  return payload?.data ?? null;
+}
+
+function normalizeOverviewItems(view, data) {
+  const normalizedItems = [];
+
+  if (Array.isArray(data?.assets)) {
+    for (const asset of data.assets) {
+      if (!asset || typeof asset !== "object") {
+        continue;
+      }
+
+      const price = pickFirstFiniteNumber([asset.priceUsd]);
+
+      if (price === null) {
+        continue;
+      }
+
+      normalizedItems.push({
+        assetId: typeof asset.assetId === "string" ? asset.assetId : "",
+        changePercent: pickFirstFiniteNumber([asset.changePercent24h]),
+        currency: "usd",
+        extraLabel:
+          typeof asset.marketCapUsd === "number"
+            ? `cap ${formatCompactUsd(asset.marketCapUsd)}`
+            : "cap n/d",
+        id: typeof asset.assetId === "string" ? asset.assetId : `${asset.symbol ?? "asset"}-${normalizedItems.length}`,
+        kind: "overview",
+        name: typeof asset.name === "string" ? asset.name : (typeof asset.symbol === "string" ? asset.symbol : "Ativo"),
+        price,
+        symbol: typeof asset.symbol === "string" ? asset.symbol : "",
+        ticker: typeof asset.symbol === "string" ? asset.symbol : (typeof asset.assetId === "string" ? asset.assetId : "ATIVO"),
+      });
+    }
+  }
+
+  const bucket = [];
+
+  if (Array.isArray(data?.quotes)) {
+    bucket.push(...data.quotes);
+  }
+
+  if (Array.isArray(data?.snapshots)) {
+    bucket.push(...data.snapshots);
+  }
+
+  for (const entry of bucket) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+
+    if ("status" in entry && entry.status !== "ok") {
+      continue;
+    }
+
+    const source = entry.quote && typeof entry.quote === "object"
+      ? entry.quote
+      : entry.snapshot && typeof entry.snapshot === "object"
+        ? entry.snapshot
+        : entry;
+
+    const marketDetails = source?.market && typeof source.market === "object" ? source.market : null;
+    const itemId = typeof entry.assetId === "string"
+      ? entry.assetId
+      : typeof entry.pair === "string"
+        ? entry.pair
+        : typeof entry.symbol === "string"
+          ? entry.symbol
+          : typeof entry.underlying === "string"
+            ? entry.underlying
+            : typeof source.assetId === "string"
+              ? source.assetId
+              : typeof source.pair === "string"
+                ? source.pair
+                : typeof source.symbol === "string"
+                  ? source.symbol
+                  : typeof source.underlying === "string"
+                    ? source.underlying
+                    : "";
+
+    if (itemId.length === 0) {
+      continue;
+    }
+
+    const price = pickFirstFiniteNumber([
+      source.priceUsd,
+      source.price,
+      source.rate,
+      source.spotPrice,
+      marketDetails?.lastPrice,
+      source.yieldPercent,
+    ]);
+
+    if (price === null) {
+      continue;
+    }
+
+    const ticker = typeof source.symbol === "string"
+      ? source.symbol
+      : typeof source.pair === "string"
+        ? source.pair
+        : typeof source.underlying === "string"
+          ? source.underlying
+          : itemId;
+    const assetId = typeof source.assetId === "string"
+      ? source.assetId
+      : (typeof entry.assetId === "string" ? entry.assetId : "");
+    const changePercent = pickFirstFiniteNumber([
+      source.changePercent24h,
+      source.underlyingChangePercent24h,
+      marketDetails?.changePercent24h,
+    ]);
+    const yieldPercent = pickFirstFiniteNumber([source.yieldPercent]);
+    const impliedVolatility = pickFirstFiniteNumber([source.impliedVolatility]);
+    const currencyFromData = normalizeMarketNavigatorCurrency(source.currency ?? source.quoteCurrency ?? "");
+    const fallbackCurrency = view?.module === "crypto"
+      || view?.module === "defi"
+      || view?.module === "futures"
+      || view?.module === "options"
+      ? "usd"
+      : "";
+    const currency = currencyFromData.length > 0 ? currencyFromData : fallbackCurrency;
+    const extraDetails = [];
+
+    if (yieldPercent !== null) {
+      extraDetails.push(`yield ${yieldPercent.toFixed(2)}%`);
+    }
+
+    if (impliedVolatility !== null) {
+      extraDetails.push(`iv ${(impliedVolatility * 100).toFixed(2)}%`);
+    }
+
+    if (typeof source.optionsBias === "string" && source.optionsBias.length > 0) {
+      extraDetails.push(`bias ${source.optionsBias}`);
+    }
+
+    if (typeof source.durationBucket === "string" && source.durationBucket.length > 0) {
+      extraDetails.push(`dur ${source.durationBucket}`);
+    }
+
+    if (typeof source.rateBucket === "string" && source.rateBucket.length > 0) {
+      extraDetails.push(`bucket ${source.rateBucket}`);
+    }
+
+    if (typeof source.marketState === "string" && source.marketState.length > 0) {
+      extraDetails.push(`estado ${source.marketState.toLowerCase()}`);
+    }
+
+    if (marketDetails && typeof marketDetails.openInterest === "number" && Number.isFinite(marketDetails.openInterest)) {
+      extraDetails.push(`oi ${marketDetails.openInterest.toFixed(0)}`);
+    }
+
+    normalizedItems.push({
+      assetId,
+      changePercent,
+      currency,
+      extraLabel: extraDetails.join(" • "),
+      id: itemId,
+      kind: "overview",
+      name: typeof source.name === "string" && source.name.length > 0 ? source.name : ticker,
+      price,
+      symbol: ticker,
+      ticker,
+    });
+  }
+
+  return normalizedItems.slice(0, 16);
+}
+
+function normalizeNewsItems(view, data) {
+  if (!Array.isArray(data?.items)) {
+    return [];
+  }
+
+  return data.items
+    .filter((item) => item && typeof item === "object")
+    .map((item, index) => {
+      const relevanceScore = typeof item.relevanceScore === "number" ? item.relevanceScore : null;
+      const impactScore = typeof item.impactScore === "number" ? item.impactScore : null;
+      const sentimentLabel = formatMarketNavigatorSentiment(item.sentiment);
+      const tags = Array.isArray(item.tags) ? item.tags.slice(0, 4).join(" • ") : "";
+
+      return {
+        assetId: typeof data.assetId === "string" ? data.assetId : (typeof view.assetId === "string" ? view.assetId : ""),
+        changePercent: null,
+        currency: "",
+        extraLabel: [
+          impactScore !== null ? `impacto ${impactScore.toFixed(1)}` : "impacto n/d",
+          relevanceScore !== null ? `relevancia ${relevanceScore.toFixed(1)}` : "relevancia n/d",
+          sentimentLabel,
+        ].join(" • "),
+        id: typeof item.id === "string" && item.id.length > 0 ? item.id : `${view.id}-news-${index}`,
+        kind: "news",
+        name: typeof item.title === "string" && item.title.length > 0 ? item.title : "Noticia sem titulo",
+        price: null,
+        publishedAt: typeof item.publishedAt === "string" ? item.publishedAt : "",
+        source: typeof item.source === "string" ? item.source : "Fonte n/d",
+        summary: typeof item.summary === "string" ? item.summary : "",
+        symbol: "",
+        tags,
+        ticker: typeof item.source === "string" ? item.source : "NEWS",
+        url: typeof item.url === "string" ? item.url : "",
+      };
+    })
+    .slice(0, 12);
+}
+
+function formatMarketNavigatorPrice(item) {
+  if (typeof item?.price !== "number" || Number.isNaN(item.price)) {
+    return "n/d";
+  }
+
+  if (typeof item.extraLabel === "string" && item.extraLabel.includes("yield ")) {
+    return `${item.price.toFixed(2)}%`;
+  }
+
+  const currency = typeof item.currency === "string" && item.currency.length > 0
+    ? item.currency
+    : "usd";
+
+  return formatPrice(item.price, currency);
+}
+
+function resolveChartTargetFromMarketItem(item) {
+  if (!(chartAssetSelect instanceof HTMLSelectElement)) {
+    return null;
+  }
+
+  const hasAssetOption = (assetId) => {
+    for (const option of chartAssetSelect.options) {
+      if (option.value === assetId) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  if (typeof item.assetId === "string" && item.assetId.length > 0 && hasAssetOption(item.assetId)) {
+    return {
+      assetId: item.assetId,
+      symbol: ASSET_TO_TERMINAL_SYMBOL[item.assetId] ?? "",
+    };
+  }
+
+  if (typeof item.id === "string" && item.id.length > 0 && hasAssetOption(item.id)) {
+    return {
+      assetId: item.id,
+      symbol: ASSET_TO_TERMINAL_SYMBOL[item.id] ?? "",
+    };
+  }
+
+  const normalizedSymbol = typeof item.symbol === "string" ? sanitizeTerminalSymbol(item.symbol) : "";
+
+  if (normalizedSymbol.length > 0) {
+    const watchItem = TERMINAL_WATCHLIST.find((candidate) => {
+      if (candidate.symbol === normalizedSymbol) {
+        return true;
+      }
+
+      if (`${candidate.symbol.replace(/USDT$/, "")}` === normalizedSymbol) {
+        return true;
+      }
+
+      return false;
+    });
+
+    if (watchItem) {
+      return {
+        assetId: watchItem.assetId,
+        symbol: watchItem.symbol,
+      };
+    }
+  }
+
+  return null;
+}
+
+function openMarketItemInChart(item) {
+  if (!(chartAssetSelect instanceof HTMLSelectElement)) {
+    return false;
+  }
+
+  const target = resolveChartTargetFromMarketItem(item);
+
+  if (!target) {
+    return false;
+  }
+
+  chartAssetSelect.value = target.assetId;
+
+  if (chartSymbolInput instanceof HTMLInputElement && target.symbol.length > 0) {
+    chartSymbolInput.value = mapSymbolToExchange(target.symbol, getSelectedTerminalExchange());
+  }
+
+  renderWatchlist();
+  chartHasInitialFit = false;
+  void loadChart();
+  void refreshWatchlistMarket({
+    silent: true,
+  });
+  scheduleTradingViewRefresh();
+  saveChartPreferences();
+  return true;
+}
+
+function sendMarketItemToChat(item, view) {
+  if (!(chatInput instanceof HTMLTextAreaElement)) {
+    return;
+  }
+
+  if (item.kind === "news") {
+    chatInput.value = [
+      `Analise esta noticia para ${item.assetId || "cripto"} em formato operacional:`,
+      `Titulo: ${item.name}`,
+      `Fonte: ${item.source || "n/d"}`,
+      `Resumo: ${item.summary || "n/d"}`,
+      `Contexto: ${item.extraLabel || "n/d"}`,
+      item.url ? `Link: ${item.url}` : "Link: n/d",
+      "Quero impacto no preco, vies (bull/bear/neutral), niveis relevantes e plano de risco em 4 passos.",
+    ].join("\n");
+  } else {
+    chatInput.value = [
+      `Monte uma leitura profissional para ${item.ticker} (${view?.label ?? "visao de mercado"}).`,
+      `Nome: ${item.name}`,
+      `Preco atual: ${formatMarketNavigatorPrice(item)}`,
+      `Variacao 24h: ${formatPercent(item.changePercent)}`,
+      `Contexto adicional: ${item.extraLabel || "n/d"}`,
+      "Quero: regime atual, suporte/resistencia, gatilhos de entrada/saida, invalidacao e gestao de risco.",
+    ].join("\n");
+  }
+
+  chatInput.focus();
+  chatInput.scrollIntoView({
+    behavior: "smooth",
+    block: "center",
+  });
+  setStatus("", "Insight pronto no chat");
+}
+
+let activeMarketNavigatorItems = [];
+
+function renderMarketNavigatorScopes() {
+  if (!(marketScopeListElement instanceof HTMLElement)) {
+    return;
+  }
+
+  marketScopeListElement.innerHTML = "";
+
+  for (const scope of MARKET_NAVIGATOR_SCOPE_OPTIONS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "market-scope-button";
+    button.dataset.scope = scope.id;
+
+    if (scope.id === activeMarketScopeId) {
+      button.classList.add("is-active");
+    }
+
+    button.innerHTML = `<span>${escapeHtml(scope.label)}<small>${escapeHtml(scope.description)}</small></span><span>›</span>`;
+    marketScopeListElement.append(button);
+  }
+}
+
+function renderMarketNavigatorCategories() {
+  if (!(marketCategoryListElement instanceof HTMLElement)) {
+    return;
+  }
+
+  marketCategoryListElement.innerHTML = "";
+
+  for (const category of MARKET_NAVIGATOR_CATEGORY_DEFINITIONS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "market-category-button";
+    button.dataset.category = category.id;
+    button.textContent = category.label;
+
+    if (category.id === activeMarketCategoryId) {
+      button.classList.add("is-active");
+    }
+
+    marketCategoryListElement.append(button);
+  }
+}
+
+function renderMarketNavigatorViews() {
+  const category = getActiveMarketNavigatorCategory();
+
+  if (!(marketPresetListElement instanceof HTMLElement) || !category) {
+    return;
+  }
+
+  if (marketActiveCategoryTitleElement instanceof HTMLElement) {
+    marketActiveCategoryTitleElement.textContent = category.label;
+  }
+
+  const activeScope = getMarketNavigatorScopeById(activeMarketScopeId);
+
+  if (marketNavigatorDescriptionElement instanceof HTMLElement) {
+    const scopeLabel = activeScope ? `Escopo ${activeScope.label.toLowerCase()}` : "Escopo global";
+    marketNavigatorDescriptionElement.textContent = `${category.description} ${scopeLabel}.`;
+  }
+
+  marketPresetListElement.innerHTML = "";
+  const selectedView = getMarketNavigatorViewById(category, activeMarketViewId);
+
+  if (selectedView) {
+    activeMarketViewId = selectedView.id;
+  }
+
+  for (const view of category.views) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "market-preset-button";
+    button.dataset.view = view.id;
+
+    if (view.id === activeMarketViewId) {
+      button.classList.add("is-active");
+    }
+
+    const sourceLabel = view.type === "news" ? "Inteligencia de noticias" : `Fonte /v1/${view.module}`;
+    button.innerHTML = `<span>${escapeHtml(view.label)}<small>${escapeHtml(sourceLabel)}</small></span><span>›</span>`;
+    marketPresetListElement.append(button);
+  }
+}
+
+function renderMarketNavigatorFeed(items, view) {
+  if (!(marketFeedListElement instanceof HTMLElement)) {
+    return;
+  }
+
+  activeMarketNavigatorItems = items;
+  marketFeedListElement.innerHTML = "";
+
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "airdrop-empty";
+    empty.textContent = "Sem ativos disponiveis para esta visao no momento.";
+    marketFeedListElement.append(empty);
+    return;
+  }
+
+  for (const [index, item] of items.entries()) {
+    const card = document.createElement("article");
+    card.className = "market-feed-card";
+
+    const head = document.createElement("div");
+    head.className = "market-feed-card-head";
+
+    const identity = document.createElement("div");
+    const ticker = document.createElement("strong");
+    ticker.textContent = item.ticker;
+    const name = document.createElement("span");
+    name.textContent = item.name;
+
+    identity.append(ticker, name);
+
+    const pricing = document.createElement("div");
+    const price = document.createElement("span");
+    price.className = "market-feed-price";
+    price.textContent = formatMarketNavigatorPrice(item);
+
+    const change = document.createElement("span");
+    change.className = "market-feed-change";
+
+    if (typeof item.changePercent === "number" && Number.isFinite(item.changePercent)) {
+      change.textContent = formatPercent(item.changePercent);
+
+      if (item.changePercent > 0) {
+        change.classList.add("is-up");
+      }
+
+      if (item.changePercent < 0) {
+        change.classList.add("is-down");
+      }
+    } else {
+      change.textContent = "n/d";
+    }
+
+    pricing.append(price, change);
+    head.append(identity, pricing);
+
+    const extra = document.createElement("p");
+    extra.className = "market-feed-extra";
+    extra.textContent = item.extraLabel || "Sem metrica adicional para esta visao.";
+
+    const actions = document.createElement("div");
+    actions.className = "market-feed-actions";
+
+    const openButton = document.createElement("button");
+    openButton.type = "button";
+    openButton.className = "market-open-button";
+    openButton.dataset.action = "open-chart";
+    openButton.dataset.index = String(index);
+    openButton.textContent = "Abrir no chart";
+
+    if (!resolveChartTargetFromMarketItem(item)) {
+      openButton.disabled = true;
+      openButton.textContent = "Chart indisponivel";
+    }
+
+    const chatButton = document.createElement("button");
+    chatButton.type = "button";
+    chatButton.className = "market-chat-button";
+    chatButton.dataset.action = "send-chat";
+    chatButton.dataset.index = String(index);
+    chatButton.textContent = "Levar ao chat";
+
+    actions.append(openButton, chatButton);
+
+    if (item.kind === "news" && typeof item.url === "string" && item.url.length > 0) {
+      const newsLink = document.createElement("a");
+      newsLink.href = item.url;
+      newsLink.rel = "noopener noreferrer";
+      newsLink.target = "_blank";
+      newsLink.className = "market-chat-button";
+      newsLink.textContent = "Abrir fonte";
+      actions.append(newsLink);
+    }
+
+    card.append(head, extra, actions);
+    marketFeedListElement.append(card);
+  }
+}
+
+function renderMarketNavigatorPayload(view, payloadData) {
+  if (marketActivePresetTitleElement instanceof HTMLElement) {
+    marketActivePresetTitleElement.textContent = view.label;
+  }
+
+  if (!payloadData || typeof payloadData !== "object") {
+    renderMarketNavigatorFeed([], view);
+    setMarketNavigatorStatus("Erro", "error");
+    setMarketNavigatorMeta("Nao foi possivel interpretar a resposta da API para esta visao.");
+    return;
+  }
+
+  if (view.type === "news") {
+    const newsItems = normalizeNewsItems(view, payloadData);
+    const summary = payloadData.summary ?? {};
+    const fetchedAt = formatShortTime(payloadData.fetchedAt);
+
+    renderMarketNavigatorFeed(newsItems, view);
+    setMarketNavigatorStatus(newsItems.length > 0 ? "Noticias" : "Sem dados", newsItems.length > 0 ? "" : "error");
+    setMarketNavigatorMeta(
+      `Cobertura ${summary.sourcesHealthy ?? 0}/${summary.totalSources ?? 0} • impacto medio ${summary.averageImpactScore ?? 0} • relevancia media ${summary.averageRelevanceScore ?? 0} • atualizado ${fetchedAt}`,
+    );
+    return;
+  }
+
+  const normalizedItems = normalizeOverviewItems(view, payloadData);
+  const successCount = typeof payloadData.successCount === "number"
+    ? payloadData.successCount
+    : normalizedItems.length;
+  const failureCount = typeof payloadData.failureCount === "number" ? payloadData.failureCount : 0;
+  const fetchedAt = formatShortTime(payloadData.fetchedAt);
+  const statusLabel = failureCount > 0 ? "Parcial" : "Carregado";
+
+  renderMarketNavigatorFeed(normalizedItems, view);
+  setMarketNavigatorStatus(statusLabel, failureCount > 0 ? "loading" : "");
+  setMarketNavigatorMeta(
+    `Ativos ${normalizedItems.length} • ok ${successCount} • falhas ${failureCount} • atualizado ${fetchedAt}`,
+  );
+}
+
+async function loadMarketNavigator() {
+  const activeView = getActiveMarketNavigatorView();
+
+  if (!activeView || isMarketNavigatorLoading) {
+    return;
+  }
+
+  const requestToken = marketNavigatorRequestToken + 1;
+  marketNavigatorRequestToken = requestToken;
+  isMarketNavigatorLoading = true;
+  setMarketNavigatorLoadingState(true);
+  setMarketNavigatorStatus("Atualizando", "loading");
+  setMarketNavigatorMeta("Coletando dados de mercado em tempo real...");
+
+  try {
+    const payloadData = await requestMarketNavigatorPayload(activeView);
+
+    if (requestToken !== marketNavigatorRequestToken) {
+      return;
+    }
+
+    renderMarketNavigatorPayload(activeView, payloadData);
+  } catch (error) {
+    if (requestToken !== marketNavigatorRequestToken) {
+      return;
+    }
+
+    const message = error instanceof Error ? error.message : "Falha ao carregar visao de mercado";
+    renderMarketNavigatorFeed([], activeView);
+    setMarketNavigatorStatus("Erro", "error");
+    setMarketNavigatorMeta(message);
+  } finally {
+    if (requestToken === marketNavigatorRequestToken) {
+      isMarketNavigatorLoading = false;
+      setMarketNavigatorLoadingState(false);
+    }
+  }
+}
+
+function setMarketNavigatorCategory(categoryId) {
+  const category = getMarketNavigatorCategoryById(categoryId);
+
+  if (!category) {
+    return;
+  }
+
+  activeMarketCategoryId = category.id;
+  activeMarketViewId = category.views[0]?.id ?? "";
+  renderMarketNavigatorCategories();
+  renderMarketNavigatorViews();
+  void loadMarketNavigator();
+}
+
+function setMarketNavigatorScope(scopeId) {
+  const scope = getMarketNavigatorScopeById(scopeId);
+
+  if (!scope) {
+    return;
+  }
+
+  activeMarketScopeId = scope.id;
+
+  if (scope.id === "news") {
+    setMarketNavigatorCategory("noticias");
+    renderMarketNavigatorScopes();
+    return;
+  }
+
+  if (scope.id === "countries") {
+    if (["noticias", "cripto", "defi", "opcoes"].includes(activeMarketCategoryId)) {
+      renderMarketNavigatorScopes();
+      setMarketNavigatorCategory("acoes");
+      return;
+    }
+  }
+
+  renderMarketNavigatorScopes();
+  renderMarketNavigatorCategories();
+  renderMarketNavigatorViews();
+  void loadMarketNavigator();
+}
+
+function setupMarketNavigator() {
+  if (!(marketScopeListElement instanceof HTMLElement)
+    || !(marketCategoryListElement instanceof HTMLElement)
+    || !(marketPresetListElement instanceof HTMLElement)
+    || !(marketFeedListElement instanceof HTMLElement)) {
+    return;
+  }
+
+  const defaultCategory = getMarketNavigatorCategoryById(activeMarketCategoryId);
+  activeMarketViewId = defaultCategory?.views?.[0]?.id ?? "";
+
+  renderMarketNavigatorScopes();
+  renderMarketNavigatorCategories();
+  renderMarketNavigatorViews();
+
+  marketScopeListElement.addEventListener("click", (event) => {
+    const target = event.target;
+    const button = target instanceof HTMLElement ? target.closest("button[data-scope]") : null;
+
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    const scopeId = button.dataset.scope;
+
+    if (!scopeId || scopeId === activeMarketScopeId) {
+      return;
+    }
+
+    setMarketNavigatorScope(scopeId);
+  });
+
+  marketCategoryListElement.addEventListener("click", (event) => {
+    const target = event.target;
+    const button = target instanceof HTMLElement ? target.closest("button[data-category]") : null;
+
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    const categoryId = button.dataset.category;
+
+    if (!categoryId || categoryId === activeMarketCategoryId) {
+      return;
+    }
+
+    setMarketNavigatorCategory(categoryId);
+  });
+
+  marketPresetListElement.addEventListener("click", (event) => {
+    const target = event.target;
+    const button = target instanceof HTMLElement ? target.closest("button[data-view]") : null;
+
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    const viewId = button.dataset.view;
+
+    if (!viewId || viewId === activeMarketViewId) {
+      return;
+    }
+
+    activeMarketViewId = viewId;
+    renderMarketNavigatorViews();
+    void loadMarketNavigator();
+  });
+
+  marketFeedListElement.addEventListener("click", (event) => {
+    const target = event.target;
+    const button = target instanceof HTMLElement ? target.closest("button[data-action]") : null;
+
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    const itemIndex = Number.parseInt(button.dataset.index ?? "", 10);
+
+    if (!Number.isInteger(itemIndex) || itemIndex < 0) {
+      return;
+    }
+
+    const item = activeMarketNavigatorItems[itemIndex];
+
+    if (!item) {
+      return;
+    }
+
+    if (button.dataset.action === "open-chart") {
+      const opened = openMarketItemInChart(item);
+      setStatus(opened ? "" : "error", opened ? "Ativo carregado no chart" : "Este ativo nao e compativel com o chart atual");
+      return;
+    }
+
+    if (button.dataset.action === "send-chat") {
+      sendMarketItemToChat(item, getActiveMarketNavigatorView());
+    }
+  });
+
+  if (marketNavigatorRefreshButton instanceof HTMLButtonElement) {
+    marketNavigatorRefreshButton.addEventListener("click", () => {
+      void loadMarketNavigator();
+    });
+  }
+
+  void loadMarketNavigator();
 }
 
 function formatTrendLabel(trend) {
@@ -4852,6 +6186,7 @@ window.addEventListener("beforeunload", () => {
 
 setupQuickPrompts();
 setupLocalHistoryControls();
+setupMarketNavigator();
 setupChartLab();
 setupAirdropRadarPanel();
 void initializeChatHistory();
