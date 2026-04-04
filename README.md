@@ -85,6 +85,7 @@ Politica de retencao:
 1. ADR 001: `docs/ADR/ADR-001-politica-degradacao-rate-limit.md`
 2. ADR 002: `docs/ADR/ADR-002-fundacao-tecnica-monorepo-typescript.md`
 3. ADR 031: `docs/ADR/ADR-031-resiliencia-mercado-coincap-e-copiloto.md`
+4. ADR 032: `docs/ADR/ADR-032-inteligencia-noticias-cripto-e-analise-profunda.md`
 
 ## Relatorio completo desta entrega
 
@@ -239,6 +240,7 @@ Cobertura de consultas apos esta evolucao:
 16. portfolios (diagnostico de carteira com pesos customizados, exposicao por classe, score de risco e regime)
 17. mercado global (indices, cambio, juros, commodities e simbolos customizaveis via Yahoo)
 18. corretoras (status de integracao e cotacao ao vivo por broker, com Binance ativa e IQ Option mapeada para configuracao)
+19. inteligencia de noticias cripto (multi-fonte RSS com score de relevancia, impacto e sentimento por ativo)
 
 Endpoint tecnico para grafico:
 
@@ -250,6 +252,12 @@ Endpoint tecnico para grafico ao vivo:
 
 ```bash
 curl "http://localhost:3000/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=bybit"
+```
+
+Endpoint tecnico para noticias e eventos por ativo:
+
+```bash
+curl "http://localhost:3000/v1/crypto/news-intelligence?assetId=bitcoin&limit=8"
 ```
 
 Endpoint tecnico para radar de airdrops:

@@ -6,6 +6,9 @@ import {
   CryptoChartService,
 } from "../application/crypto-chart-service.js";
 import {
+  CryptoNewsIntelligenceService,
+} from "../application/crypto-news-intelligence-service.js";
+import {
   CryptoMarketOverviewService,
 } from "../application/crypto-market-overview-service.js";
 import {
@@ -61,9 +64,15 @@ const marketOverviewQuerySchema = z.object({
   limit: z.coerce.number().int().min(3).max(25).default(10),
 });
 
+const newsIntelligenceQuerySchema = z.object({
+  assetId: z.string().trim().min(1).default("bitcoin"),
+  limit: z.coerce.number().int().min(3).max(20).default(8),
+});
+
 const cryptoSyncPolicyService = new CryptoSyncPolicyService();
 const cryptoSpotPriceService = new CryptoSpotPriceService();
 const cryptoChartService = new CryptoChartService();
+const cryptoNewsIntelligenceService = new CryptoNewsIntelligenceService();
 const cryptoMarketOverviewService = new CryptoMarketOverviewService();
 
 export function getSyncPolicy(request: FastifyRequest, reply: FastifyReply): void {
@@ -112,4 +121,11 @@ export async function getMarketOverview(request: FastifyRequest, reply: FastifyR
   const marketOverview = await cryptoMarketOverviewService.getOverview(parsedQuery);
 
   void reply.send(buildSuccessResponse(request.id, marketOverview));
+}
+
+export async function getNewsIntelligence(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const parsedQuery = newsIntelligenceQuerySchema.parse(request.query);
+  const newsIntelligence = await cryptoNewsIntelligenceService.getNewsIntelligence(parsedQuery);
+
+  void reply.send(buildSuccessResponse(request.id, newsIntelligence));
 }

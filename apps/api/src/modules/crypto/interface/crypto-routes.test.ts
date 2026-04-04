@@ -1080,3 +1080,152 @@ void it("GET /v1/crypto/market-overview valida limite maximo", async () => {
   assert.equal(body.error.code, "VALIDATION_ERROR");
   assert.equal(body.error.message, "Invalid payload");
 });
+
+void it("GET /v1/crypto/news-intelligence agrega fontes RSS com sucesso parcial", async () => {
+  let coindeskCalls = 0;
+  let cointelegraphCalls = 0;
+  let decryptCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("coindesk.com/arc/outboundfeeds/rss")) {
+      coindeskCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          `<?xml version="1.0"?><rss><channel>
+            <item>
+              <title>Bitcoin ETF sees strong inflow as BTC rallies</title>
+              <link>https://www.coindesk.com/markets/bitcoin-etf-inflow</link>
+              <description>Institutional flow and SEC narrative keep bitcoin in focus.</description>
+              <pubDate>Fri, 04 Apr 2026 12:00:00 GMT</pubDate>
+            </item>
+            <item>
+              <title>Ethereum staking update is live</title>
+              <link>https://www.coindesk.com/tech/ethereum-staking-update</link>
+              <description>Protocol roadmap progresses with lower fee pressure.</description>
+              <pubDate>Fri, 04 Apr 2026 10:00:00 GMT</pubDate>
+            </item>
+          </channel></rss>`,
+          {
+            headers: {
+              "content-type": "application/rss+xml",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("cointelegraph.com/rss")) {
+      cointelegraphCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          `<?xml version="1.0"?><rss><channel>
+            <item>
+              <title>BTC volatility jumps after Fed speech</title>
+              <link>https://cointelegraph.com/news/btc-volatility-fed-speech</link>
+              <description>Traders watch liquidation clusters and macro rates.</description>
+              <pubDate>Fri, 04 Apr 2026 11:00:00 GMT</pubDate>
+            </item>
+          </channel></rss>`,
+          {
+            headers: {
+              "content-type": "application/rss+xml",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("decrypt.co/feed")) {
+      decryptCalls += 1;
+
+      return Promise.resolve(
+        new Response("service unavailable", {
+          status: 503,
+        }),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/news-intelligence?assetId=bitcoin&limit=5",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(coindeskCalls, 1);
+  assert.equal(cointelegraphCalls, 1);
+  assert.equal(decryptCalls, 1);
+
+  const body = response.json<{
+    data: {
+      assetId: string;
+      cache: {
+        stale: boolean;
+        state: string;
+      };
+      items: Array<{
+        impactScore: number;
+        relevanceScore: number;
+        sentiment: "negative" | "neutral" | "positive";
+        source: string;
+        title: string;
+        url: string;
+      }>;
+      limit: number;
+      provider: "rss_multi_source";
+      summary: {
+        averageImpactScore: number;
+        averageRelevanceScore: number;
+        highImpactItems: number;
+        sourcesHealthy: number;
+        totalItems: number;
+        totalSources: number;
+      };
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.assetId, "bitcoin");
+  assert.equal(body.data.provider, "rss_multi_source");
+  assert.equal(body.data.limit, 5);
+  assert.equal(body.data.cache.state, "refreshed");
+  assert.equal(body.data.cache.stale, false);
+  assert.ok(body.data.items.length >= 2);
+  assert.ok(body.data.items.every((item) => item.relevanceScore >= 18));
+  assert.ok(body.data.items.every((item) => item.impactScore >= 0 && item.impactScore <= 100));
+  assert.equal(body.data.summary.totalSources, 3);
+  assert.equal(body.data.summary.sourcesHealthy, 2);
+  assert.equal(body.data.summary.totalItems, body.data.items.length);
+  assert.ok(body.data.summary.averageImpactScore >= 0);
+  assert.ok(body.data.summary.averageRelevanceScore >= 0);
+});
+
+void it("GET /v1/crypto/news-intelligence valida limite maximo", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/news-intelligence?limit=40",
+  });
+
+  assert.equal(response.statusCode, 400);
+
+  const body = response.json<{
+    error: {
+      code: string;
+      message: string;
+    };
+    status: "error";
+  }>();
+
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "VALIDATION_ERROR");
+  assert.equal(body.error.message, "Invalid payload");
+});

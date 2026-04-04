@@ -97,6 +97,7 @@ const CHART_STYLE_LABELS = {
   heikin: "heikin ashi",
   line: "linha",
 };
+const NEWS_INTELLIGENCE_REFRESH_INTERVAL_MS = 180000;
 const ANALYSIS_TAB_DEFINITIONS = [
   {
     id: "resumo",
@@ -289,6 +290,10 @@ let watchlistDiagnostics = {
   unavailableCount: 0,
 };
 let activeAnalysisTabId = "resumo";
+let newsIntelligencePayload = null;
+let newsIntelligenceLastAssetId = "";
+let newsIntelligenceLastFetchedAtMs = 0;
+let newsIntelligenceRequestToken = 0;
 let airdropRadarPayload = null;
 let isAirdropRadarLoading = false;
 let airdropQueryDebounceTimer = null;
@@ -1826,6 +1831,48 @@ function renderAnalysisTabContent(analysis, snapshot) {
         <ul class="analysis-list">
           ${analysis.visualChecklist.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
         </ul>
+      </article>
+    `;
+    return;
+  }
+
+  const hasLiveNews =
+    newsIntelligencePayload
+    && newsIntelligenceLastAssetId === snapshot?.assetId
+    && Array.isArray(newsIntelligencePayload.items)
+    && newsIntelligencePayload.items.length > 0;
+
+  if (hasLiveNews) {
+    const newsItems = newsIntelligencePayload.items.slice(0, 6);
+    const summary = newsIntelligencePayload.summary ?? {};
+    const updatedAt = formatShortTime(newsIntelligencePayload.fetchedAt);
+
+    analysisTabContentElement.innerHTML = `
+      <article class="analysis-block">
+        <h4>Noticias e eventos reais (multi-fonte)</h4>
+        <p>Cobertura: ${summary.sourcesHealthy ?? 0}/${summary.totalSources ?? 0} fontes • impacto medio ${(summary.averageImpactScore ?? 0).toFixed(1)} • relevancia media ${(summary.averageRelevanceScore ?? 0).toFixed(1)} • atualizado ${updatedAt}</p>
+        <div class="analysis-news-list">
+          ${newsItems
+            .map(
+              (item) => `
+            <article class="analysis-news-card">
+              <div class="analysis-news-top">
+                <strong>${escapeHtml(item.title)}</strong>
+                <span>${escapeHtml(item.source)}</span>
+              </div>
+              <p>${escapeHtml(item.summary)}</p>
+              <div class="analysis-news-meta">
+                <span>Impacto ${Number(item.impactScore).toFixed(1)}</span>
+                <span>Relevancia ${Number(item.relevanceScore).toFixed(1)}</span>
+                <span>Sentimento ${escapeHtml(item.sentiment)}</span>
+                <span>${escapeHtml(formatShortTime(item.publishedAt))}</span>
+              </div>
+              <div class="analysis-news-tags">${Array.isArray(item.tags) ? item.tags.map((tag) => escapeHtml(tag)).join(" • ") : ""}</div>
+              <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">Abrir fonte</a>
+            </article>`,
+            )
+            .join("")}
+        </div>
       </article>
     `;
     return;
@@ -3738,6 +3785,94 @@ async function requestCryptoChart(assetId, range, mode, exchange) {
   }
 }
 
+function shouldRefreshNewsIntelligence(assetId, force = false) {
+  if (force) {
+    return true;
+  }
+
+  if (newsIntelligenceLastAssetId !== assetId) {
+    return true;
+  }
+
+  if (newsIntelligenceLastFetchedAtMs <= 0) {
+    return true;
+  }
+
+  return Date.now() - newsIntelligenceLastFetchedAtMs >= NEWS_INTELLIGENCE_REFRESH_INTERVAL_MS;
+}
+
+async function requestNewsIntelligence(assetId) {
+  const response = await fetch(
+    buildApiUrl(`/v1/crypto/news-intelligence?assetId=${encodeURIComponent(assetId)}&limit=8`),
+    {
+      method: "GET",
+    },
+  );
+
+  let payload = null;
+
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const apiMessage = payload?.error?.message;
+    throw new Error(typeof apiMessage === "string" ? apiMessage : "Falha ao carregar noticias do ativo");
+  }
+
+  return payload?.data ?? null;
+}
+
+async function loadNewsIntelligence(assetId, options = {}) {
+  if (typeof assetId !== "string" || assetId.length === 0) {
+    return;
+  }
+
+  const forceRefresh = options.force === true;
+
+  if (!shouldRefreshNewsIntelligence(assetId, forceRefresh)) {
+    if (activeAnalysisTabId === "noticias") {
+      renderDeepAnalysisPanel(currentChartSnapshot);
+    }
+
+    return;
+  }
+
+  const requestToken = newsIntelligenceRequestToken + 1;
+  newsIntelligenceRequestToken = requestToken;
+
+  try {
+    const payload = await requestNewsIntelligence(assetId);
+
+    if (requestToken !== newsIntelligenceRequestToken) {
+      return;
+    }
+
+    if (!payload || !Array.isArray(payload.items)) {
+      throw new Error("Payload de noticias em formato invalido");
+    }
+
+    newsIntelligencePayload = payload;
+    newsIntelligenceLastAssetId = assetId;
+    newsIntelligenceLastFetchedAtMs = Date.now();
+  } catch {
+    if (requestToken !== newsIntelligenceRequestToken) {
+      return;
+    }
+
+    if (newsIntelligenceLastAssetId !== assetId) {
+      newsIntelligencePayload = null;
+      newsIntelligenceLastFetchedAtMs = 0;
+    }
+  } finally {
+    if (activeAnalysisTabId === "noticias") {
+      renderDeepAnalysisPanel(currentChartSnapshot);
+    }
+  }
+}
+
 function buildContingencyChartSnapshot(input) {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const points = Array.from({ length: 36 }, (_, index) => {
@@ -3838,6 +3973,7 @@ async function loadChart(options = {}) {
     }
 
     currentChartSnapshot = snapshot;
+    void loadNewsIntelligence(assetId);
 
     if (chartViewMode === "copilot") {
       renderInteractiveChart(snapshot);
@@ -3905,6 +4041,7 @@ async function loadChart(options = {}) {
       });
 
       currentChartSnapshot = contingencySnapshot;
+      void loadNewsIntelligence(assetId);
 
       if (chartViewMode === "copilot") {
         renderInteractiveChart(contingencySnapshot);
@@ -4632,6 +4769,10 @@ function setupChartLab() {
 
       activeAnalysisTabId = tabId;
       renderDeepAnalysisPanel(currentChartSnapshot);
+
+      if (tabId === "noticias" && chartAssetSelect instanceof HTMLSelectElement) {
+        void loadNewsIntelligence(chartAssetSelect.value);
+      }
     });
   }
 
