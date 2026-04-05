@@ -4,7 +4,9 @@ import {
   CoinCapMarketDataAdapter,
   type CoinCapMarketAsset,
 } from "../../../integrations/market_data/coincap-market-data-adapter.js";
+import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
+import { retryWithExponentialBackoff } from "../../../shared/resilience/retry-with-backoff.js";
 
 const defiAssetIdSchema = z
   .string()
@@ -23,7 +25,25 @@ const defiAssetIdsSchema = z
 
 const defiMarketOverviewPresetSchema = z.enum(["blue_chips", "dex", "lending", "infrastructure"]);
 
+const coinGeckoDefiAssetSchema = z.object({
+  current_price: z.number().nullable().optional(),
+  id: z.string().trim().min(1),
+  market_cap: z.number().nullable().optional(),
+  name: z.string().trim().min(1),
+  price_change_percentage_24h: z.number().nullable().optional(),
+  symbol: z.string().trim().min(1),
+  total_volume: z.number().nullable().optional(),
+});
+
+const coinGeckoDefiAssetsSchema = z.array(coinGeckoDefiAssetSchema);
+
+const coinGeckoRequestHeaders = {
+  Accept: "application/json, text/plain, */*",
+  "User-Agent": "Mozilla/5.0 (compatible; BotFinanceiro/1.0)",
+};
+
 type DefiMarketOverviewPreset = z.infer<typeof defiMarketOverviewPresetSchema>;
+type CoinGeckoDefiAsset = z.infer<typeof coinGeckoDefiAssetSchema>;
 
 export interface DefiQuoteSnapshot {
   assetId: string;
@@ -32,7 +52,7 @@ export interface DefiQuoteSnapshot {
   marketCapUsd: number | null;
   name: string;
   priceUsd: number;
-  provider: "coincap";
+  provider: "coincap" | "coingecko";
   rank: number | null;
   sector: "defi";
   symbol: string;
@@ -131,24 +151,197 @@ function toSnapshot(asset: CoinCapMarketAsset, fetchedAt: string): DefiQuoteSnap
   };
 }
 
-async function resolveSingleDefiQuote(assetId: string): Promise<DefiQuoteSnapshot> {
-  const spot = await coinCapMarketDataAdapter.getSpotPriceUsd({
-    assetId,
-  });
+function toSnapshotFromCoinGecko(asset: CoinGeckoDefiAsset, fetchedAt: string): DefiQuoteSnapshot {
+  const priceUsd = typeof asset.current_price === "number" && Number.isFinite(asset.current_price)
+    ? asset.current_price
+    : null;
+
+  if (priceUsd === null) {
+    throw new AppError({
+      code: "DEFI_ASSET_NOT_AVAILABLE",
+      details: {
+        assetId: asset.id,
+      },
+      message: "DeFi asset is not available",
+      statusCode: 503,
+    });
+  }
 
   return {
-    assetId: spot.assetId,
-    changePercent24h: null,
-    fetchedAt: spot.fetchedAt,
-    marketCapUsd: null,
-    name: toTitleCaseSlug(spot.assetId),
-    priceUsd: spot.price,
-    provider: "coincap",
+    assetId: asset.id,
+    changePercent24h:
+      typeof asset.price_change_percentage_24h === "number" && Number.isFinite(asset.price_change_percentage_24h)
+        ? asset.price_change_percentage_24h
+        : null,
+    fetchedAt,
+    marketCapUsd:
+      typeof asset.market_cap === "number" && Number.isFinite(asset.market_cap)
+        ? asset.market_cap
+        : null,
+    name: asset.name,
+    priceUsd,
+    provider: "coingecko",
     rank: null,
     sector: "defi",
-    symbol: spot.symbol,
-    volumeUsd24h: null,
+    symbol: asset.symbol.toUpperCase(),
+    volumeUsd24h:
+      typeof asset.total_volume === "number" && Number.isFinite(asset.total_volume)
+        ? asset.total_volume
+        : null,
   };
+}
+
+async function loadCoinGeckoDefiAssets(assetIds: string[]): Promise<{
+  assetsById: Map<string, CoinGeckoDefiAsset>;
+  fetchedAt: string;
+}> {
+  if (assetIds.length === 0) {
+    return {
+      assetsById: new Map<string, CoinGeckoDefiAsset>(),
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+
+  const query = new URLSearchParams({
+    ids: assetIds.join(","),
+    order: "market_cap_desc",
+    page: "1",
+    per_page: String(Math.max(1, Math.min(50, assetIds.length))),
+    sparkline: "false",
+    vs_currency: "usd",
+  });
+
+  const payload = await retryWithExponentialBackoff(
+    async () => {
+      let response: Response;
+
+      try {
+        response = await fetch(`${env.COINGECKO_API_BASE_URL}/coins/markets?${query.toString()}`, {
+          headers: coinGeckoRequestHeaders,
+          method: "GET",
+          signal: AbortSignal.timeout(env.COINGECKO_TIMEOUT_MS),
+        });
+      } catch (error) {
+        throw new AppError({
+          code: "COINGECKO_UNAVAILABLE",
+          details: {
+            cause: error,
+            retryable: true,
+          },
+          message: "CoinGecko request failed",
+          statusCode: 503,
+        });
+      }
+
+      if (!response.ok) {
+        const responseBody = await response.text();
+        const retryable = response.status === 408 || response.status === 425 || response.status === 429 || response.status >= 500;
+
+        throw new AppError({
+          code: "COINGECKO_BAD_STATUS",
+          details: {
+            responseBody: responseBody.slice(0, 1000),
+            responseStatus: response.status,
+            retryable,
+          },
+          message: "CoinGecko returned a non-success status",
+          statusCode: retryable ? 503 : 502,
+        });
+      }
+
+      try {
+        return (await response.json()) as unknown;
+      } catch {
+        throw new AppError({
+          code: "COINGECKO_INVALID_JSON",
+          details: {
+            retryable: true,
+          },
+          message: "CoinGecko returned invalid JSON",
+          statusCode: 502,
+        });
+      }
+    },
+    {
+      attempts: Math.max(2, Math.min(6, env.COINGECKO_RETRY_ATTEMPTS)),
+      baseDelayMs: env.COINGECKO_RETRY_BASE_DELAY_MS,
+      jitterPercent: env.COINGECKO_RETRY_JITTER_PERCENT,
+      shouldRetry: (error) => {
+        if (!(error instanceof AppError)) {
+          return true;
+        }
+
+        if (error.code === "COINGECKO_UNAVAILABLE") {
+          return true;
+        }
+
+        if (error.code !== "COINGECKO_BAD_STATUS") {
+          return false;
+        }
+
+        const details = error.details as { retryable?: boolean } | undefined;
+        return details?.retryable === true;
+      },
+    },
+  );
+  const parsedPayload = coinGeckoDefiAssetsSchema.safeParse(payload);
+
+  if (!parsedPayload.success) {
+    throw new AppError({
+      code: "COINGECKO_SCHEMA_MISMATCH",
+      details: {
+        issues: parsedPayload.error.issues,
+        retryable: false,
+      },
+      message: "CoinGecko market payload schema mismatch",
+      statusCode: 502,
+    });
+  }
+
+  return {
+    assetsById: new Map<string, CoinGeckoDefiAsset>(
+      parsedPayload.data.map((asset) => [asset.id, asset] as const),
+    ),
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+async function resolveSingleDefiQuote(assetId: string): Promise<DefiQuoteSnapshot> {
+  try {
+    const spot = await coinCapMarketDataAdapter.getSpotPriceUsd({
+      assetId,
+    });
+
+    return {
+      assetId: spot.assetId,
+      changePercent24h: null,
+      fetchedAt: spot.fetchedAt,
+      marketCapUsd: null,
+      name: toTitleCaseSlug(spot.assetId),
+      priceUsd: spot.price,
+      provider: "coincap",
+      rank: null,
+      sector: "defi",
+      symbol: spot.symbol,
+      volumeUsd24h: null,
+    };
+  } catch {
+    const coinGeckoData = await loadCoinGeckoDefiAssets([assetId]);
+    const asset = coinGeckoData.assetsById.get(assetId);
+
+    if (!asset) {
+      throw new AppError({
+        code: "DEFI_ASSET_NOT_AVAILABLE",
+        details: {
+          assetId,
+        },
+        message: "DeFi asset is not available",
+        statusCode: 503,
+      });
+    }
+
+    return toSnapshotFromCoinGecko(asset, coinGeckoData.fetchedAt);
+  }
 }
 
 export class DefiMarketService {
@@ -223,12 +416,35 @@ export class DefiMarketService {
     const limit = Math.max(1, Math.min(20, Math.floor(input?.limit ?? sourceAssetIds.length)));
     const selectedAssetIds = sourceAssetIds.slice(0, limit);
 
-    const overview = await coinCapMarketDataAdapter.getMarketOverview({
-      limit: 25,
-    });
-    const assetsById = new Map<string, CoinCapMarketAsset>(
-      overview.assets.map((asset) => [asset.assetId, asset] as const),
-    );
+    let overviewFetchedAt = new Date().toISOString();
+    let assetsById = new Map<string, CoinCapMarketAsset>();
+    let shouldUseCoinGeckoBatchFallback = false;
+
+    try {
+      const overview = await coinCapMarketDataAdapter.getMarketOverview({
+        limit: 25,
+      });
+
+      overviewFetchedAt = overview.fetchedAt;
+      assetsById = new Map<string, CoinCapMarketAsset>(
+        overview.assets.map((asset) => [asset.assetId, asset] as const),
+      );
+    } catch {
+      overviewFetchedAt = new Date().toISOString();
+      shouldUseCoinGeckoBatchFallback = true;
+    }
+
+    let coinGeckoFallbackById = new Map<string, CoinGeckoDefiAsset>();
+
+    if (shouldUseCoinGeckoBatchFallback) {
+      try {
+        const coinGeckoFallback = await loadCoinGeckoDefiAssets(selectedAssetIds);
+        overviewFetchedAt = coinGeckoFallback.fetchedAt;
+        coinGeckoFallbackById = coinGeckoFallback.assetsById;
+      } catch {
+        coinGeckoFallbackById = new Map<string, CoinGeckoDefiAsset>();
+      }
+    }
 
     const quotes = await Promise.all(
       selectedAssetIds.map(async (assetId) => {
@@ -237,7 +453,17 @@ export class DefiMarketService {
         if (fromOverview) {
           return {
             assetId,
-            quote: toSnapshot(fromOverview, overview.fetchedAt),
+            quote: toSnapshot(fromOverview, overviewFetchedAt),
+            status: "ok" as const,
+          };
+        }
+
+        const fromCoinGeckoBatch = coinGeckoFallbackById.get(assetId);
+
+        if (fromCoinGeckoBatch) {
+          return {
+            assetId,
+            quote: toSnapshotFromCoinGecko(fromCoinGeckoBatch, overviewFetchedAt),
             status: "ok" as const,
           };
         }
@@ -268,7 +494,7 @@ export class DefiMarketService {
     return {
       assetIds: selectedAssetIds,
       failureCount: quotes.length - successCount,
-      fetchedAt: overview.fetchedAt,
+      fetchedAt: overviewFetchedAt,
       preset,
       quotes,
       successCount,

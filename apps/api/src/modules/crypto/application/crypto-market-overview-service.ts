@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+import { env } from "../../../shared/config/env.js";
+import { AppError } from "../../../shared/errors/app-error.js";
+import { retryWithExponentialBackoff } from "../../../shared/resilience/retry-with-backoff.js";
+import {
+  BinanceMarketDataAdapter,
+} from "../../../integrations/market_data/binance-market-data-adapter.js";
 import {
   CoinCapMarketDataAdapter,
   type CoinCapMarketAsset,
@@ -8,6 +14,39 @@ import {
 const marketOverviewInputSchema = z.object({
   limit: z.number().int().min(3).max(25).default(10),
 });
+
+const coinGeckoMarketAssetSchema = z.object({
+  current_price: z.number().nullable().optional(),
+  id: z.string().trim().min(1),
+  market_cap: z.number().nullable().optional(),
+  market_cap_rank: z.number().nullable().optional(),
+  name: z.string().trim().min(1),
+  price_change_percentage_24h: z.number().nullable().optional(),
+  symbol: z.string().trim().min(1),
+  total_volume: z.number().nullable().optional(),
+});
+
+const coinGeckoMarketOverviewSchema = z.array(coinGeckoMarketAssetSchema);
+
+const coinGeckoRequestHeaders = {
+  Accept: "application/json, text/plain, */*",
+  "User-Agent": "Mozilla/5.0 (compatible; BotFinanceiro/1.0)",
+};
+
+const binanceFallbackAssets = [
+  { assetId: "bitcoin", name: "Bitcoin" },
+  { assetId: "ethereum", name: "Ethereum" },
+  { assetId: "binancecoin", name: "BNB" },
+  { assetId: "solana", name: "Solana" },
+  { assetId: "xrp", name: "XRP" },
+  { assetId: "dogecoin", name: "Dogecoin" },
+  { assetId: "cardano", name: "Cardano" },
+  { assetId: "chainlink", name: "Chainlink" },
+  { assetId: "avalanche-2", name: "Avalanche" },
+  { assetId: "aave", name: "Aave" },
+  { assetId: "uniswap", name: "Uniswap" },
+  { assetId: "maker", name: "Maker" },
+] as const;
 
 interface MarketLeader {
   assetId: string;
@@ -42,7 +81,7 @@ export interface CryptoMarketOverviewResponse {
   assets: CryptoMarketOverviewAsset[];
   fetchedAt: string;
   limit: number;
-  provider: "coincap";
+  provider: "coincap" | "coingecko" | "binance";
   summary: CryptoMarketOverviewSummary;
 }
 
@@ -68,13 +107,12 @@ function toLeader(asset: CoinCapMarketAsset | null): MarketLeader | null {
 
 export class CryptoMarketOverviewService {
   private readonly coinCapAdapter = new CoinCapMarketDataAdapter();
+  private readonly binanceAdapter = new BinanceMarketDataAdapter();
 
   public async getOverview(input?: { limit?: number }): Promise<CryptoMarketOverviewResponse> {
     const parsedInput = marketOverviewInputSchema.parse(input ?? {});
-    const marketOverview = await this.coinCapAdapter.getMarketOverview({
-      limit: parsedInput.limit,
-    });
-    const assets = marketOverview.assets.slice(0, parsedInput.limit);
+    const marketOverview = await this.loadOverviewWithFallback(parsedInput.limit);
+    const assets = marketOverview.assets;
     const assetsWithChange = assets.filter(
       (asset): asset is CoinCapMarketAsset & { changePercent24h: number } =>
         isFiniteNumber(asset.changePercent24h),
@@ -115,5 +153,224 @@ export class CryptoMarketOverviewService {
         weakest24h: toLeader(weakest24hAsset),
       },
     };
+  }
+
+  private async loadOverviewWithFallback(limit: number): Promise<{
+    assets: CoinCapMarketAsset[];
+    fetchedAt: string;
+    provider: "coincap" | "coingecko" | "binance";
+  }> {
+    try {
+      const coinCapOverview = await this.coinCapAdapter.getMarketOverview({
+        limit,
+      });
+
+      return {
+        assets: coinCapOverview.assets.slice(0, limit),
+        fetchedAt: coinCapOverview.fetchedAt,
+        provider: coinCapOverview.provider,
+      };
+    } catch {
+      try {
+        const coinGeckoAssets = await this.loadCoinGeckoOverview(limit);
+
+        if (coinGeckoAssets.length > 0) {
+          return {
+            assets: coinGeckoAssets,
+            fetchedAt: new Date().toISOString(),
+            provider: "coingecko",
+          };
+        }
+      } catch {
+        // Continua para fallback Binance.
+      }
+
+      const binanceAssets = await this.loadBinanceOverview(limit);
+
+      if (binanceAssets.length === 0) {
+        throw new AppError({
+          code: "CRYPTO_MARKET_OVERVIEW_UNAVAILABLE",
+          details: {
+            limit,
+            retryable: true,
+          },
+          message: "CoinCap, CoinGecko e Binance indisponiveis para market overview",
+          statusCode: 503,
+        });
+      }
+
+      return {
+        assets: binanceAssets,
+        fetchedAt: new Date().toISOString(),
+        provider: "binance",
+      };
+    }
+  }
+
+  private async loadCoinGeckoOverview(limit: number): Promise<CoinCapMarketAsset[]> {
+    const query = new URLSearchParams({
+      order: "market_cap_desc",
+      page: "1",
+      per_page: String(limit),
+      sparkline: "false",
+      vs_currency: "usd",
+    });
+
+    const payload = await retryWithExponentialBackoff(
+      async () => {
+        let response: Response;
+
+        try {
+          response = await fetch(`${env.COINGECKO_API_BASE_URL}/coins/markets?${query.toString()}`, {
+            headers: coinGeckoRequestHeaders,
+            method: "GET",
+            signal: AbortSignal.timeout(env.COINGECKO_TIMEOUT_MS),
+          });
+        } catch (error) {
+          throw new AppError({
+            code: "COINGECKO_UNAVAILABLE",
+            details: {
+              cause: error,
+              retryable: true,
+            },
+            message: "CoinGecko request failed",
+            statusCode: 503,
+          });
+        }
+
+        if (!response.ok) {
+          const responseBody = await response.text();
+          const retryable = response.status === 408 || response.status === 425 || response.status === 429 || response.status >= 500;
+
+          throw new AppError({
+            code: "COINGECKO_BAD_STATUS",
+            details: {
+              responseBody: responseBody.slice(0, 1000),
+              responseStatus: response.status,
+              retryable,
+            },
+            message: "CoinGecko returned a non-success status",
+            statusCode: retryable ? 503 : 502,
+          });
+        }
+
+        try {
+          return (await response.json()) as unknown;
+        } catch {
+          throw new AppError({
+            code: "COINGECKO_INVALID_JSON",
+            details: {
+              retryable: true,
+            },
+            message: "CoinGecko returned invalid JSON",
+            statusCode: 502,
+          });
+        }
+      },
+      {
+        attempts: Math.max(2, Math.min(6, env.COINGECKO_RETRY_ATTEMPTS)),
+        baseDelayMs: env.COINGECKO_RETRY_BASE_DELAY_MS,
+        jitterPercent: env.COINGECKO_RETRY_JITTER_PERCENT,
+        shouldRetry: (error) => {
+          if (!(error instanceof AppError)) {
+            return true;
+          }
+
+          if (error.code === "COINGECKO_UNAVAILABLE") {
+            return true;
+          }
+
+          if (error.code !== "COINGECKO_BAD_STATUS") {
+            return false;
+          }
+
+          const details = error.details as { retryable?: boolean } | undefined;
+          return details?.retryable === true;
+        },
+      },
+    );
+    const parsedPayload = coinGeckoMarketOverviewSchema.safeParse(payload);
+
+    if (!parsedPayload.success) {
+      throw new AppError({
+        code: "COINGECKO_SCHEMA_MISMATCH",
+        details: {
+          issues: parsedPayload.error.issues,
+          retryable: false,
+        },
+        message: "CoinGecko market overview payload schema mismatch",
+        statusCode: 502,
+      });
+    }
+
+    return parsedPayload.data
+      .map((asset, index): CoinCapMarketAsset | null => {
+        const priceUsd = typeof asset.current_price === "number" && Number.isFinite(asset.current_price)
+          ? asset.current_price
+          : null;
+
+        if (priceUsd === null) {
+          return null;
+        }
+
+        return {
+          assetId: asset.id,
+          changePercent24h:
+            typeof asset.price_change_percentage_24h === "number" && Number.isFinite(asset.price_change_percentage_24h)
+              ? asset.price_change_percentage_24h
+              : null,
+          marketCapUsd:
+            typeof asset.market_cap === "number" && Number.isFinite(asset.market_cap)
+              ? asset.market_cap
+              : null,
+          name: asset.name,
+          priceUsd,
+          rank:
+            typeof asset.market_cap_rank === "number" && Number.isFinite(asset.market_cap_rank)
+              ? asset.market_cap_rank
+              : index + 1,
+          symbol: asset.symbol.toUpperCase(),
+          volumeUsd24h:
+            typeof asset.total_volume === "number" && Number.isFinite(asset.total_volume)
+              ? asset.total_volume
+              : null,
+        };
+      })
+      .filter((asset): asset is CoinCapMarketAsset => asset !== null)
+      .slice(0, limit);
+  }
+
+  private async loadBinanceOverview(limit: number): Promise<CoinCapMarketAsset[]> {
+    const selectedAssets = binanceFallbackAssets.slice(0, Math.max(1, Math.min(limit, binanceFallbackAssets.length)));
+    const results = await Promise.allSettled(
+      selectedAssets.map(async (asset) => {
+        const snapshot = await this.binanceAdapter.getTickerSnapshot({
+          assetId: asset.assetId,
+        });
+
+        const rawSymbol = snapshot.symbol.toUpperCase();
+        const normalizedSymbol = rawSymbol.endsWith("USDT") ? rawSymbol.slice(0, -4) : rawSymbol;
+
+        return {
+          assetId: asset.assetId,
+          changePercent24h: snapshot.changePercent24h,
+          marketCapUsd: null,
+          name: asset.name,
+          priceUsd: snapshot.lastPrice,
+          rank: null,
+          symbol: normalizedSymbol,
+          volumeUsd24h: null,
+        } satisfies CoinCapMarketAsset;
+      }),
+    );
+    const assets: CoinCapMarketAsset[] = [];
+
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        assets.push(result.value);
+      }
+    }
+
+    return assets.slice(0, limit);
   }
 }
