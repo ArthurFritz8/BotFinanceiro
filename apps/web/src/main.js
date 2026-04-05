@@ -59,6 +59,18 @@ const airdropQueryFilter = document.querySelector("#airdrop-query-filter");
 const airdropIncludeSpeculativeToggle = document.querySelector("#airdrop-include-speculative");
 const airdropSummaryElement = document.querySelector("#airdrop-summary");
 const airdropListElement = document.querySelector("#airdrop-list");
+const memecoinRefreshButton = document.querySelector("#memecoin-refresh-button");
+const memecoinFiltersForm = document.querySelector("#memecoin-filters");
+const memecoinChainFilter = document.querySelector("#memecoin-chain-filter");
+const memecoinPriorityFilter = document.querySelector("#memecoin-priority-filter");
+const memecoinPinnedOnlyToggle = document.querySelector("#memecoin-pinned-only");
+const memecoinSummaryElement = document.querySelector("#memecoin-summary");
+const memecoinCriticalListElement = document.querySelector("#memecoin-column-critical");
+const memecoinHighListElement = document.querySelector("#memecoin-column-high");
+const memecoinWatchListElement = document.querySelector("#memecoin-column-watch");
+const memecoinCountCriticalElement = document.querySelector("#memecoin-count-critical");
+const memecoinCountHighElement = document.querySelector("#memecoin-count-high");
+const memecoinCountWatchElement = document.querySelector("#memecoin-count-watch");
 const marketNavigatorRefreshButton = document.querySelector("#market-navigator-refresh");
 const marketScopeListElement = document.querySelector("#market-scope-list");
 const marketCategoryListElement = document.querySelector("#market-category-list");
@@ -78,6 +90,7 @@ const CHAT_HISTORY_STORAGE_KEY = "botfinanceiro.copilot.history.v1";
 const CHAT_SESSION_STORAGE_KEY = "botfinanceiro.copilot.session.v1";
 const CHART_PREFERENCES_STORAGE_KEY = "botfinanceiro.chart.preferences.v1";
 const AIRDROP_PREFERENCES_STORAGE_KEY = "botfinanceiro.airdrop.preferences.v1";
+const MEMECOIN_PREFERENCES_STORAGE_KEY = "botfinanceiro.memecoin.preferences.v1";
 const MARKET_NAVIGATOR_FAVORITES_STORAGE_KEY = "botfinanceiro.marketNavigator.favorites.v1";
 const MAX_STORED_MESSAGES = 60;
 const MAX_RECENT_HISTORY_ITEMS = 8;
@@ -765,6 +778,9 @@ let airdropRadarPayload = null;
 let isAirdropRadarLoading = false;
 let airdropQueryDebounceTimer = null;
 let airdropPersistedChainPreference = "all";
+let memecoinRadarPayload = null;
+let isMemecoinRadarLoading = false;
+let memecoinAutoRefreshTimer = null;
 let activeMarketScopeId = MARKET_NAVIGATOR_DEFAULT_SCOPE_ID;
 let activeMarketCategoryId = MARKET_NAVIGATOR_DEFAULT_CATEGORY_ID;
 let activeMarketViewId = "";
@@ -1657,6 +1673,538 @@ function setupAirdropRadarPanel() {
 
   renderAirdropList([]);
   void loadAirdropRadar();
+}
+
+function formatMemePriorityLabel(priority) {
+  if (priority === "critical") {
+    return "Critico";
+  }
+
+  if (priority === "high") {
+    return "Alta";
+  }
+
+  return "Watch";
+}
+
+function formatMemeChainLabel(chain) {
+  if (chain === "solana") {
+    return "Solana";
+  }
+
+  if (chain === "base") {
+    return "Base";
+  }
+
+  return "Global";
+}
+
+function formatMemeMetricUsd(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "n/d";
+  }
+
+  return formatCompactUsd(value);
+}
+
+function setMemecoinRefreshLoadingState(isLoading) {
+  if (!(memecoinRefreshButton instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  memecoinRefreshButton.disabled = isLoading;
+  memecoinRefreshButton.textContent = isLoading ? "Atualizando..." : "Atualizar wall";
+}
+
+function setMemecoinSummary(message, mode = "") {
+  if (!(memecoinSummaryElement instanceof HTMLElement)) {
+    return;
+  }
+
+  memecoinSummaryElement.textContent = message;
+
+  if (mode.length > 0) {
+    memecoinSummaryElement.setAttribute("data-mode", mode);
+  } else {
+    memecoinSummaryElement.removeAttribute("data-mode");
+  }
+}
+
+function getMemecoinFilterState() {
+  const chain = memecoinChainFilter instanceof HTMLSelectElement
+    ? memecoinChainFilter.value
+    : "all";
+  const priority = memecoinPriorityFilter instanceof HTMLSelectElement
+    ? memecoinPriorityFilter.value
+    : "all";
+  const pinnedOnly = memecoinPinnedOnlyToggle instanceof HTMLInputElement
+    ? memecoinPinnedOnlyToggle.checked
+    : false;
+
+  return {
+    chain,
+    pinnedOnly,
+    priority,
+  };
+}
+
+function buildMemecoinChatPrompt(notification) {
+  const tokenSymbol = typeof notification?.token?.symbol === "string"
+    ? notification.token.symbol
+    : "TOKEN";
+  const tokenName = typeof notification?.token?.name === "string"
+    ? notification.token.name
+    : "Projeto n/d";
+  const chain = formatMemeChainLabel(notification?.chain);
+  const priority = formatMemePriorityLabel(notification?.priority);
+  const score = typeof notification?.sentiment?.hypeScore === "number"
+    ? Math.round(notification.sentiment.hypeScore)
+    : "n/d";
+  const confidence = typeof notification?.sentiment?.confidence === "number"
+    ? Math.round(notification.sentiment.confidence)
+    : "n/d";
+  const catalysts = Array.isArray(notification?.catalysts)
+    ? notification.catalysts.slice(0, 3).join("; ")
+    : "n/d";
+  const risks = Array.isArray(notification?.riskFlags)
+    ? notification.riskFlags.slice(0, 3).join("; ")
+    : "n/d";
+  const pairUrl = typeof notification?.pairUrl === "string" ? notification.pairUrl : "";
+
+  return [
+    "Analise este alerta de MemeCoin Radar e gere um plano tatico de acompanhamento sem recomendacao financeira.",
+    `Token: ${tokenSymbol} (${tokenName})`,
+    `Chain: ${chain}`,
+    `Prioridade: ${priority}`,
+    `Hype score: ${score}`,
+    `Confianca do sinal: ${confidence}`,
+    `Catalisadores: ${catalysts}`,
+    `Riscos: ${risks}`,
+    pairUrl.length > 0 ? `Link da pool: ${pairUrl}` : "Link da pool: n/d",
+    "Quero resposta em 4 blocos: leitura de momentum, risco de liquidez, gatilhos de entrada/saida para monitoramento e red flags de manipulacao.",
+  ].join("\n");
+}
+
+async function requestMemecoinRadar(filterState, forceRefresh) {
+  const params = new URLSearchParams({
+    chain: filterState.chain,
+    limit: "42",
+    pinnedOnly: filterState.pinnedOnly ? "true" : "false",
+    priority: filterState.priority,
+    refresh: forceRefresh ? "true" : "false",
+  });
+
+  const response = await fetch(buildApiUrl(`/v1/meme-radar/notifications?${params.toString()}`), {
+    method: "GET",
+  });
+
+  let payload = null;
+
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const message = payload?.error?.message;
+    throw new Error(typeof message === "string" ? message : "Falha ao carregar MemeCoin Radar");
+  }
+
+  return payload?.data ?? null;
+}
+
+function setMemecoinCount(element, value) {
+  if (!(element instanceof HTMLElement)) {
+    return;
+  }
+
+  element.textContent = String(value);
+}
+
+function renderMemecoinEmpty(listElement, message) {
+  if (!(listElement instanceof HTMLElement)) {
+    return;
+  }
+
+  const empty = document.createElement("div");
+  empty.className = "memecoin-empty";
+  empty.textContent = message;
+  listElement.append(empty);
+}
+
+function createMemecoinCard(notification) {
+  const card = document.createElement("article");
+  card.className = "memecoin-card";
+  card.dataset.priority = notification.priority;
+
+  const top = document.createElement("div");
+  top.className = "memecoin-card-top";
+
+  const title = document.createElement("h5");
+  title.textContent = `${notification.token.symbol} • ${notification.token.name}`;
+
+  const chainPill = document.createElement("span");
+  chainPill.className = "memecoin-card-chain";
+  chainPill.textContent = formatMemeChainLabel(notification.chain);
+
+  top.append(title, chainPill);
+
+  const metrics = document.createElement("div");
+  metrics.className = "memecoin-card-metrics";
+
+  const scoreChip = document.createElement("span");
+  scoreChip.className = "memecoin-chip";
+  scoreChip.textContent = `Hype ${Math.round(notification.sentiment.hypeScore)}`;
+
+  const confidenceChip = document.createElement("span");
+  confidenceChip.className = "memecoin-chip";
+  confidenceChip.textContent = `Conf ${Math.round(notification.sentiment.confidence)}`;
+
+  const liquidityChip = document.createElement("span");
+  liquidityChip.className = "memecoin-chip";
+  liquidityChip.textContent = `Liq ${formatMemeMetricUsd(notification.metrics.liquidityUsd)}`;
+
+  const priorityChip = document.createElement("span");
+  priorityChip.className = "memecoin-chip";
+  priorityChip.textContent = formatMemePriorityLabel(notification.priority);
+
+  metrics.append(scoreChip, confidenceChip, liquidityChip, priorityChip);
+
+  const summary = document.createElement("p");
+  summary.className = "memecoin-card-summary";
+  summary.textContent = notification.summary || notification.sentiment.oneLineSummary;
+
+  const details = document.createElement("div");
+  details.className = "memecoin-card-list";
+
+  const catalystLine = document.createElement("div");
+  const catalystLabel = document.createElement("strong");
+  catalystLabel.textContent = "Catalisadores: ";
+  const catalystText = document.createElement("span");
+  catalystText.textContent = notification.catalysts.length > 0
+    ? notification.catalysts.join(" • ")
+    : "n/d";
+  catalystLine.append(catalystLabel, catalystText);
+
+  const riskLine = document.createElement("div");
+  const riskLabel = document.createElement("strong");
+  riskLabel.textContent = "Riscos: ";
+  const riskText = document.createElement("span");
+  riskText.textContent = notification.riskFlags.length > 0
+    ? notification.riskFlags.join(" • ")
+    : "n/d";
+  riskLine.append(riskLabel, riskText);
+
+  details.append(catalystLine, riskLine);
+
+  const footer = document.createElement("div");
+  footer.className = "memecoin-card-footer";
+
+  const source = document.createElement("span");
+  source.className = "memecoin-card-source";
+  source.textContent = `${notification.sources.join(" + ")} • ${formatAirdropDate(notification.updatedAt)}`;
+
+  const actions = document.createElement("div");
+  actions.className = "memecoin-card-actions";
+
+  const pinButton = document.createElement("button");
+  pinButton.type = "button";
+  pinButton.className = "memecoin-pin-button";
+  pinButton.dataset.action = "toggle-pin";
+  pinButton.dataset.notificationId = notification.id;
+  pinButton.dataset.pinned = notification.pinned ? "true" : "false";
+  pinButton.textContent = notification.pinned ? "Desfixar" : "Fixar";
+
+  const chatButton = document.createElement("button");
+  chatButton.type = "button";
+  chatButton.className = "memecoin-chat-button";
+  chatButton.dataset.action = "send-to-chat";
+  chatButton.dataset.notificationId = notification.id;
+  chatButton.textContent = "Levar ao chat";
+
+  actions.append(pinButton, chatButton);
+
+  if (notification.pairUrl) {
+    const link = document.createElement("a");
+    link.className = "memecoin-card-link";
+    link.href = notification.pairUrl;
+    link.rel = "noopener noreferrer";
+    link.target = "_blank";
+    link.textContent = "Pool";
+    actions.append(link);
+  }
+
+  footer.append(source, actions);
+  card.append(top, metrics, summary, details, footer);
+
+  return card;
+}
+
+function renderMemecoinBoard(notifications) {
+  const listEntries = [
+    ["critical", memecoinCriticalListElement, memecoinCountCriticalElement],
+    ["high", memecoinHighListElement, memecoinCountHighElement],
+    ["watch", memecoinWatchListElement, memecoinCountWatchElement],
+  ];
+
+  for (const [, listElement] of listEntries) {
+    if (listElement instanceof HTMLElement) {
+      listElement.innerHTML = "";
+    }
+  }
+
+  for (const [priority, listElement, countElement] of listEntries) {
+    const bucket = notifications.filter((notification) => notification.priority === priority);
+    setMemecoinCount(countElement, bucket.length);
+
+    if (!(listElement instanceof HTMLElement)) {
+      continue;
+    }
+
+    if (bucket.length === 0) {
+      renderMemecoinEmpty(listElement, "Sem sinais nesta faixa agora.");
+      continue;
+    }
+
+    for (const notification of bucket) {
+      listElement.append(createMemecoinCard(notification));
+    }
+  }
+}
+
+function renderMemecoinFromState() {
+  if (!memecoinRadarPayload) {
+    renderMemecoinBoard([]);
+    setMemecoinSummary("Sem dados de MemeCoin Radar no momento.", "error");
+    return;
+  }
+
+  const notifications = Array.isArray(memecoinRadarPayload.notifications)
+    ? memecoinRadarPayload.notifications
+    : [];
+  const sources = Array.isArray(memecoinRadarPayload.sources)
+    ? memecoinRadarPayload.sources
+    : [];
+  const healthySources = sources.filter((source) => source?.status === "ok").length;
+  const fetchedAt = formatShortTime(memecoinRadarPayload.fetchedAt);
+  const board = memecoinRadarPayload.board ?? {};
+
+  setMemecoinSummary(
+    `Fontes ${healthySources}/${sources.length} • total ${board.total ?? notifications.length} • fixados ${board.pinned ?? 0} • atualizado ${fetchedAt}`,
+  );
+  renderMemecoinBoard(notifications);
+}
+
+async function loadMemecoinRadar({ forceRefresh = false } = {}) {
+  if (isMemecoinRadarLoading) {
+    return;
+  }
+
+  isMemecoinRadarLoading = true;
+  setMemecoinRefreshLoadingState(true);
+  setMemecoinSummary("Atualizando MemeCoin Radar...", "");
+
+  try {
+    const filterState = getMemecoinFilterState();
+    const payload = await requestMemecoinRadar(filterState, forceRefresh);
+
+    if (!payload || !Array.isArray(payload.notifications)) {
+      throw new Error("Resposta de MemeCoin Radar invalida");
+    }
+
+    memecoinRadarPayload = payload;
+    renderMemecoinFromState();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Falha ao atualizar MemeCoin Radar";
+    memecoinRadarPayload = null;
+    renderMemecoinBoard([]);
+    setMemecoinSummary(message, "error");
+  } finally {
+    isMemecoinRadarLoading = false;
+    setMemecoinRefreshLoadingState(false);
+  }
+}
+
+async function toggleMemecoinPinned(notificationId, currentPinned) {
+  const response = await fetch(
+    buildApiUrl(`/v1/meme-radar/notifications/${encodeURIComponent(notificationId)}/pin`),
+    {
+      body: JSON.stringify({
+        pinned: !currentPinned,
+      }),
+      headers: {
+        "content-type": "application/json",
+      },
+      method: "POST",
+    },
+  );
+
+  let payload = null;
+
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const message = payload?.error?.message;
+    throw new Error(typeof message === "string" ? message : "Falha ao atualizar pin");
+  }
+
+  return payload?.data ?? null;
+}
+
+function startMemecoinAutoRefresh() {
+  if (memecoinAutoRefreshTimer !== null) {
+    window.clearInterval(memecoinAutoRefreshTimer);
+    memecoinAutoRefreshTimer = null;
+  }
+
+  memecoinAutoRefreshTimer = window.setInterval(() => {
+    void loadMemecoinRadar({
+      forceRefresh: false,
+    });
+  }, 180000);
+}
+
+function stopMemecoinAutoRefresh() {
+  if (memecoinAutoRefreshTimer === null) {
+    return;
+  }
+
+  window.clearInterval(memecoinAutoRefreshTimer);
+  memecoinAutoRefreshTimer = null;
+}
+
+function setupMemecoinRadarPanel() {
+  if (
+    !(memecoinCriticalListElement instanceof HTMLElement)
+    || !(memecoinHighListElement instanceof HTMLElement)
+    || !(memecoinWatchListElement instanceof HTMLElement)
+  ) {
+    return;
+  }
+
+  hydrateMemecoinPreferences();
+
+  if (memecoinRefreshButton instanceof HTMLButtonElement) {
+    memecoinRefreshButton.addEventListener("click", () => {
+      void loadMemecoinRadar({
+        forceRefresh: true,
+      });
+    });
+  }
+
+  if (memecoinFiltersForm instanceof HTMLFormElement) {
+    memecoinFiltersForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      saveMemecoinPreferences();
+      void loadMemecoinRadar({
+        forceRefresh: false,
+      });
+    });
+  }
+
+  if (memecoinChainFilter instanceof HTMLSelectElement) {
+    memecoinChainFilter.addEventListener("change", () => {
+      saveMemecoinPreferences();
+      void loadMemecoinRadar({
+        forceRefresh: false,
+      });
+    });
+  }
+
+  if (memecoinPriorityFilter instanceof HTMLSelectElement) {
+    memecoinPriorityFilter.addEventListener("change", () => {
+      saveMemecoinPreferences();
+      void loadMemecoinRadar({
+        forceRefresh: false,
+      });
+    });
+  }
+
+  if (memecoinPinnedOnlyToggle instanceof HTMLInputElement) {
+    memecoinPinnedOnlyToggle.addEventListener("change", () => {
+      saveMemecoinPreferences();
+      void loadMemecoinRadar({
+        forceRefresh: false,
+      });
+    });
+  }
+
+  const handleListClick = (event) => {
+    const target = event.target;
+    const actionButton = target instanceof HTMLElement
+      ? target.closest("button[data-action]")
+      : null;
+
+    if (!(actionButton instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    const action = actionButton.dataset.action;
+    const notificationId = actionButton.dataset.notificationId ?? "";
+
+    if (notificationId.length < 6) {
+      return;
+    }
+
+    if (action === "toggle-pin") {
+      const currentPinned = actionButton.dataset.pinned === "true";
+
+      void (async () => {
+        try {
+          await toggleMemecoinPinned(notificationId, currentPinned);
+          setStatus("", currentPinned ? "Sinal desfixado" : "Sinal fixado");
+          void loadMemecoinRadar({
+            forceRefresh: false,
+          });
+        } catch (error) {
+          setStatus("error", error instanceof Error ? error.message : "Falha ao atualizar pin");
+        }
+      })();
+
+      return;
+    }
+
+    if (action !== "send-to-chat") {
+      return;
+    }
+
+    if (!(chatInput instanceof HTMLTextAreaElement) || !memecoinRadarPayload) {
+      return;
+    }
+
+    const notifications = Array.isArray(memecoinRadarPayload.notifications)
+      ? memecoinRadarPayload.notifications
+      : [];
+    const notification = notifications.find((item) => item?.id === notificationId);
+
+    if (!notification) {
+      return;
+    }
+
+    chatInput.value = buildMemecoinChatPrompt(notification);
+    chatInput.focus();
+    chatInput.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+
+    setStatus("", "Prompt MemeCoin pronto");
+  };
+
+  memecoinCriticalListElement.addEventListener("click", handleListClick);
+  memecoinHighListElement.addEventListener("click", handleListClick);
+  memecoinWatchListElement.addEventListener("click", handleListClick);
+
+  renderMemecoinBoard([]);
+  startMemecoinAutoRefresh();
+  void loadMemecoinRadar({
+    forceRefresh: true,
+  });
 }
 
 function normalizeMarketSearchText(value) {
@@ -4310,6 +4858,69 @@ function hydrateAirdropPreferences() {
   }
 }
 
+function readStoredMemecoinPreferences() {
+  try {
+    const raw = localStorage.getItem(MEMECOIN_PREFERENCES_STORAGE_KEY);
+
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw);
+
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveMemecoinPreferences() {
+  const filterState = getMemecoinFilterState();
+  const payload = {
+    chain: typeof filterState.chain === "string" ? filterState.chain : "all",
+    pinnedOnly: filterState.pinnedOnly === true,
+    priority: typeof filterState.priority === "string" ? filterState.priority : "all",
+  };
+
+  try {
+    localStorage.setItem(MEMECOIN_PREFERENCES_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore storage errors and keep UX stateless.
+  }
+}
+
+function hydrateMemecoinPreferences() {
+  const preferences = readStoredMemecoinPreferences();
+
+  if (!preferences) {
+    return;
+  }
+
+  if (
+    memecoinChainFilter instanceof HTMLSelectElement
+    && typeof preferences.chain === "string"
+    && isValueInSelect(memecoinChainFilter, preferences.chain)
+  ) {
+    memecoinChainFilter.value = preferences.chain;
+  }
+
+  if (
+    memecoinPriorityFilter instanceof HTMLSelectElement
+    && typeof preferences.priority === "string"
+    && isValueInSelect(memecoinPriorityFilter, preferences.priority)
+  ) {
+    memecoinPriorityFilter.value = preferences.priority;
+  }
+
+  if (memecoinPinnedOnlyToggle instanceof HTMLInputElement && typeof preferences.pinnedOnly === "boolean") {
+    memecoinPinnedOnlyToggle.checked = preferences.pinnedOnly;
+  }
+}
+
 function setWatchlistStatus(message, mode = "") {
   if (!(watchlistStatusElement instanceof HTMLElement)) {
     return;
@@ -6936,6 +7547,7 @@ window.addEventListener("beforeunload", () => {
   }
 
   stopChartAutoRefresh();
+  stopMemecoinAutoRefresh();
   stopWatchlistAutoRefresh();
   destroyInteractiveChart();
 });
@@ -6945,4 +7557,5 @@ setupLocalHistoryControls();
 setupMarketNavigator();
 setupChartLab();
 setupAirdropRadarPanel();
+setupMemecoinRadarPanel();
 void initializeChatHistory();

@@ -86,6 +86,7 @@ Politica de retencao:
 2. ADR 002: `docs/ADR/ADR-002-fundacao-tecnica-monorepo-typescript.md`
 3. ADR 031: `docs/ADR/ADR-031-resiliencia-mercado-coincap-e-copiloto.md`
 4. ADR 032: `docs/ADR/ADR-032-inteligencia-noticias-cripto-e-analise-profunda.md`
+5. ADR 033: `docs/ADR/ADR-033-memecoin-radar-social-sentiment.md`
 
 ## Relatorio completo desta entrega
 
@@ -218,6 +219,12 @@ Observacao tecnica da tool de airdrops:
 2. Fontes premium por API key podem ser habilitadas via env para expandir cobertura sem quebrar o fluxo base.
 3. O resultado e informativo (nao garante reward) e pode incluir oportunidades especulativas quando `includeSpeculative=true`.
 
+Observacao tecnica do MemeCoin Radar:
+
+1. O endpoint `GET /v1/meme-radar/notifications` combina discovery de novos pools (`solana`/`base`) com enriquecimento de sinais via DexScreener.
+2. O score de hype usa camada heuristica com opcao de reforco por IA (OpenRouter); sem chave, o fluxo permanece funcional em fallback.
+3. O pinning operacional e feito por `POST /v1/meme-radar/notifications/:notificationId/pin` para manter sinais prioritarios no topo da wall.
+
 Quando o modelo usa ferramentas, a resposta inclui `toolCallsUsed` com a lista das tools executadas no fluxo.
 
 Cobertura de consultas apos esta evolucao:
@@ -264,6 +271,15 @@ Endpoint tecnico para radar de airdrops:
 
 ```bash
 curl "http://localhost:3000/v1/airdrops/opportunities?limit=10&minScore=30&query=base&includeSpeculative=true&chain=base&confidence=high&sources=airdrops_io,defillama&sortBy=recent"
+```
+
+Endpoint tecnico para MemeCoin Radar & Social Sentiment:
+
+```bash
+curl "http://localhost:3000/v1/meme-radar/notifications?chain=all&priority=all&pinnedOnly=false&limit=24&refresh=true"
+curl -X POST "http://localhost:3000/v1/meme-radar/notifications/solana%3A<fingerprint>/pin" \
+	-H "Content-Type: application/json" \
+	-d '{"pinned":true}'
 ```
 
 Endpoints tecnicos para forex:

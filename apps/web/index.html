@@ -502,67 +502,133 @@
           <div id="analysis-tab-content" class="analysis-tab-content"></div>
         </section>
 
-        <section class="airdrop-radar" aria-labelledby="airdrop-radar-title">
-          <div class="airdrop-radar-top">
-            <div>
-              <p class="eyebrow airdrop-radar-eyebrow">Airdrops Intelligence</p>
-              <h3 id="airdrop-radar-title">Radar de oportunidades</h3>
+        <div class="intelligence-side-column">
+          <section class="airdrop-radar" aria-labelledby="airdrop-radar-title">
+            <div class="airdrop-radar-top">
+              <div>
+                <p class="eyebrow airdrop-radar-eyebrow">Airdrops Intelligence</p>
+                <h3 id="airdrop-radar-title">Radar de oportunidades</h3>
+              </div>
+              <button type="button" id="airdrop-refresh-button">Atualizar radar</button>
             </div>
-            <button type="button" id="airdrop-refresh-button">Atualizar radar</button>
-          </div>
 
-          <form id="airdrop-filters" class="airdrop-filters">
-            <label class="airdrop-filter-field" for="airdrop-chain-filter">
-              Chain
-              <select id="airdrop-chain-filter" name="chain">
-                <option value="all">Todas</option>
-              </select>
-            </label>
+            <form id="airdrop-filters" class="airdrop-filters">
+              <label class="airdrop-filter-field" for="airdrop-chain-filter">
+                Chain
+                <select id="airdrop-chain-filter" name="chain">
+                  <option value="all">Todas</option>
+                </select>
+              </label>
 
-            <label class="airdrop-filter-field" for="airdrop-confidence-filter">
-              Confianca
-              <select id="airdrop-confidence-filter" name="confidence">
-                <option value="all">Todas</option>
-                <option value="high">Alta</option>
-                <option value="medium">Media</option>
-                <option value="low">Baixa</option>
-              </select>
-            </label>
+              <label class="airdrop-filter-field" for="airdrop-confidence-filter">
+                Confianca
+                <select id="airdrop-confidence-filter" name="confidence">
+                  <option value="all">Todas</option>
+                  <option value="high">Alta</option>
+                  <option value="medium">Media</option>
+                  <option value="low">Baixa</option>
+                </select>
+              </label>
 
-            <label class="airdrop-filter-field" for="airdrop-score-filter">
-              Score minimo
-              <input
-                id="airdrop-score-filter"
-                name="score"
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                value="35"
-              />
-              <span id="airdrop-score-filter-value">35</span>
-            </label>
+              <label class="airdrop-filter-field" for="airdrop-score-filter">
+                Score minimo
+                <input
+                  id="airdrop-score-filter"
+                  name="score"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value="35"
+                />
+                <span id="airdrop-score-filter-value">35</span>
+              </label>
 
-            <label class="airdrop-filter-field" for="airdrop-query-filter">
-              Busca
-              <input
-                id="airdrop-query-filter"
-                name="query"
-                type="text"
-                maxlength="80"
-                placeholder="Ex.: base, zksync, testnet"
-              />
-            </label>
+              <label class="airdrop-filter-field" for="airdrop-query-filter">
+                Busca
+                <input
+                  id="airdrop-query-filter"
+                  name="query"
+                  type="text"
+                  maxlength="80"
+                  placeholder="Ex.: base, zksync, testnet"
+                />
+              </label>
 
-            <label class="airdrop-filter-toggle" for="airdrop-include-speculative">
-              <input id="airdrop-include-speculative" name="includeSpeculative" type="checkbox" checked />
-              Incluir oportunidades especulativas
-            </label>
-          </form>
+              <label class="airdrop-filter-toggle" for="airdrop-include-speculative">
+                <input id="airdrop-include-speculative" name="includeSpeculative" type="checkbox" checked />
+                Incluir oportunidades especulativas
+              </label>
+            </form>
 
-          <div id="airdrop-summary" class="airdrop-summary">Carregando radar...</div>
-          <div id="airdrop-list" class="airdrop-list"></div>
-        </section>
+            <div id="airdrop-summary" class="airdrop-summary">Carregando radar...</div>
+            <div id="airdrop-list" class="airdrop-list"></div>
+          </section>
+
+          <section class="memecoin-radar" aria-labelledby="memecoin-radar-title">
+            <div class="memecoin-radar-top">
+              <div>
+                <p class="eyebrow memecoin-radar-eyebrow">MemeCoin Radar & Social Sentiment</p>
+                <h3 id="memecoin-radar-title">Notification wall inteligente</h3>
+              </div>
+              <button type="button" id="memecoin-refresh-button">Atualizar wall</button>
+            </div>
+
+            <form id="memecoin-filters" class="memecoin-filters">
+              <label class="memecoin-filter-field" for="memecoin-chain-filter">
+                Chain
+                <select id="memecoin-chain-filter" name="chain">
+                  <option value="all">Todas</option>
+                  <option value="solana">Solana</option>
+                  <option value="base">Base</option>
+                </select>
+              </label>
+
+              <label class="memecoin-filter-field" for="memecoin-priority-filter">
+                Prioridade
+                <select id="memecoin-priority-filter" name="priority">
+                  <option value="all">Todas</option>
+                  <option value="critical">Critico</option>
+                  <option value="high">Alta</option>
+                  <option value="watch">Watch</option>
+                </select>
+              </label>
+
+              <label class="memecoin-filter-toggle" for="memecoin-pinned-only">
+                <input id="memecoin-pinned-only" name="pinnedOnly" type="checkbox" />
+                Somente fixados
+              </label>
+            </form>
+
+            <div id="memecoin-summary" class="memecoin-summary">Carregando MemeCoin Radar...</div>
+
+            <div class="memecoin-columns">
+              <section class="memecoin-column memecoin-column-critical" aria-label="Prioridade critica">
+                <header class="memecoin-column-head">
+                  <h4>Critico</h4>
+                  <span id="memecoin-count-critical">0</span>
+                </header>
+                <div id="memecoin-column-critical" class="memecoin-column-list"></div>
+              </section>
+
+              <section class="memecoin-column memecoin-column-high" aria-label="Prioridade alta">
+                <header class="memecoin-column-head">
+                  <h4>Alta</h4>
+                  <span id="memecoin-count-high">0</span>
+                </header>
+                <div id="memecoin-column-high" class="memecoin-column-list"></div>
+              </section>
+
+              <section class="memecoin-column memecoin-column-watch" aria-label="Prioridade watch">
+                <header class="memecoin-column-head">
+                  <h4>Watch</h4>
+                  <span id="memecoin-count-watch">0</span>
+                </header>
+                <div id="memecoin-column-watch" class="memecoin-column-list"></div>
+              </section>
+            </div>
+          </section>
+        </div>
       </section>
     </main>
 

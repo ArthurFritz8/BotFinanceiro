@@ -16,6 +16,7 @@ import { registerForexRoutes } from "../modules/forex/interface/forex-routes.js"
 import { registerFuturesRoutes } from "../modules/futures/interface/futures-routes.js";
 import { registerGlobalSectorsRoutes } from "../modules/global_sectors/interface/global-sectors-routes.js";
 import { registerMacroRatesRoutes } from "../modules/macro_rates/interface/macro-rates-routes.js";
+import { registerMemeRadarRoutes } from "../modules/meme_radar/interface/meme-radar-routes.js";
 import { registerOptionsRoutes } from "../modules/options/interface/options-routes.js";
 import { registerPortfoliosRoutes } from "../modules/portfolios/interface/portfolios-routes.js";
 import { registerSystemRoutes } from "../modules/system/interface/system-routes.js";
@@ -88,6 +89,7 @@ export function buildApp() {
       registerFuturesRoutes(instance);
       registerGlobalSectorsRoutes(instance);
       registerMacroRatesRoutes(instance);
+      registerMemeRadarRoutes(instance);
       registerOptionsRoutes(instance);
       registerPortfoliosRoutes(instance);
       registerWallStreetRoutes(instance);

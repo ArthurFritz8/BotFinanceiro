@@ -1,4 +1,5 @@
 import { cryptoSyncJobRunner } from "../jobs/crypto-sync-job-runner.js";
+import { memeRadarSyncJobRunner } from "../jobs/meme-radar-sync-job-runner.js";
 import { operationalHealthSnapshotJobRunner } from "../jobs/operational-health-snapshot-job-runner.js";
 import { env } from "../shared/config/env.js";
 import { logger } from "../shared/logger/logger.js";
@@ -26,6 +27,7 @@ async function startServer(): Promise<void> {
     });
 
     cryptoSyncJobRunner.start();
+    await memeRadarSyncJobRunner.start();
     await operationalHealthSnapshotJobRunner.start();
 
     logger.info({ port: env.APP_PORT }, "API started");
@@ -40,6 +42,7 @@ async function closeServer(signal: string): Promise<void> {
 
   try {
     operationalHealthSnapshotJobRunner.stop();
+    memeRadarSyncJobRunner.stop();
     cryptoSyncJobRunner.stop();
     await app.close();
     await closePostgresPool();
