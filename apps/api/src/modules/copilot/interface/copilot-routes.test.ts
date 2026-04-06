@@ -61,7 +61,15 @@ interface MutableEnv {
   OPENROUTER_APP_URL: string;
   OPENROUTER_MODEL: string;
   OPENROUTER_TIMEOUT_MS: number;
-  WEB_SEARCH_PROVIDER_STRATEGY: "duckduckgo_only" | "duckduckgo_then_tavily" | "tavily_then_duckduckgo";
+  WEB_SEARCH_PROVIDER_STRATEGY:
+    | "duckduckgo_only"
+    | "duckduckgo_then_tavily"
+    | "tavily_then_duckduckgo"
+    | "tavily_then_serper_then_serpapi_then_duckduckgo";
+  WEB_SEARCH_SERPER_API_BASE_URL: string;
+  WEB_SEARCH_SERPER_API_KEY: string;
+  WEB_SEARCH_SERPAPI_API_BASE_URL: string;
+  WEB_SEARCH_SERPAPI_API_KEY: string;
   WEB_SEARCH_TAVILY_API_BASE_URL: string;
   WEB_SEARCH_TAVILY_API_KEY: string;
 }
@@ -76,6 +84,10 @@ const originalOpenRouterConfig: MutableEnv = {
   OPENROUTER_MODEL: mutableEnv.OPENROUTER_MODEL,
   OPENROUTER_TIMEOUT_MS: mutableEnv.OPENROUTER_TIMEOUT_MS,
   WEB_SEARCH_PROVIDER_STRATEGY: mutableEnv.WEB_SEARCH_PROVIDER_STRATEGY,
+  WEB_SEARCH_SERPER_API_BASE_URL: mutableEnv.WEB_SEARCH_SERPER_API_BASE_URL,
+  WEB_SEARCH_SERPER_API_KEY: mutableEnv.WEB_SEARCH_SERPER_API_KEY,
+  WEB_SEARCH_SERPAPI_API_BASE_URL: mutableEnv.WEB_SEARCH_SERPAPI_API_BASE_URL,
+  WEB_SEARCH_SERPAPI_API_KEY: mutableEnv.WEB_SEARCH_SERPAPI_API_KEY,
   WEB_SEARCH_TAVILY_API_BASE_URL: mutableEnv.WEB_SEARCH_TAVILY_API_BASE_URL,
   WEB_SEARCH_TAVILY_API_KEY: mutableEnv.WEB_SEARCH_TAVILY_API_KEY,
 };
@@ -87,7 +99,11 @@ void beforeEach(() => {
   mutableEnv.OPENROUTER_APP_URL = "";
   mutableEnv.OPENROUTER_MODEL = "google/gemini-1.5-flash";
   mutableEnv.OPENROUTER_TIMEOUT_MS = 15_000;
-  mutableEnv.WEB_SEARCH_PROVIDER_STRATEGY = "tavily_then_duckduckgo";
+  mutableEnv.WEB_SEARCH_PROVIDER_STRATEGY = "tavily_then_serper_then_serpapi_then_duckduckgo";
+  mutableEnv.WEB_SEARCH_SERPER_API_BASE_URL = "https://google.serper.dev";
+  mutableEnv.WEB_SEARCH_SERPER_API_KEY = "";
+  mutableEnv.WEB_SEARCH_SERPAPI_API_BASE_URL = "https://serpapi.com";
+  mutableEnv.WEB_SEARCH_SERPAPI_API_KEY = "";
   mutableEnv.WEB_SEARCH_TAVILY_API_BASE_URL = "https://api.tavily.com";
   mutableEnv.WEB_SEARCH_TAVILY_API_KEY = "";
   globalThis.fetch = originalFetch;
@@ -103,6 +119,10 @@ void after(async () => {
   mutableEnv.OPENROUTER_MODEL = originalOpenRouterConfig.OPENROUTER_MODEL;
   mutableEnv.OPENROUTER_TIMEOUT_MS = originalOpenRouterConfig.OPENROUTER_TIMEOUT_MS;
   mutableEnv.WEB_SEARCH_PROVIDER_STRATEGY = originalOpenRouterConfig.WEB_SEARCH_PROVIDER_STRATEGY;
+  mutableEnv.WEB_SEARCH_SERPER_API_BASE_URL = originalOpenRouterConfig.WEB_SEARCH_SERPER_API_BASE_URL;
+  mutableEnv.WEB_SEARCH_SERPER_API_KEY = originalOpenRouterConfig.WEB_SEARCH_SERPER_API_KEY;
+  mutableEnv.WEB_SEARCH_SERPAPI_API_BASE_URL = originalOpenRouterConfig.WEB_SEARCH_SERPAPI_API_BASE_URL;
+  mutableEnv.WEB_SEARCH_SERPAPI_API_KEY = originalOpenRouterConfig.WEB_SEARCH_SERPAPI_API_KEY;
   mutableEnv.WEB_SEARCH_TAVILY_API_BASE_URL = originalOpenRouterConfig.WEB_SEARCH_TAVILY_API_BASE_URL;
   mutableEnv.WEB_SEARCH_TAVILY_API_KEY = originalOpenRouterConfig.WEB_SEARCH_TAVILY_API_KEY;
   await app.close();
@@ -2005,6 +2025,266 @@ void it("POST /v1/copilot/chat aplica matriz contextual e prioriza fontes de equ
   assert.equal(body.status, "success");
   assert.equal(body.data.responseId, "gen-tool-web-equities-002");
   assert.deepEqual(body.data.toolCallsUsed, ["search_web_realtime"]);
+});
+
+void it("POST /v1/copilot/chat usa Serper como segunda opcao quando Tavily falha", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+  mutableEnv.WEB_SEARCH_PROVIDER_STRATEGY = "tavily_then_serper_then_serpapi_then_duckduckgo";
+  mutableEnv.WEB_SEARCH_TAVILY_API_KEY = "tvly-test-key-1234567890";
+  mutableEnv.WEB_SEARCH_SERPER_API_KEY = "serper-test-key-1234567890";
+  mutableEnv.WEB_SEARCH_SERPAPI_API_KEY = "serpapi-test-key-1234567890";
+
+  let openRouterCalls = 0;
+  let tavilyCalls = 0;
+  let serperCalls = 0;
+  let serpApiCalls = 0;
+  let duckDuckGoCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "Sem mais informacoes sobre esse token no momento.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-serper-fallback-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 15,
+              prompt_tokens: 26,
+              total_tokens: 41,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.tavily.com/search")) {
+      tavilyCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            error: "temporary unavailable",
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 503,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://google.serper.dev/search")) {
+      serperCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            organic: [
+              {
+                link: "https://www.coingecko.com/en/coins/base-meme-four",
+                snippet: "Base Meme Four listing and token references.",
+                title: "Base Meme Four (BMFOUR)",
+              },
+            ],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://serpapi.com/search.json")) {
+      serpApiCalls += 1;
+    }
+
+    if (requestUrl.startsWith("https://api.duckduckgo.com/?")) {
+      duckDuckGoCalls += 1;
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "aonde posso comprar BMFOUR?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 1);
+  assert.equal(tavilyCalls, 2);
+  assert.equal(serperCalls, 1);
+  assert.equal(serpApiCalls, 0);
+  assert.equal(duckDuckGoCalls, 0);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-serper-fallback-001");
+  assert.match(body.data.answer, /Provider usado: serper/);
+});
+
+void it("POST /v1/copilot/chat usa SerpAPI como terceira opcao quando Tavily e Serper falham", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+  mutableEnv.WEB_SEARCH_PROVIDER_STRATEGY = "tavily_then_serper_then_serpapi_then_duckduckgo";
+  mutableEnv.WEB_SEARCH_TAVILY_API_KEY = "tvly-test-key-1234567890";
+  mutableEnv.WEB_SEARCH_SERPER_API_KEY = "serper-test-key-1234567890";
+  mutableEnv.WEB_SEARCH_SERPAPI_API_KEY = "serpapi-test-key-1234567890";
+
+  let openRouterCalls = 0;
+  let tavilyCalls = 0;
+  let serperCalls = 0;
+  let serpApiCalls = 0;
+  let duckDuckGoCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "Sem mais informacoes sobre esse token no momento.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-serpapi-fallback-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 15,
+              prompt_tokens: 26,
+              total_tokens: 41,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.tavily.com/search")) {
+      tavilyCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            error: "temporary unavailable",
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 503,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://google.serper.dev/search")) {
+      serperCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            error: "quota exceeded",
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 503,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://serpapi.com/search.json")) {
+      serpApiCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            organic_results: [
+              {
+                link: "https://www.coingecko.com/en/coins/base-meme-four",
+                snippet: "Base Meme Four listing and token references.",
+                title: "Base Meme Four (BMFOUR)",
+              },
+            ],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.duckduckgo.com/?")) {
+      duckDuckGoCalls += 1;
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "aonde posso comprar BMFOUR?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 1);
+  assert.equal(tavilyCalls, 2);
+  assert.equal(serperCalls, 2);
+  assert.equal(serpApiCalls, 1);
+  assert.equal(duckDuckGoCalls, 0);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-serpapi-fallback-001");
+  assert.match(body.data.answer, /Provider usado: serpapi/);
 });
 
 void it("POST /v1/copilot/chat faz fallback para DuckDuckGo quando Tavily falha", async () => {

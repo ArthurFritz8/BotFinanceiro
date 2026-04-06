@@ -20,6 +20,28 @@ const tavilySearchPayloadSchema = z.object({
   results: z.array(tavilySearchResultSchema).optional(),
 });
 
+const serperSearchResultSchema = z.object({
+  link: z.string().optional(),
+  snippet: z.string().optional(),
+  title: z.string().optional(),
+});
+
+const serperSearchPayloadSchema = z.object({
+  news: z.array(serperSearchResultSchema).optional(),
+  organic: z.array(serperSearchResultSchema).optional(),
+});
+
+const serpApiSearchResultSchema = z.object({
+  link: z.string().optional(),
+  snippet: z.string().optional(),
+  title: z.string().optional(),
+});
+
+const serpApiSearchPayloadSchema = z.object({
+  news_results: z.array(serpApiSearchResultSchema).optional(),
+  organic_results: z.array(serpApiSearchResultSchema).optional(),
+});
+
 const duckDuckGoInstantPayloadSchema = z.object({
   AbstractText: z.string().optional(),
   AbstractURL: z.string().optional(),
@@ -28,7 +50,7 @@ const duckDuckGoInstantPayloadSchema = z.object({
   Results: z.array(z.record(z.string(), z.unknown())).optional(),
 });
 
-type WebSearchProvider = "duckduckgo" | "tavily";
+type WebSearchProvider = "duckduckgo" | "serpapi" | "serper" | "tavily";
 type WebSearchConfidenceLabel = "high" | "low" | "medium";
 type WebSearchSourceType =
   | "community"
@@ -581,10 +603,7 @@ export class WebSearchAdapter {
 
     for (const provider of providerOrder) {
       try {
-        const providerResults =
-          provider === "tavily"
-            ? await this.searchWithTavily(parsedInput.query, parsedInput.maxResults)
-            : await this.searchWithDuckDuckGo(parsedInput.query);
+        const providerResults = await this.searchWithProvider(provider, parsedInput.query, parsedInput.maxResults);
 
         if (providerResults.length === 0) {
           continue;
@@ -627,8 +646,28 @@ export class WebSearchAdapter {
     };
   }
 
+  private async searchWithProvider(
+    provider: WebSearchProvider,
+    query: string,
+    maxResults: number,
+  ): Promise<WebSearchRawResultItem[]> {
+    switch (provider) {
+      case "tavily":
+        return this.searchWithTavily(query, maxResults);
+      case "serper":
+        return this.searchWithSerper(query, maxResults);
+      case "serpapi":
+        return this.searchWithSerpApi(query, maxResults);
+      case "duckduckgo":
+      default:
+        return this.searchWithDuckDuckGo(query);
+    }
+  }
+
   private resolveProviderOrder(): WebSearchProvider[] {
     const hasTavilyKey = env.WEB_SEARCH_TAVILY_API_KEY.trim().length >= 10;
+    const hasSerperKey = env.WEB_SEARCH_SERPER_API_KEY.trim().length >= 10;
+    const hasSerpApiKey = env.WEB_SEARCH_SERPAPI_API_KEY.trim().length >= 10;
 
     if (env.WEB_SEARCH_PROVIDER_STRATEGY === "duckduckgo_only") {
       return ["duckduckgo"];
@@ -636,6 +675,25 @@ export class WebSearchAdapter {
 
     if (env.WEB_SEARCH_PROVIDER_STRATEGY === "duckduckgo_then_tavily") {
       return hasTavilyKey ? ["duckduckgo", "tavily"] : ["duckduckgo"];
+    }
+
+    if (env.WEB_SEARCH_PROVIDER_STRATEGY === "tavily_then_serper_then_serpapi_then_duckduckgo") {
+      const prioritizedProviders: WebSearchProvider[] = [];
+
+      if (hasTavilyKey) {
+        prioritizedProviders.push("tavily");
+      }
+
+      if (hasSerperKey) {
+        prioritizedProviders.push("serper");
+      }
+
+      if (hasSerpApiKey) {
+        prioritizedProviders.push("serpapi");
+      }
+
+      prioritizedProviders.push("duckduckgo");
+      return prioritizedProviders;
     }
 
     return hasTavilyKey ? ["tavily", "duckduckgo"] : ["duckduckgo"];
@@ -708,6 +766,50 @@ export class WebSearchAdapter {
         const title = collapseWhitespace(item.title ?? "");
         const snippet = collapseWhitespace(item.content ?? "");
         const url = ensureAbsoluteUrl(collapseWhitespace(item.url ?? ""));
+
+        if (title.length === 0 || snippet.length === 0 || url.length === 0) {
+          return null;
+        }
+
+        return {
+          snippet,
+          title,
+          url,
+        } satisfies WebSearchRawResultItem;
+      })
+      .filter((item): item is WebSearchRawResultItem => item !== null);
+  }
+
+  private async searchWithSerper(query: string, maxResults: number): Promise<WebSearchRawResultItem[]> {
+    const payload = await this.requestSerper(query, maxResults);
+
+    return [...(payload.organic ?? []), ...(payload.news ?? [])]
+      .map((item) => {
+        const title = collapseWhitespace(item.title ?? "");
+        const snippet = collapseWhitespace(item.snippet ?? item.title ?? "");
+        const url = ensureAbsoluteUrl(collapseWhitespace(item.link ?? ""));
+
+        if (title.length === 0 || snippet.length === 0 || url.length === 0) {
+          return null;
+        }
+
+        return {
+          snippet,
+          title,
+          url,
+        } satisfies WebSearchRawResultItem;
+      })
+      .filter((item): item is WebSearchRawResultItem => item !== null);
+  }
+
+  private async searchWithSerpApi(query: string, maxResults: number): Promise<WebSearchRawResultItem[]> {
+    const payload = await this.requestSerpApi(query, maxResults);
+
+    return [...(payload.organic_results ?? []), ...(payload.news_results ?? [])]
+      .map((item) => {
+        const title = collapseWhitespace(item.title ?? "");
+        const snippet = collapseWhitespace(item.snippet ?? item.title ?? "");
+        const url = ensureAbsoluteUrl(collapseWhitespace(item.link ?? ""));
 
         if (title.length === 0 || snippet.length === 0 || url.length === 0) {
           return null;
@@ -882,6 +984,214 @@ export class WebSearchAdapter {
         details: {
           issues: parsedPayload.error.issues,
           provider: "tavily",
+          query,
+        },
+        message: "Web search payload schema mismatch",
+        statusCode: 502,
+      });
+    }
+
+    return parsedPayload.data;
+  }
+
+  private async requestSerper(
+    query: string,
+    maxResults: number,
+  ): Promise<z.infer<typeof serperSearchPayloadSchema>> {
+    return retryWithExponentialBackoff(
+      () => this.requestSerperOnce(query, maxResults),
+      {
+        attempts: 2,
+        baseDelayMs: 250,
+        jitterPercent: 25,
+        shouldRetry: shouldRetryWebSearchRequest,
+      },
+    );
+  }
+
+  private async requestSerperOnce(
+    query: string,
+    maxResults: number,
+  ): Promise<z.infer<typeof serperSearchPayloadSchema>> {
+    const requestUrl = `${env.WEB_SEARCH_SERPER_API_BASE_URL}/search`;
+
+    let response: Response;
+
+    try {
+      response = await fetch(requestUrl, {
+        body: JSON.stringify({
+          autocorrect: true,
+          num: Math.min(Math.max(maxResults, 1), 10),
+          q: query,
+        }),
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "User-Agent": "BotFinanceiro/1.0 (+https://github.com/ArthurFritz8/BotFinanceiro)",
+          "X-API-KEY": env.WEB_SEARCH_SERPER_API_KEY,
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(env.WEB_SEARCH_TIMEOUT_MS),
+      });
+    } catch (error) {
+      throw new AppError({
+        code: "WEB_SEARCH_UNAVAILABLE",
+        details: {
+          cause: error,
+          provider: "serper",
+          query,
+        },
+        message: "Web search provider request failed",
+        statusCode: 503,
+      });
+    }
+
+    if (!response.ok) {
+      const responseBodyPreview = await response.text();
+      const retryable = isRetryableStatusCode(response.status);
+
+      throw new AppError({
+        code: "WEB_SEARCH_BAD_STATUS",
+        details: {
+          provider: "serper",
+          query,
+          responseBody: responseBodyPreview.slice(0, 500),
+          responseStatus: response.status,
+          retryable,
+        },
+        message: "Web search provider returned non-success status",
+        statusCode: retryable ? 503 : 502,
+      });
+    }
+
+    let payload: unknown;
+
+    try {
+      payload = await response.json();
+    } catch {
+      throw new AppError({
+        code: "WEB_SEARCH_INVALID_JSON",
+        details: {
+          provider: "serper",
+          query,
+        },
+        message: "Web search provider returned invalid JSON",
+        statusCode: 502,
+      });
+    }
+
+    const parsedPayload = serperSearchPayloadSchema.safeParse(payload);
+
+    if (!parsedPayload.success) {
+      throw new AppError({
+        code: "WEB_SEARCH_SCHEMA_MISMATCH",
+        details: {
+          issues: parsedPayload.error.issues,
+          provider: "serper",
+          query,
+        },
+        message: "Web search payload schema mismatch",
+        statusCode: 502,
+      });
+    }
+
+    return parsedPayload.data;
+  }
+
+  private async requestSerpApi(
+    query: string,
+    maxResults: number,
+  ): Promise<z.infer<typeof serpApiSearchPayloadSchema>> {
+    return retryWithExponentialBackoff(
+      () => this.requestSerpApiOnce(query, maxResults),
+      {
+        attempts: 2,
+        baseDelayMs: 250,
+        jitterPercent: 25,
+        shouldRetry: shouldRetryWebSearchRequest,
+      },
+    );
+  }
+
+  private async requestSerpApiOnce(
+    query: string,
+    maxResults: number,
+  ): Promise<z.infer<typeof serpApiSearchPayloadSchema>> {
+    const requestUrl = `${env.WEB_SEARCH_SERPAPI_API_BASE_URL}/search.json?${new URLSearchParams({
+      api_key: env.WEB_SEARCH_SERPAPI_API_KEY,
+      engine: "google",
+      gl: "us",
+      hl: "en",
+      num: String(Math.min(Math.max(maxResults, 1), 10)),
+      q: query,
+    }).toString()}`;
+
+    let response: Response;
+
+    try {
+      response = await fetch(requestUrl, {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "BotFinanceiro/1.0 (+https://github.com/ArthurFritz8/BotFinanceiro)",
+        },
+        method: "GET",
+        signal: AbortSignal.timeout(env.WEB_SEARCH_TIMEOUT_MS),
+      });
+    } catch (error) {
+      throw new AppError({
+        code: "WEB_SEARCH_UNAVAILABLE",
+        details: {
+          cause: error,
+          provider: "serpapi",
+          query,
+        },
+        message: "Web search provider request failed",
+        statusCode: 503,
+      });
+    }
+
+    if (!response.ok) {
+      const responseBodyPreview = await response.text();
+      const retryable = isRetryableStatusCode(response.status);
+
+      throw new AppError({
+        code: "WEB_SEARCH_BAD_STATUS",
+        details: {
+          provider: "serpapi",
+          query,
+          responseBody: responseBodyPreview.slice(0, 500),
+          responseStatus: response.status,
+          retryable,
+        },
+        message: "Web search provider returned non-success status",
+        statusCode: retryable ? 503 : 502,
+      });
+    }
+
+    let payload: unknown;
+
+    try {
+      payload = await response.json();
+    } catch {
+      throw new AppError({
+        code: "WEB_SEARCH_INVALID_JSON",
+        details: {
+          provider: "serpapi",
+          query,
+        },
+        message: "Web search provider returned invalid JSON",
+        statusCode: 502,
+      });
+    }
+
+    const parsedPayload = serpApiSearchPayloadSchema.safeParse(payload);
+
+    if (!parsedPayload.success) {
+      throw new AppError({
+        code: "WEB_SEARCH_SCHEMA_MISMATCH",
+        details: {
+          issues: parsedPayload.error.issues,
+          provider: "serpapi",
           query,
         },
         message: "Web search payload schema mismatch",
