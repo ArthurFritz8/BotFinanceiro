@@ -63,8 +63,9 @@ body {
   display: grid;
   gap: 1rem;
   margin: 0 auto;
-  max-width: 1720px;
+  max-width: none;
   min-height: 100vh;
+  width: min(98vw, 2100px);
   padding: 2rem 1.1rem 2.2rem calc(1.1rem + 220px);
   position: relative;
   z-index: 1;
@@ -248,7 +249,7 @@ body.sidebar-collapsed .app-shell {
   align-items: start;
   display: grid;
   gap: 1rem;
-  grid-template-columns: minmax(0, 1.5fr) minmax(430px, 1fr);
+  grid-template-columns: 1fr;
 }
 
 .workspace-stage > *,
@@ -706,9 +707,11 @@ body.sidebar-collapsed .app-shell {
   align-items: stretch;
   display: grid;
   gap: 1rem;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 370px);
-  height: clamp(560px, calc(100dvh - 10.5rem), 900px);
+  grid-template-columns: minmax(0, 2.1fr) minmax(370px, 1fr);
+  height: clamp(620px, calc(100dvh - 9.2rem), 1180px);
+  margin-inline: auto;
   min-height: 0;
+  width: min(100%, 1680px);
 }
 
 .chat-panel,
@@ -733,6 +736,7 @@ body.sidebar-collapsed .app-shell {
   flex-direction: column;
   gap: 0.82rem;
   min-height: 0;
+  width: 100%;
 }
 
 .chat-context-card {
@@ -2860,7 +2864,7 @@ body.sidebar-collapsed .app-shell {
 
 @media (max-width: 1440px) {
   .app-shell {
-    max-width: 1240px;
+    width: min(98vw, 1600px);
   }
 
   .market-navigator-grid {
@@ -2874,8 +2878,9 @@ body.sidebar-collapsed .app-shell {
 
   .layout-grid {
     align-items: stretch;
-    grid-template-columns: minmax(0, 1fr) minmax(290px, 330px);
-    height: clamp(540px, calc(100dvh - 10rem), 860px);
+    grid-template-columns: minmax(0, 2fr) minmax(340px, 1fr);
+    height: clamp(580px, calc(100dvh - 9.8rem), 980px);
+    width: min(100%, 1440px);
   }
 }
 
