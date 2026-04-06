@@ -63,19 +63,51 @@
           <button
             type="button"
             class="sidebar-nav-button"
-            data-route="radar"
-            data-label="Radar"
-            title="Radar"
+            data-route="mercados"
+            data-label="Mercados"
+            title="Mercados"
           >
             <span class="sidebar-nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 21c4.97 0 9-4.03 9-9" />
-                <path d="M12 17a5 5 0 0 0 5-5" />
-                <path d="M12 13a1 1 0 0 0 1-1" />
-                <path d="M3 21h4.5a13.5 13.5 0 0 0 13.5-13.5V3" />
+                <path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" />
+                <path d="M3 12h18" />
+                <path d="M12 3a13.5 13.5 0 0 1 0 18" />
+                <path d="M12 3a13.5 13.5 0 0 0 0 18" />
               </svg>
             </span>
-            <span class="sidebar-nav-label">Radar</span>
+            <span class="sidebar-nav-label">Mercados</span>
+          </button>
+          <button
+            type="button"
+            class="sidebar-nav-button"
+            data-route="memecoins"
+            data-label="Memecoins"
+            title="Memecoins"
+          >
+            <span class="sidebar-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m12 2 2.2 4.7 5.1.7-3.7 3.8.9 5.3L12 14l-4.5 2.5.9-5.3-3.7-3.8 5.1-.7L12 2Z" />
+                <path d="M9.2 12.2a3.5 3.5 0 0 0 5.6 0" />
+              </svg>
+            </span>
+            <span class="sidebar-nav-label">Memecoins</span>
+          </button>
+          <button
+            type="button"
+            class="sidebar-nav-button"
+            data-route="airdrops"
+            data-label="Airdrops"
+            title="Airdrops"
+          >
+            <span class="sidebar-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3v8" />
+                <path d="m5 12 7 6 7-6" />
+                <path d="M5 12V9.8A2.8 2.8 0 0 1 7.8 7h8.4A2.8 2.8 0 0 1 19 9.8V12" />
+                <path d="M12 18v3" />
+              </svg>
+            </span>
+            <span class="sidebar-nav-label">Airdrops</span>
           </button>
         </nav>
       </aside>
@@ -323,7 +355,7 @@
           anotacoes como nas corretoras.
         </p>
         <p class="terminal-shortcuts">
-          Atalhos: Ctrl+K simbolo • Alt+1..6 intervalo • Alt+7..9 rotas • Alt+V modo • Alt+R refresh • Alt+F recenter
+          Atalhos: Ctrl+K simbolo • Alt+1..6 intervalo • Alt+7..0 e Alt+- rotas • Alt+V modo • Alt+R refresh • Alt+F recenter
         </p>
 
         <div class="chart-toolbar">
@@ -568,134 +600,136 @@
 
           <div id="analysis-tab-content" class="analysis-tab-content"></div>
         </section>
+      </section>
 
-        <div class="intelligence-side-column">
-          <section class="airdrop-radar" aria-labelledby="airdrop-radar-title">
-            <div class="airdrop-radar-top">
-              <div>
-                <p class="eyebrow airdrop-radar-eyebrow">Airdrops Intelligence</p>
-                <h3 id="airdrop-radar-title">Radar de oportunidades</h3>
-              </div>
-              <button type="button" id="airdrop-refresh-button">Atualizar radar</button>
+      <section class="memecoins-stage reveal reveal-delay-2 route-hidden">
+        <section class="memecoin-radar" aria-labelledby="memecoin-radar-title">
+          <div class="memecoin-radar-top">
+            <div>
+              <p class="eyebrow memecoin-radar-eyebrow">MemeCoin Radar & Social Sentiment</p>
+              <h3 id="memecoin-radar-title">Notification wall inteligente</h3>
             </div>
+            <button type="button" id="memecoin-refresh-button">Atualizar wall</button>
+          </div>
 
-            <form id="airdrop-filters" class="airdrop-filters">
-              <label class="airdrop-filter-field" for="airdrop-chain-filter">
-                Chain
-                <select id="airdrop-chain-filter" name="chain">
-                  <option value="all">Todas</option>
-                </select>
-              </label>
+          <form id="memecoin-filters" class="memecoin-filters">
+            <label class="memecoin-filter-field" for="memecoin-chain-filter">
+              Chain
+              <select id="memecoin-chain-filter" name="chain">
+                <option value="all">Todas</option>
+                <option value="solana">Solana</option>
+                <option value="base">Base</option>
+              </select>
+            </label>
 
-              <label class="airdrop-filter-field" for="airdrop-confidence-filter">
-                Confianca
-                <select id="airdrop-confidence-filter" name="confidence">
-                  <option value="all">Todas</option>
-                  <option value="high">Alta</option>
-                  <option value="medium">Media</option>
-                  <option value="low">Baixa</option>
-                </select>
-              </label>
+            <label class="memecoin-filter-field" for="memecoin-priority-filter">
+              Prioridade
+              <select id="memecoin-priority-filter" name="priority">
+                <option value="all">Todas</option>
+                <option value="critical">Critico</option>
+                <option value="high">Alta</option>
+                <option value="watch">Watch</option>
+              </select>
+            </label>
 
-              <label class="airdrop-filter-field" for="airdrop-score-filter">
-                Score minimo
-                <input
-                  id="airdrop-score-filter"
-                  name="score"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  value="35"
-                />
-                <span id="airdrop-score-filter-value">35</span>
-              </label>
+            <label class="memecoin-filter-toggle" for="memecoin-pinned-only">
+              <input id="memecoin-pinned-only" name="pinnedOnly" type="checkbox" />
+              Somente fixados
+            </label>
+          </form>
 
-              <label class="airdrop-filter-field" for="airdrop-query-filter">
-                Busca
-                <input
-                  id="airdrop-query-filter"
-                  name="query"
-                  type="text"
-                  maxlength="80"
-                  placeholder="Ex.: base, zksync, testnet"
-                />
-              </label>
+          <div id="memecoin-summary" class="memecoin-summary">Carregando MemeCoin Radar...</div>
 
-              <label class="airdrop-filter-toggle" for="airdrop-include-speculative">
-                <input id="airdrop-include-speculative" name="includeSpeculative" type="checkbox" checked />
-                Incluir oportunidades especulativas
-              </label>
-            </form>
+          <div class="memecoin-columns">
+            <section class="memecoin-column memecoin-column-critical" aria-label="Prioridade critica">
+              <header class="memecoin-column-head">
+                <h4>Critico</h4>
+                <span id="memecoin-count-critical">0</span>
+              </header>
+              <div id="memecoin-column-critical" class="memecoin-column-list"></div>
+            </section>
 
-            <div id="airdrop-summary" class="airdrop-summary">Carregando radar...</div>
-            <div id="airdrop-list" class="airdrop-list"></div>
-          </section>
+            <section class="memecoin-column memecoin-column-high" aria-label="Prioridade alta">
+              <header class="memecoin-column-head">
+                <h4>Alta</h4>
+                <span id="memecoin-count-high">0</span>
+              </header>
+              <div id="memecoin-column-high" class="memecoin-column-list"></div>
+            </section>
 
-          <section class="memecoin-radar" aria-labelledby="memecoin-radar-title">
-            <div class="memecoin-radar-top">
-              <div>
-                <p class="eyebrow memecoin-radar-eyebrow">MemeCoin Radar & Social Sentiment</p>
-                <h3 id="memecoin-radar-title">Notification wall inteligente</h3>
-              </div>
-              <button type="button" id="memecoin-refresh-button">Atualizar wall</button>
+            <section class="memecoin-column memecoin-column-watch" aria-label="Prioridade watch">
+              <header class="memecoin-column-head">
+                <h4>Watch</h4>
+                <span id="memecoin-count-watch">0</span>
+              </header>
+              <div id="memecoin-column-watch" class="memecoin-column-list"></div>
+            </section>
+          </div>
+        </section>
+      </section>
+
+      <section class="airdrops-stage reveal reveal-delay-2 route-hidden">
+        <section class="airdrop-radar" aria-labelledby="airdrop-radar-title">
+          <div class="airdrop-radar-top">
+            <div>
+              <p class="eyebrow airdrop-radar-eyebrow">Airdrops Intelligence</p>
+              <h3 id="airdrop-radar-title">Radar de oportunidades</h3>
             </div>
+            <button type="button" id="airdrop-refresh-button">Atualizar radar</button>
+          </div>
 
-            <form id="memecoin-filters" class="memecoin-filters">
-              <label class="memecoin-filter-field" for="memecoin-chain-filter">
-                Chain
-                <select id="memecoin-chain-filter" name="chain">
-                  <option value="all">Todas</option>
-                  <option value="solana">Solana</option>
-                  <option value="base">Base</option>
-                </select>
-              </label>
+          <form id="airdrop-filters" class="airdrop-filters">
+            <label class="airdrop-filter-field" for="airdrop-chain-filter">
+              Chain
+              <select id="airdrop-chain-filter" name="chain">
+                <option value="all">Todas</option>
+              </select>
+            </label>
 
-              <label class="memecoin-filter-field" for="memecoin-priority-filter">
-                Prioridade
-                <select id="memecoin-priority-filter" name="priority">
-                  <option value="all">Todas</option>
-                  <option value="critical">Critico</option>
-                  <option value="high">Alta</option>
-                  <option value="watch">Watch</option>
-                </select>
-              </label>
+            <label class="airdrop-filter-field" for="airdrop-confidence-filter">
+              Confianca
+              <select id="airdrop-confidence-filter" name="confidence">
+                <option value="all">Todas</option>
+                <option value="high">Alta</option>
+                <option value="medium">Media</option>
+                <option value="low">Baixa</option>
+              </select>
+            </label>
 
-              <label class="memecoin-filter-toggle" for="memecoin-pinned-only">
-                <input id="memecoin-pinned-only" name="pinnedOnly" type="checkbox" />
-                Somente fixados
-              </label>
-            </form>
+            <label class="airdrop-filter-field" for="airdrop-score-filter">
+              Score minimo
+              <input
+                id="airdrop-score-filter"
+                name="score"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value="35"
+              />
+              <span id="airdrop-score-filter-value">35</span>
+            </label>
 
-            <div id="memecoin-summary" class="memecoin-summary">Carregando MemeCoin Radar...</div>
+            <label class="airdrop-filter-field" for="airdrop-query-filter">
+              Busca
+              <input
+                id="airdrop-query-filter"
+                name="query"
+                type="text"
+                maxlength="80"
+                placeholder="Ex.: base, zksync, testnet"
+              />
+            </label>
 
-            <div class="memecoin-columns">
-              <section class="memecoin-column memecoin-column-critical" aria-label="Prioridade critica">
-                <header class="memecoin-column-head">
-                  <h4>Critico</h4>
-                  <span id="memecoin-count-critical">0</span>
-                </header>
-                <div id="memecoin-column-critical" class="memecoin-column-list"></div>
-              </section>
+            <label class="airdrop-filter-toggle" for="airdrop-include-speculative">
+              <input id="airdrop-include-speculative" name="includeSpeculative" type="checkbox" checked />
+              Incluir oportunidades especulativas
+            </label>
+          </form>
 
-              <section class="memecoin-column memecoin-column-high" aria-label="Prioridade alta">
-                <header class="memecoin-column-head">
-                  <h4>Alta</h4>
-                  <span id="memecoin-count-high">0</span>
-                </header>
-                <div id="memecoin-column-high" class="memecoin-column-list"></div>
-              </section>
-
-              <section class="memecoin-column memecoin-column-watch" aria-label="Prioridade watch">
-                <header class="memecoin-column-head">
-                  <h4>Watch</h4>
-                  <span id="memecoin-count-watch">0</span>
-                </header>
-                <div id="memecoin-column-watch" class="memecoin-column-list"></div>
-              </section>
-            </div>
-          </section>
-        </div>
+          <div id="airdrop-summary" class="airdrop-summary">Carregando radar...</div>
+          <div id="airdrop-list" class="airdrop-list"></div>
+        </section>
       </section>
     </main>
 

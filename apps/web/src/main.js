@@ -32,12 +32,14 @@ const authSubmitButton = document.querySelector("#auth-submit-button");
 const authToggleModeButton = document.querySelector("#auth-toggle-mode");
 const authFeedbackElement = document.querySelector("#auth-feedback");
 const authStatusElement = document.querySelector("#auth-status");
+const heroSection = document.querySelector(".hero");
 const marketNavigatorSection = document.querySelector(".market-navigator");
 const workspaceStageSection = document.querySelector(".workspace-stage");
 const chartDeskSection = document.querySelector(".chart-desk");
 const layoutGridSection = document.querySelector(".layout-grid");
 const intelligenceStageSection = document.querySelector(".intelligence-stage");
-const intelligenceSideColumnSection = document.querySelector(".intelligence-side-column");
+const memecoinsStageSection = document.querySelector(".memecoins-stage");
+const airdropsStageSection = document.querySelector(".airdrops-stage");
 const chartControlsForm = document.querySelector("#chart-controls");
 const chartAssetSelect = document.querySelector("#chart-asset");
 const chartModeSelect = document.querySelector("#chart-mode");
@@ -122,17 +124,29 @@ const MAX_CONVERSATIONS = 60;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
 const APP_ROUTE_CHAT = "chat";
 const APP_ROUTE_CHART_LAB = "chart-lab";
-const APP_ROUTE_RADAR = "radar";
-const APP_ROUTES = new Set([APP_ROUTE_CHAT, APP_ROUTE_CHART_LAB, APP_ROUTE_RADAR]);
+const APP_ROUTE_MERCADOS = "mercados";
+const APP_ROUTE_MEMECOINS = "memecoins";
+const APP_ROUTE_AIRDROPS = "airdrops";
+const APP_ROUTES = new Set([
+  APP_ROUTE_CHAT,
+  APP_ROUTE_CHART_LAB,
+  APP_ROUTE_MERCADOS,
+  APP_ROUTE_MEMECOINS,
+  APP_ROUTE_AIRDROPS,
+]);
 const APP_ROUTE_LABELS = {
   [APP_ROUTE_CHAT]: "Chat",
   [APP_ROUTE_CHART_LAB]: "Chart Lab",
-  [APP_ROUTE_RADAR]: "Radar",
+  [APP_ROUTE_MERCADOS]: "Mercados",
+  [APP_ROUTE_MEMECOINS]: "Memecoins",
+  [APP_ROUTE_AIRDROPS]: "Airdrops",
 };
 const APP_ROUTE_SHORTCUTS = {
   Digit7: APP_ROUTE_CHAT,
   Digit8: APP_ROUTE_CHART_LAB,
-  Digit9: APP_ROUTE_RADAR,
+  Digit9: APP_ROUTE_MERCADOS,
+  Digit0: APP_ROUTE_MEMECOINS,
+  Minus: APP_ROUTE_AIRDROPS,
 };
 const AUTH_MODE_SIGN_IN = "signin";
 const AUTH_MODE_SIGN_UP = "signup";
@@ -217,34 +231,91 @@ const MARKET_NAVIGATOR_REGION_OPTIONS = [
 ];
 const MARKET_NAVIGATOR_CATEGORY_DEFINITIONS = [
   {
-    description: "Indices globais, setores e regime de risco.",
-    id: "indices",
-    label: "Indices",
+    description: "Mesa por pais para leitura global de ativos e indicadores.",
+    hiddenInCategoryList: true,
+    id: "paises",
+    label: "Paises",
     views: [
       {
-        id: "indices-global",
-        label: "Todos os indices",
-        limit: 8,
-        module: "wall-street",
-        preset: "indices",
-      },
-      {
-        id: "indices-setores",
-        label: "Setores S&P",
-        limit: 8,
-        module: "wall-street",
-        preset: "sectors",
-      },
-      {
-        id: "indices-brasil",
-        label: "Indices Brasil",
+        id: "paises-brasil",
+        label: "Brasil",
         limit: 8,
         module: "b3",
         preset: "indices",
       },
       {
-        id: "indices-moedas",
-        label: "Indices de moedas",
+        id: "paises-estados-unidos",
+        label: "Estados Unidos",
+        limit: 8,
+        module: "wall-street",
+        preset: "indices",
+      },
+      {
+        id: "paises-canada",
+        label: "Canada",
+        limit: 8,
+        module: "equities",
+        preset: "global_brands",
+      },
+      {
+        id: "paises-reino-unido",
+        label: "Reino Unido",
+        limit: 8,
+        module: "equities",
+        preset: "global_brands",
+      },
+      {
+        id: "paises-alemanha",
+        label: "Alemanha",
+        limit: 8,
+        module: "equities",
+        preset: "global_brands",
+      },
+      {
+        id: "paises-india",
+        label: "India",
+        limit: 8,
+        module: "equities",
+        preset: "global_brands",
+      },
+      {
+        id: "paises-japao",
+        label: "Japao",
+        limit: 8,
+        module: "wall-street",
+        preset: "indices",
+      },
+      {
+        id: "paises-china",
+        label: "China Continental",
+        limit: 8,
+        module: "equities",
+        preset: "global_brands",
+      },
+      {
+        id: "paises-hong-kong",
+        label: "Hong Kong, China",
+        limit: 8,
+        module: "equities",
+        preset: "global_brands",
+      },
+      {
+        id: "paises-arabia-saudita",
+        label: "Arabia Saudita",
+        limit: 8,
+        module: "equities",
+        preset: "global_brands",
+      },
+      {
+        id: "paises-australia",
+        label: "Australia",
+        limit: 8,
+        module: "equities",
+        preset: "global_brands",
+      },
+      {
+        id: "paises-mais",
+        label: "Mais paises...",
         limit: 8,
         module: "macro-rates",
         preset: "global_rates",
@@ -252,10 +323,159 @@ const MARKET_NAVIGATOR_CATEGORY_DEFINITIONS = [
     ],
   },
   {
-    description: "Acoes globais, Brasil e FIIs em uma unica mesa.",
+    description: "Noticias e fornecedores editoriais para leitura de risco.",
+    hiddenInCategoryList: true,
+    id: "noticias",
+    label: "Noticias",
+    views: [
+      {
+        id: "noticias-visao-geral",
+        label: "Visao geral",
+        limit: 8,
+        type: "news",
+        assetId: "bitcoin",
+      },
+      {
+        id: "noticias-atividade-corporativa",
+        label: "Atividade corporativa",
+        limit: 8,
+        type: "news",
+        assetId: "ethereum",
+      },
+      {
+        id: "noticias-group-fornecedores",
+        label: "Melhores fornecedores",
+        type: "group",
+      },
+      {
+        id: "noticias-reuters",
+        label: "Reuters",
+        limit: 8,
+        type: "news",
+        assetId: "bitcoin",
+      },
+      {
+        id: "noticias-afp",
+        label: "AFP",
+        limit: 8,
+        type: "news",
+        assetId: "ethereum",
+      },
+      {
+        id: "noticias-invezz",
+        label: "Invezz",
+        limit: 8,
+        type: "news",
+        assetId: "solana",
+      },
+      {
+        id: "noticias-beincrypto",
+        label: "Beincrypto",
+        limit: 8,
+        type: "news",
+        assetId: "chainlink",
+      },
+      {
+        id: "noticias-globenewswire",
+        label: "GlobeNewswire",
+        limit: 8,
+        type: "news",
+        assetId: "avalanche-2",
+      },
+      {
+        id: "noticias-agricolas",
+        label: "Noticias Agricolas",
+        limit: 8,
+        type: "news",
+        assetId: "cardano",
+      },
+      {
+        id: "noticias-livecoins",
+        label: "Livecoins",
+        limit: 8,
+        type: "news",
+        assetId: "xrp",
+      },
+    ],
+  },
+  {
+    description: "Indices globais e cortes por familia de cotacoes.",
+    id: "indices",
+    label: "Indices",
+    views: [
+      {
+        id: "indices-visao-geral",
+        label: "Visao geral",
+        limit: 8,
+        module: "wall-street",
+        preset: "indices",
+      },
+      {
+        id: "indices-group-cotacoes",
+        label: "Cotacoes",
+        type: "group",
+      },
+      {
+        id: "indices-todos",
+        label: "Todos os indices",
+        limit: 8,
+        module: "wall-street",
+        preset: "indices",
+      },
+      {
+        id: "indices-principais-globais",
+        label: "Principais indices globais",
+        limit: 8,
+        module: "wall-street",
+        preset: "indices",
+      },
+      {
+        id: "indices-eua",
+        label: "Indices dos EUA",
+        limit: 8,
+        module: "wall-street",
+        preset: "indices",
+      },
+      {
+        id: "indices-setores-sp",
+        label: "Setores S&P",
+        limit: 8,
+        module: "wall-street",
+        preset: "sectors",
+      },
+      {
+        id: "indices-moedas",
+        label: "Indices de Moedas",
+        limit: 8,
+        module: "macro-rates",
+        preset: "global_rates",
+      },
+    ],
+  },
+  {
+    description: "Acoes por recorte setorial, desempenho e geografias.",
     id: "acoes",
     label: "Acoes",
     views: [
+      {
+        id: "acoes-visao-geral",
+        label: "Visao geral",
+        limit: 8,
+        module: "equities",
+        preset: "us_mega_caps",
+      },
+      {
+        id: "acoes-setores-industrias",
+        label: "Setores e industrias",
+        limit: 8,
+        module: "equities",
+        preset: "global_brands",
+      },
+      {
+        id: "acoes-group-brasil",
+        label: "Acoes Brasil",
+        type: "group",
+      },
       {
         id: "acoes-todas",
         label: "Todas as acoes",
@@ -271,70 +491,166 @@ const MARKET_NAVIGATOR_CATEGORY_DEFINITIONS = [
         preset: "global_brands",
       },
       {
-        id: "acoes-brasil",
-        label: "Acoes Brasil",
+        id: "acoes-melhores",
+        label: "Melhores desempenhos",
         limit: 8,
         module: "b3",
         preset: "blue_chips",
       },
       {
-        id: "acoes-fii",
-        label: "FIIs liquidos",
+        id: "acoes-piores",
+        label: "Piores desempenhos",
         limit: 8,
-        module: "fiis",
-        preset: "high_liquidity",
+        module: "equities",
+        preset: "global_brands",
+      },
+      {
+        id: "acoes-group-mundiais",
+        label: "Acoes Mundiais",
+        type: "group",
+      },
+      {
+        id: "acoes-maiores-mundo",
+        label: "Maiores empresas do mundo",
+        limit: 8,
+        module: "equities",
+        preset: "global_brands",
+      },
+      {
+        id: "acoes-maiores-fora-eua",
+        label: "Maiores empresas fora dos EUA",
+        limit: 8,
+        module: "equities",
+        preset: "global_brands",
+      },
+      {
+        id: "acoes-maiores-empregadoras",
+        label: "Maiores empregadoras do mundo",
+        limit: 8,
+        module: "equities",
+        preset: "us_mega_caps",
       },
     ],
   },
   {
-    description: "Cripto spot, DeFi e derivativos de maior liquidez.",
+    description: "Cripto por market cap, dominancia e filtros de moedas.",
     id: "cripto",
     label: "Cripto",
     views: [
       {
-        id: "cripto-spot",
-        label: "Spot principal",
+        id: "cripto-visao-geral",
+        label: "Visao geral",
         limit: 10,
         module: "crypto",
       },
       {
-        id: "cripto-layer1",
-        label: "Layer 1 futuros",
-        limit: 8,
-        module: "futures",
-        preset: "layer1",
+        id: "cripto-market-cap",
+        label: "Graficos de Market cap",
+        limit: 10,
+        module: "crypto",
       },
       {
-        id: "cripto-defi",
-        label: "Tokens DeFi",
+        id: "cripto-dominancia",
+        label: "Grafico de dominancia",
+        limit: 10,
+        module: "crypto",
+      },
+      {
+        id: "cripto-group-moedas",
+        label: "Moedas",
+        type: "group",
+      },
+      {
+        id: "cripto-todas-moedas",
+        label: "Todas as Moedas",
+        limit: 10,
+        module: "crypto",
+      },
+      {
+        id: "cripto-moedas-defi",
+        label: "Moedas DeFi",
         limit: 8,
         module: "defi",
         preset: "blue_chips",
       },
       {
-        id: "cripto-noticias",
-        label: "Noticias cripto",
+        id: "cripto-maior-valor-bloqueado",
+        label: "Maior valor bloqueado",
         limit: 8,
-        type: "news",
-        assetId: "bitcoin",
+        module: "defi",
+        preset: "lending",
+      },
+      {
+        id: "cripto-melhores-desempenhos",
+        label: "Melhores desempenhos",
+        limit: 10,
+        module: "crypto",
+      },
+      {
+        id: "cripto-piores-desempenhos",
+        label: "Piores desempenhos",
+        limit: 10,
+        module: "crypto",
+      },
+      {
+        id: "cripto-large-cap",
+        label: "Large-cap",
+        limit: 10,
+        module: "crypto",
+      },
+      {
+        id: "cripto-mais-negociadas",
+        label: "Mais negociadas",
+        limit: 10,
+        module: "crypto",
+      },
+      {
+        id: "cripto-mais-transacoes",
+        label: "Mais transacoes",
+        limit: 10,
+        module: "crypto",
+      },
+      {
+        id: "cripto-maior-oferta",
+        label: "Maior oferta",
+        limit: 10,
+        module: "crypto",
+      },
+      {
+        id: "cripto-menor-oferta",
+        label: "Menor oferta",
+        limit: 10,
+        module: "crypto",
       },
     ],
   },
   {
-    description: "Futuros cripto e contratos de commodities.",
+    description: "Mesa de futuros por bloco de precos e classes.",
     id: "futuros",
     label: "Futuros",
     views: [
       {
-        id: "futuros-cripto",
+        id: "futuros-visao-geral",
+        label: "Visao geral",
+        limit: 8,
+        module: "futures",
+        preset: "crypto_majors",
+      },
+      {
+        id: "futuros-group-precos",
+        label: "Precos",
+        type: "group",
+      },
+      {
+        id: "futuros-todos",
         label: "Todos os futuros",
         limit: 8,
         module: "futures",
         preset: "crypto_majors",
       },
       {
-        id: "futuros-agro",
-        label: "Agricolas",
+        id: "futuros-agricola",
+        label: "Agricola",
         limit: 8,
         module: "commodities",
         preset: "agro",
@@ -347,22 +663,76 @@ const MARKET_NAVIGATOR_CATEGORY_DEFINITIONS = [
         preset: "energy",
       },
       {
+        id: "futuros-moedas",
+        label: "Moedas",
+        limit: 8,
+        module: "futures",
+        preset: "layer1",
+      },
+      {
         id: "futuros-metais",
         label: "Metais",
         limit: 8,
         module: "commodities",
         preset: "metals",
       },
+      {
+        id: "futuros-indices-internacionais",
+        label: "Indices Internacionais",
+        limit: 8,
+        module: "wall-street",
+        preset: "indices",
+      },
+      {
+        id: "futuros-juros",
+        label: "Juros",
+        limit: 8,
+        module: "fixed-income",
+        preset: "us_curve",
+      },
     ],
   },
   {
-    description: "Pares de moedas por bloco geografico.",
+    description: "Forex por cotacoes cruzadas, calor e blocos regionais.",
     id: "forex",
     label: "Forex",
     views: [
       {
-        id: "forex-global",
-        label: "Todos os pares",
+        id: "forex-visao-geral",
+        label: "Visao geral",
+        limit: 8,
+        module: "forex",
+        preset: "global",
+      },
+      {
+        id: "forex-cotacoes-cruzada",
+        label: "Cotacoes Cruzada",
+        limit: 8,
+        module: "forex",
+        preset: "majors",
+      },
+      {
+        id: "forex-mapa-calor",
+        label: "Mapa de Calor",
+        limit: 8,
+        module: "forex",
+        preset: "global",
+      },
+      {
+        id: "forex-indices-moedas",
+        label: "Indices de Moedas",
+        limit: 8,
+        module: "macro-rates",
+        preset: "global_rates",
+      },
+      {
+        id: "forex-group-cotacoes",
+        label: "Cotacoes",
+        type: "group",
+      },
+      {
+        id: "forex-todos-pares",
+        label: "Todos os pares de moedas",
         limit: 8,
         module: "forex",
         preset: "global",
@@ -375,8 +745,22 @@ const MARKET_NAVIGATOR_CATEGORY_DEFINITIONS = [
         preset: "majors",
       },
       {
-        id: "forex-latam",
-        label: "Latam",
+        id: "forex-secundario",
+        label: "Secundario",
+        limit: 8,
+        module: "forex",
+        preset: "global",
+      },
+      {
+        id: "forex-exotico",
+        label: "Exotico",
+        limit: 8,
+        module: "forex",
+        preset: "latam",
+      },
+      {
+        id: "forex-americas",
+        label: "Americas",
         limit: 8,
         module: "forex",
         preset: "latam",
@@ -395,225 +779,401 @@ const MARKET_NAVIGATOR_CATEGORY_DEFINITIONS = [
         module: "forex",
         preset: "asia",
       },
+      {
+        id: "forex-pacifico",
+        label: "Pacifico",
+        limit: 8,
+        module: "forex",
+        preset: "asia",
+      },
+      {
+        id: "forex-oriente-medio",
+        label: "Oriente Medio",
+        limit: 8,
+        module: "forex",
+        preset: "global",
+      },
+      {
+        id: "forex-africa",
+        label: "Africa",
+        limit: 8,
+        module: "forex",
+        preset: "global",
+      },
     ],
   },
   {
-    description: "Curva de juros soberana e term structure.",
+    description: "Titulos soberanos por curva e geografias de yield.",
     id: "titulos_governo",
     label: "Titulos do Governo",
     views: [
       {
-        id: "gov-curve",
-        label: "Curva EUA",
+        id: "governo-visao-geral",
+        label: "Visao geral",
         limit: 8,
         module: "fixed-income",
         preset: "us_curve",
       },
       {
-        id: "gov-global",
-        label: "Rates globais",
+        id: "governo-curva",
+        label: "Curva de rendimento",
+        limit: 8,
+        module: "fixed-income",
+        preset: "us_curve",
+      },
+      {
+        id: "governo-mapa-calor-yield",
+        label: "Mapa de Calor Yield",
         limit: 8,
         module: "macro-rates",
         preset: "global_rates",
       },
       {
-        id: "gov-risco",
-        label: "Regime de risco",
+        id: "governo-group-cotacoes",
+        label: "Cotacoes",
+        type: "group",
+      },
+      {
+        id: "governo-todos-titulos",
+        label: "Todos os titulos",
+        limit: 8,
+        module: "fixed-income",
+        preset: "us_curve",
+      },
+      {
+        id: "governo-todos-10a",
+        label: "Todos 10A",
         limit: 8,
         module: "macro-rates",
-        preset: "risk_regime",
+        preset: "global_rates",
+      },
+      {
+        id: "governo-principais-10a",
+        label: "Principais 10A",
+        limit: 8,
+        module: "macro-rates",
+        preset: "global_rates",
+      },
+      {
+        id: "governo-americas",
+        label: "Americas",
+        limit: 8,
+        module: "macro-rates",
+        preset: "global_rates",
+      },
+      {
+        id: "governo-europa",
+        label: "Europa",
+        limit: 8,
+        module: "macro-rates",
+        preset: "global_rates",
+      },
+      {
+        id: "governo-asia",
+        label: "Asia",
+        limit: 8,
+        module: "macro-rates",
+        preset: "global_rates",
+      },
+      {
+        id: "governo-pacifico",
+        label: "Pacifico",
+        limit: 8,
+        module: "macro-rates",
+        preset: "global_rates",
+      },
+      {
+        id: "governo-oriente-medio",
+        label: "Oriente Medio",
+        limit: 8,
+        module: "macro-rates",
+        preset: "global_rates",
+      },
+      {
+        id: "governo-africa",
+        label: "Africa",
+        limit: 8,
+        module: "macro-rates",
+        preset: "global_rates",
       },
     ],
   },
   {
-    description: "Credito corporativo e proxies de spread/risco.",
+    description: "Credito corporativo por perfil de yield e duracao.",
     id: "titulos_corporativos",
     label: "Titulos corporativos",
     views: [
       {
-        id: "corp-credito",
-        label: "Credito global",
+        id: "corporativo-visao-geral",
+        label: "Visao geral",
         limit: 8,
         module: "fixed-income",
         preset: "credit_proxies",
       },
       {
-        id: "corp-risco",
-        label: "Taxas x risco",
+        id: "corporativo-group-cotacoes",
+        label: "Cotacoes",
+        type: "group",
+      },
+      {
+        id: "corporativo-maior-yield",
+        label: "Maior yield",
+        limit: 8,
+        module: "fixed-income",
+        preset: "credit_proxies",
+      },
+      {
+        id: "corporativo-longo-prazo",
+        label: "Longo prazo",
         limit: 8,
         module: "fixed-income",
         preset: "rates_risk",
       },
       {
-        id: "corp-macro",
-        label: "Proxies inflacao",
+        id: "corporativo-curto-prazo",
+        label: "Curto prazo",
         limit: 8,
-        module: "macro-rates",
-        preset: "inflation_proxies",
+        module: "fixed-income",
+        preset: "rates_risk",
+      },
+      {
+        id: "corporativo-taxa-variavel",
+        label: "Taxa variavel",
+        limit: 8,
+        module: "fixed-income",
+        preset: "rates_risk",
+      },
+      {
+        id: "corporativo-taxa-fixa",
+        label: "Taxa fixa",
+        limit: 8,
+        module: "fixed-income",
+        preset: "rates_risk",
+      },
+      {
+        id: "corporativo-cupom-zero",
+        label: "Cupom zero",
+        limit: 8,
+        module: "fixed-income",
+        preset: "rates_risk",
       },
     ],
   },
   {
-    description: "ETFs de beta, tema, internacional e renda fixa.",
+    description: "ETFs por tamanho, fluxo, tema e classe de ativo.",
     id: "etfs",
     label: "ETFs",
     views: [
       {
-        id: "etf-broad",
-        label: "Broad market",
+        id: "etfs-visao-geral",
+        label: "Visao geral",
         limit: 8,
         module: "etfs",
         preset: "broad_market",
       },
       {
-        id: "etf-thematic",
-        label: "Tematicos",
+        id: "etfs-group-fundos",
+        label: "Fundos",
+        type: "group",
+      },
+      {
+        id: "etfs-maiores",
+        label: "Maiores ETFs",
+        limit: 8,
+        module: "etfs",
+        preset: "broad_market",
+      },
+      {
+        id: "etfs-maior-aum",
+        label: "Maior crescimento de AUM",
         limit: 8,
         module: "etfs",
         preset: "thematic",
       },
       {
-        id: "etf-international",
-        label: "Internacional",
+        id: "etfs-maiores-retornos",
+        label: "Maiores retornos",
         limit: 8,
         module: "etfs",
-        preset: "international",
+        preset: "broad_market",
       },
       {
-        id: "etf-renda-fixa",
+        id: "etfs-maiores-perdas",
+        label: "Maiores perdas",
+        limit: 8,
+        module: "etfs",
+        preset: "broad_market",
+      },
+      {
+        id: "etfs-mais-negociadas",
+        label: "Mais negociadas",
+        limit: 8,
+        module: "etfs",
+        preset: "broad_market",
+      },
+      {
+        id: "etfs-maior-yield",
+        label: "Maior yield",
+        limit: 8,
+        module: "etfs",
+        preset: "fixed_income",
+      },
+      {
+        id: "etfs-acoes",
+        label: "Acoes",
+        limit: 8,
+        module: "etfs",
+        preset: "broad_market",
+      },
+      {
+        id: "etfs-bitcoin",
+        label: "Bitcoin",
+        limit: 8,
+        module: "etfs",
+        preset: "thematic",
+      },
+      {
+        id: "etfs-ethereum",
+        label: "Ethereum",
+        limit: 8,
+        module: "etfs",
+        preset: "thematic",
+      },
+      {
+        id: "etfs-ouro",
+        label: "Ouro",
+        limit: 8,
+        module: "etfs",
+        preset: "thematic",
+      },
+      {
+        id: "etfs-renda-fixa",
         label: "Renda fixa",
         limit: 8,
         module: "etfs",
         preset: "fixed_income",
       },
+      {
+        id: "etfs-commodities",
+        label: "Commodities",
+        limit: 8,
+        module: "etfs",
+        preset: "international",
+      },
     ],
   },
   {
-    description: "Macro global com commodities, FX e risco.",
+    description: "Macro global por paises e indicadores estruturais.",
     id: "economia_mundial",
     label: "Economia mundial",
     views: [
       {
-        id: "eco-macro",
-        label: "Macro rates",
+        id: "economia-visao-geral",
+        label: "Visao geral",
         limit: 8,
         module: "macro-rates",
         preset: "global_rates",
       },
       {
-        id: "eco-commodities",
-        label: "Commodities globais",
+        id: "economia-mapa-calor",
+        label: "Mapa de Calor",
         limit: 8,
-        module: "commodities",
-        preset: "global",
+        module: "macro-rates",
+        preset: "global_rates",
       },
       {
-        id: "eco-metais",
-        label: "Metais e ouro",
+        id: "economia-tendencias-globais",
+        label: "Tendencias globais",
         limit: 8,
-        module: "commodities",
-        preset: "metals",
+        module: "macro-rates",
+        preset: "risk_regime",
       },
       {
-        id: "eco-energia",
-        label: "Petroleo e energia",
-        limit: 8,
-        module: "commodities",
-        preset: "energy",
-      },
-    ],
-  },
-  {
-    description: "Volatilidade implicita e vies tatico de opcoes.",
-    id: "opcoes",
-    label: "Opcoes",
-    views: [
-      {
-        id: "opcoes-indices",
-        label: "Indices EUA",
-        limit: 8,
-        module: "options",
-        preset: "us_indices",
-        daysToExpiry: 30,
+        id: "economia-group-paises",
+        label: "Paises",
+        type: "group",
       },
       {
-        id: "opcoes-mega-caps",
-        label: "Mega caps",
+        id: "economia-todos-paises",
+        label: "Todos os paises",
         limit: 8,
-        module: "options",
-        preset: "us_mega_caps",
-        daysToExpiry: 30,
+        module: "wall-street",
+        preset: "indices",
       },
       {
-        id: "opcoes-high-beta",
-        label: "High beta",
+        id: "economia-brasil",
+        label: "Brasil",
         limit: 8,
-        module: "options",
-        preset: "high_beta",
-        daysToExpiry: 30,
-      },
-    ],
-  },
-  {
-    description: "Radar DeFi por vertical de protocolo.",
-    id: "defi",
-    label: "DeFi",
-    views: [
-      {
-        id: "defi-blue-chips",
-        label: "Blue chips",
-        limit: 8,
-        module: "defi",
-        preset: "blue_chips",
+        module: "b3",
+        preset: "indices",
       },
       {
-        id: "defi-lending",
-        label: "Lending",
+        id: "economia-eua",
+        label: "Estados Unidos",
         limit: 8,
-        module: "defi",
-        preset: "lending",
+        module: "wall-street",
+        preset: "indices",
       },
       {
-        id: "defi-dex",
-        label: "DEX",
+        id: "economia-china",
+        label: "China Continental",
         limit: 8,
-        module: "defi",
-        preset: "dex",
+        module: "equities",
+        preset: "global_brands",
       },
       {
-        id: "defi-infra",
-        label: "Infra",
+        id: "economia-uniao-europeia",
+        label: "Uniao Europeia",
         limit: 8,
-        module: "defi",
-        preset: "infrastructure",
-      },
-    ],
-  },
-  {
-    description: "Noticias estruturadas com score de relevancia e impacto.",
-    id: "noticias",
-    label: "Noticias",
-    views: [
-      {
-        id: "noticias-btc",
-        label: "Noticias BTC",
-        limit: 8,
-        type: "news",
-        assetId: "bitcoin",
+        module: "equities",
+        preset: "global_brands",
       },
       {
-        id: "noticias-eth",
-        label: "Noticias ETH",
+        id: "economia-japao",
+        label: "Japao",
         limit: 8,
-        type: "news",
-        assetId: "ethereum",
+        module: "wall-street",
+        preset: "indices",
       },
       {
-        id: "noticias-sol",
-        label: "Noticias SOL",
+        id: "economia-group-indicadores",
+        label: "Indicadores",
+        type: "group",
+      },
+      {
+        id: "economia-todos-indicadores",
+        label: "Todos os indicadores",
         limit: 8,
-        type: "news",
-        assetId: "solana",
+        module: "macro-rates",
+        preset: "global_rates",
+      },
+      {
+        id: "economia-pib",
+        label: "PIB",
+        limit: 8,
+        module: "macro-rates",
+        preset: "global_rates",
+      },
+      {
+        id: "economia-taxa-juros",
+        label: "Taxa de juros",
+        limit: 8,
+        module: "macro-rates",
+        preset: "global_rates",
+      },
+      {
+        id: "economia-taxa-inflacao",
+        label: "Taxa de inflacao",
+        limit: 8,
+        module: "macro-rates",
+        preset: "inflation_proxies",
+      },
+      {
+        id: "economia-taxa-desemprego",
+        label: "Taxa de desemprego",
+        limit: 8,
+        module: "macro-rates",
+        preset: "risk_regime",
       },
     ],
   },
@@ -944,6 +1504,11 @@ function normalizeAppRoute(value) {
   }
 
   const normalized = value.trim().toLowerCase();
+
+  if (normalized === "radar") {
+    return APP_ROUTE_MERCADOS;
+  }
+
   return APP_ROUTES.has(normalized) ? normalized : APP_ROUTE_CHAT;
 }
 
@@ -975,8 +1540,20 @@ function resolveRouteFromLocation() {
     return APP_ROUTE_CHART_LAB;
   }
 
-  if (pathname.endsWith(`/${APP_ROUTE_RADAR}`) || hash === "#/radar") {
-    return APP_ROUTE_RADAR;
+  if (pathname.endsWith(`/${APP_ROUTE_MERCADOS}`) || hash === "#/mercados") {
+    return APP_ROUTE_MERCADOS;
+  }
+
+  if (pathname.endsWith("/radar") || hash === "#/radar") {
+    return APP_ROUTE_MERCADOS;
+  }
+
+  if (pathname.endsWith(`/${APP_ROUTE_MEMECOINS}`) || hash === "#/memecoins") {
+    return APP_ROUTE_MEMECOINS;
+  }
+
+  if (pathname.endsWith(`/${APP_ROUTE_AIRDROPS}`) || hash === "#/airdrops") {
+    return APP_ROUTE_AIRDROPS;
   }
 
   return APP_ROUTE_CHAT;
@@ -1017,12 +1594,17 @@ function persistSidebarCollapsed(nextValue) {
 function setRouteVisibility(route) {
   const showChartDesk = route === APP_ROUTE_CHART_LAB;
   const showLayoutGrid = route === APP_ROUTE_CHAT;
-  const showMarketNavigator = route === APP_ROUTE_RADAR;
+  const showMarketNavigator = route === APP_ROUTE_MERCADOS;
   const showAnalysisPanel = route === APP_ROUTE_CHART_LAB;
-  const showIntelligenceColumn = route === APP_ROUTE_RADAR;
+  const showMemecoins = route === APP_ROUTE_MEMECOINS;
+  const showAirdrops = route === APP_ROUTE_AIRDROPS;
 
   if (chartDeskSection instanceof HTMLElement) {
     chartDeskSection.classList.toggle("route-hidden", !showChartDesk);
+  }
+
+  if (heroSection instanceof HTMLElement) {
+    heroSection.classList.toggle("route-hidden", !showLayoutGrid);
   }
 
   if (layoutGridSection instanceof HTMLElement) {
@@ -1037,8 +1619,12 @@ function setRouteVisibility(route) {
     analysisPanel.classList.toggle("route-hidden", !showAnalysisPanel);
   }
 
-  if (intelligenceSideColumnSection instanceof HTMLElement) {
-    intelligenceSideColumnSection.classList.toggle("route-hidden", !showIntelligenceColumn);
+  if (memecoinsStageSection instanceof HTMLElement) {
+    memecoinsStageSection.classList.toggle("route-hidden", !showMemecoins);
+  }
+
+  if (airdropsStageSection instanceof HTMLElement) {
+    airdropsStageSection.classList.toggle("route-hidden", !showAirdrops);
   }
 
   if (workspaceStageSection instanceof HTMLElement) {
@@ -1046,7 +1632,7 @@ function setRouteVisibility(route) {
   }
 
   if (intelligenceStageSection instanceof HTMLElement) {
-    intelligenceStageSection.classList.toggle("route-hidden", !(showAnalysisPanel || showIntelligenceColumn));
+    intelligenceStageSection.classList.toggle("route-hidden", !showAnalysisPanel);
   }
 }
 
@@ -3636,12 +4222,51 @@ function getMarketNavigatorCategoryById(categoryId) {
     ?? null;
 }
 
+function isMarketNavigatorActionableView(view) {
+  return Boolean(view) && view.type !== "group";
+}
+
+function getFirstMarketNavigatorActionableView(category) {
+  if (!category || !Array.isArray(category.views) || category.views.length === 0) {
+    return null;
+  }
+
+  return category.views.find((view) => isMarketNavigatorActionableView(view)) ?? null;
+}
+
+function getMarketNavigatorGroupTargetViewId(category, groupViewId) {
+  if (!category || !Array.isArray(category.views) || category.views.length === 0) {
+    return "";
+  }
+
+  const groupIndex = category.views.findIndex((view) => view.id === groupViewId && view.type === "group");
+
+  if (groupIndex < 0) {
+    return "";
+  }
+
+  for (let index = groupIndex + 1; index < category.views.length; index += 1) {
+    const candidate = category.views[index];
+
+    if (!candidate || candidate.type === "group") {
+      break;
+    }
+
+    if (isMarketNavigatorActionableView(candidate)) {
+      return candidate.id;
+    }
+  }
+
+  return getFirstMarketNavigatorActionableView(category)?.id ?? "";
+}
+
 function getMarketNavigatorViewById(category, viewId) {
   if (!category || !Array.isArray(category.views) || category.views.length === 0) {
     return null;
   }
 
-  return category.views.find((view) => view.id === viewId) ?? category.views[0] ?? null;
+  return category.views.find((view) => view.id === viewId && isMarketNavigatorActionableView(view))
+    ?? getFirstMarketNavigatorActionableView(category);
 }
 
 function getActiveMarketNavigatorCategory() {
@@ -4139,6 +4764,10 @@ function renderMarketNavigatorCategories() {
   marketCategoryListElement.innerHTML = "";
 
   for (const category of MARKET_NAVIGATOR_CATEGORY_DEFINITIONS) {
+    if (category.hiddenInCategoryList) {
+      continue;
+    }
+
     const button = document.createElement("button");
     button.type = "button";
     button.className = "market-category-button";
@@ -4179,6 +4808,27 @@ function renderMarketNavigatorViews() {
   }
 
   for (const view of category.views) {
+    if (!isMarketNavigatorActionableView(view)) {
+      const groupButton = document.createElement("button");
+      const targetViewId = getMarketNavigatorGroupTargetViewId(category, view.id);
+
+      groupButton.type = "button";
+      groupButton.className = "market-preset-group-button";
+      groupButton.dataset.groupTargetView = targetViewId;
+
+      if (targetViewId.length === 0) {
+        groupButton.disabled = true;
+      }
+
+      if (targetViewId === activeMarketViewId) {
+        groupButton.classList.add("is-active");
+      }
+
+      groupButton.innerHTML = `<span>${escapeHtml(view.label)}<small>Abrir secao</small></span><span>›</span>`;
+      marketPresetListElement.append(groupButton);
+      continue;
+    }
+
     const button = document.createElement("button");
     button.type = "button";
     button.className = "market-preset-button";
@@ -4188,7 +4838,9 @@ function renderMarketNavigatorViews() {
       button.classList.add("is-active");
     }
 
-    const sourceLabel = view.type === "news" ? "Inteligencia de noticias" : `Fonte /v1/${view.module}`;
+    const sourceLabel = view.type === "news"
+      ? "Inteligencia de noticias"
+      : `Fonte /v1/${view.module}`;
     button.innerHTML = `<span>${escapeHtml(view.label)}<small>${escapeHtml(sourceLabel)}</small></span><span>›</span>`;
     marketPresetListElement.append(button);
   }
@@ -4426,8 +5078,17 @@ function setMarketNavigatorCategory(categoryId) {
     return;
   }
 
+  if (category.id === "noticias") {
+    activeMarketScopeId = "news";
+  } else if (category.id === "paises") {
+    activeMarketScopeId = "countries";
+  } else {
+    activeMarketScopeId = "global";
+  }
+
   activeMarketCategoryId = category.id;
-  activeMarketViewId = category.views[0]?.id ?? "";
+  activeMarketViewId = getFirstMarketNavigatorActionableView(category)?.id ?? "";
+  renderMarketNavigatorScopes();
   renderMarketNavigatorCategories();
   renderMarketNavigatorViews();
   renderMarketNavigatorFromState();
@@ -4445,16 +5106,17 @@ function setMarketNavigatorScope(scopeId) {
 
   if (scope.id === "news") {
     setMarketNavigatorCategory("noticias");
-    renderMarketNavigatorScopes();
     return;
   }
 
   if (scope.id === "countries") {
-    if (["noticias", "cripto", "defi", "opcoes"].includes(activeMarketCategoryId)) {
-      renderMarketNavigatorScopes();
-      setMarketNavigatorCategory("acoes");
-      return;
-    }
+    setMarketNavigatorCategory("paises");
+    return;
+  }
+
+  if (getActiveMarketNavigatorCategory()?.hiddenInCategoryList) {
+    setMarketNavigatorCategory(MARKET_NAVIGATOR_DEFAULT_CATEGORY_ID);
+    return;
   }
 
   renderMarketNavigatorScopes();
@@ -4473,7 +5135,15 @@ function setupMarketNavigator() {
   }
 
   const defaultCategory = getMarketNavigatorCategoryById(activeMarketCategoryId);
-  activeMarketViewId = defaultCategory?.views?.[0]?.id ?? "";
+  const initialCategory = defaultCategory?.hiddenInCategoryList
+    ? getMarketNavigatorCategoryById(MARKET_NAVIGATOR_DEFAULT_CATEGORY_ID)
+    : defaultCategory;
+
+  if (initialCategory) {
+    activeMarketCategoryId = initialCategory.id;
+    activeMarketViewId = getFirstMarketNavigatorActionableView(initialCategory)?.id ?? "";
+  }
+
   hydrateMarketNavigatorFavorites();
   fillMarketRegionFilterOptions();
 
@@ -4549,13 +5219,15 @@ function setupMarketNavigator() {
 
   marketPresetListElement.addEventListener("click", (event) => {
     const target = event.target;
-    const button = target instanceof HTMLElement ? target.closest("button[data-view]") : null;
+    const button = target instanceof HTMLElement
+      ? target.closest("button[data-view], button[data-group-target-view]")
+      : null;
 
     if (!(button instanceof HTMLButtonElement)) {
       return;
     }
 
-    const viewId = button.dataset.view;
+    const viewId = button.dataset.view ?? button.dataset.groupTargetView;
 
     if (!viewId || viewId === activeMarketViewId) {
       return;
