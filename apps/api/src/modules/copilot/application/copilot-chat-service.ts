@@ -504,6 +504,12 @@ const financialIntentKeywords = [
   "airdrop",
   "defi",
   "macro rates",
+  "comprar",
+  "compra",
+  "vender",
+  "corretora",
+  "broker",
+  "exchange",
 ];
 
 const financeFramingMarkers = [
@@ -665,8 +671,13 @@ function hasBrokerIntegrationIntent(message: string): boolean {
     normalizedMessage.includes("corretora") ||
     normalizedMessage.includes("broker") ||
     normalizedMessage.includes("binance") ||
+    normalizedMessage.includes("bybit") ||
+    normalizedMessage.includes("coinbase") ||
+    normalizedMessage.includes("kraken") ||
+    normalizedMessage.includes("okx") ||
     normalizedMessage.includes("iq option") ||
-    normalizedMessage.includes("iqoption");
+    normalizedMessage.includes("iqoption") ||
+    normalizedMessage.includes("exchange");
   const asksForLiveQuote =
     normalizedMessage.includes("cotacao") ||
     normalizedMessage.includes("cotacao ao vivo") ||
@@ -676,7 +687,29 @@ function hasBrokerIntegrationIntent(message: string): boolean {
     normalizedMessage.includes("conectar") ||
     normalizedMessage.includes("api");
 
-  return mentionsBroker && asksForLiveQuote;
+  const asksWhereToBuy =
+    normalizedMessage.includes("onde comprar") ||
+    normalizedMessage.includes("aonde comprar") ||
+    normalizedMessage.includes("onde compra") ||
+    normalizedMessage.includes("aonde compra") ||
+    normalizedMessage.includes("qual corretora") ||
+    normalizedMessage.includes("qual broker") ||
+    normalizedMessage.includes("qual exchange") ||
+    normalizedMessage.includes("em qual corretora") ||
+    normalizedMessage.includes("em qual exchange") ||
+    normalizedMessage.includes("onde negocia") ||
+    normalizedMessage.includes("onde negociar");
+
+  const hasTokenContext =
+    normalizedMessage.includes("token") ||
+    normalizedMessage.includes("moeda") ||
+    normalizedMessage.includes("coin") ||
+    normalizedMessage.includes("cripto") ||
+    normalizedMessage.includes("crypto") ||
+    normalizedMessage.includes("memecoin") ||
+    hasFinancialIntent(message);
+
+  return (mentionsBroker && asksForLiveQuote) || (asksWhereToBuy && hasTokenContext);
 }
 
 function hasAirdropIntent(message: string): boolean {
@@ -2100,8 +2133,9 @@ const copilotTools: OpenRouterToolDefinition[] = [
 export class CopilotChatService {
   public async chat(input: CopilotChatInput): Promise<OpenRouterChatCompletion> {
     const preparedInput = this.withDefaultSystemPrompt(input);
-    const completion = await openRouterChatAdapter.createCompletionWithTools(preparedInput, copilotTools);
-    const completionWithFallback = await this.applyIntentFallback(preparedInput, completion);
+    const contextualInput = await this.withConversationContext(preparedInput, input.sessionId);
+    const completion = await openRouterChatAdapter.createCompletionWithTools(contextualInput, copilotTools);
+    const completionWithFallback = await this.applyIntentFallback(contextualInput, completion);
 
     try {
       await copilotChatAuditStore.append({
@@ -2142,6 +2176,70 @@ export class CopilotChatService {
       ...input,
       systemPrompt: `${copilotDefaultSystemPrompt}\n\nContexto adicional do usuario:\n${trimmedCustomPrompt}`,
     };
+  }
+
+  private async withConversationContext(
+    input: CopilotChatInput,
+    sessionId?: string,
+  ): Promise<CopilotChatInput> {
+    const safeSessionId = typeof sessionId === "string" ? sessionId.trim() : "";
+
+    if (safeSessionId.length < 8 || input.message.length > 3200) {
+      return input;
+    }
+
+    try {
+      const sessionHistory = await copilotChatAuditStore.getSessionHistory({
+        limit: 8,
+        sessionId: safeSessionId,
+      });
+
+      if (!Array.isArray(sessionHistory.messages) || sessionHistory.messages.length === 0) {
+        return input;
+      }
+
+      const recentMessages = sessionHistory.messages.slice(-4);
+      const compactContext = recentMessages
+        .map((message) => {
+          const speaker = message.role === "assistant" ? "Assistente" : "Usuario";
+          const compactContent = message.content.replace(/\s+/g, " ").trim();
+
+          if (compactContent.length === 0) {
+            return "";
+          }
+
+          return `${speaker}: ${compactContent.slice(0, 320)}`;
+        })
+        .filter((line) => line.length > 0)
+        .join("\n");
+
+      if (compactContext.length === 0) {
+        return input;
+      }
+
+      const availableContextChars = Math.max(0, 3900 - input.message.length);
+
+      if (availableContextChars < 120) {
+        return input;
+      }
+
+      const boundedContext = compactContext.slice(0, availableContextChars);
+
+      return {
+        ...input,
+        message: `${input.message}\n\nContexto recente da conversa:\n${boundedContext}`,
+      };
+    } catch (error) {
+      logger.warn(
+        {
+          err: error,
+          sessionId: safeSessionId,
+        },
+        "Failed to load copilot session context, continuing without context",
+      );
+
+      return input;
+    }
   }
 
   private async applyIntentFallback(

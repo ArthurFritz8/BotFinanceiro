@@ -3641,6 +3641,8 @@ function setupMemecoinRadarPanel() {
       return;
     }
 
+    navigateToRoute(APP_ROUTE_CHAT);
+
     chatInput.value = buildMemecoinChatPrompt(notification);
     chatInput.focus();
     chatInput.scrollIntoView({
@@ -4817,6 +4819,7 @@ function sendMarketItemToChat(item, view) {
   if (!(chatInput instanceof HTMLTextAreaElement)) {
     return;
   }
+  navigateToRoute(APP_ROUTE_CHAT);
 
   const viewLabel = typeof item?.viewLabel === "string" && item.viewLabel.length > 0
     ? item.viewLabel
