@@ -1341,7 +1341,7 @@ function renderConversationList() {
     const localModeItem = document.createElement("li");
     localModeItem.textContent = isSupabaseConfigured
       ? "Faca login para carregar suas conversas da conta."
-      : "Modo local ativo. Configure Supabase para multiplas conversas.";
+      : "Supabase nao configurado. Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.";
     conversationListElement.append(localModeItem);
     return;
   }
@@ -8467,25 +8467,26 @@ function handleSignedOutState() {
     authLogoutButton.classList.add("is-hidden");
   }
 
-  if (!isSupabaseConfigured || !supabase) {
-    setAuthUserLabel("Modo local sem login.");
+  const hasSupabase = isSupabaseConfigured && Boolean(supabase);
 
-    if (clearLocalHistoryButton instanceof HTMLButtonElement) {
-      clearLocalHistoryButton.textContent = "Limpar";
-    }
-
-    setAuthGateVisible(false);
-    setChatLockState(false);
-    return;
+  if (!hasSupabase) {
+    setAuthUserLabel("Supabase nao configurado.");
+    setAuthStatusMessage("Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no frontend.");
+    setAuthFeedback("Nao foi possivel habilitar login: configuracao Supabase ausente.", "error");
+    setAuthFormDisabled(true);
+    setStatus("error", "Configurar Supabase para login");
+  } else {
+    setAuthUserLabel("Login obrigatorio para historico por usuario.");
+    setAuthFeedback("");
+    setAuthFormDisabled(false);
+    setStatus("", "Aguardando login");
   }
 
-  setAuthUserLabel("Login obrigatorio para historico por usuario.");
   setAuthGateVisible(true);
   setChatLockState(true);
   messages.splice(0, messages.length);
   renderMessages();
   renderRecentHistory();
-  setStatus("", "Aguardando login");
 }
 
 async function handleAuthSubmit(event) {
@@ -8587,7 +8588,7 @@ async function initializeAuth() {
   }
 
   if (!isSupabaseConfigured || !supabase) {
-    setAuthStatusMessage("Supabase nao configurado. O chat funciona em modo local.");
+    setAuthStatusMessage("Supabase nao configurado. Login obrigatorio para continuar.");
     handleSignedOutState();
     return;
   }
@@ -8749,8 +8750,4 @@ setupAirdropRadarPanel();
 setupMemecoinRadarPanel();
 void (async () => {
   await initializeAuth();
-
-  if (!isSupabaseConfigured || !supabase) {
-    await initializeChatHistory();
-  }
 })();
