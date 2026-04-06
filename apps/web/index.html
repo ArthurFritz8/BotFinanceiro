@@ -367,9 +367,9 @@
         <section class="layout-grid">
           <section class="chat-panel">
             <header class="chat-header">
-              <h2>Conversa Geral + Mercado</h2>
+              <h2>Copiloto Premium | Chat Desk</h2>
               <div class="chat-header-actions">
-                <span class="status-pill" id="connection-status">Pronto</span>
+                <span class="status-pill" id="connection-status">Desk pronto</span>
                 <button type="button" id="auth-logout-button" class="auth-logout-button is-hidden">
                   Sair
                 </button>
@@ -379,19 +379,19 @@
             <div class="messages" id="messages" aria-live="polite"></div>
 
             <form id="chat-form" class="composer">
-              <label for="chat-input">Mensagem</label>
+              <label for="chat-input">Prompt</label>
               <textarea
                 id="chat-input"
                 name="message"
                 rows="4"
                 maxlength="4000"
-                placeholder="Ex.: Me explique juros compostos, escreva um e-mail curto ou resuma o mercado de hoje"
+                placeholder="Ex.: Monte um plano tatico para BTC hoje com entrada, invalidacao e checkpoints"
                 required
               ></textarea>
 
               <div class="composer-footer">
-                <div class="hint">Enter para enviar • Shift + Enter para quebrar linha</div>
-                <button id="send-button" type="submit">Enviar ao Copiloto</button>
+                <div class="hint">Enter envia • Shift+Enter quebra linha</div>
+                <button id="send-button" type="submit">Enviar ao desk</button>
               </div>
             </form>
           </section>
@@ -399,16 +399,16 @@
           <aside class="chat-context-sidebar" aria-label="Contexto do chat">
             <section class="chat-context-card history-card">
               <div class="history-card-header">
-                <h3>Historico de Conversas</h3>
-                <button id="clear-local-history" type="button">Nova conversa</button>
+                <h3>Conversas da Conta</h3>
+                <button id="clear-local-history" type="button">Nova thread</button>
               </div>
               <ul id="conversation-list" class="conversation-list"></ul>
             </section>
 
             <section class="chat-context-card chat-shortcuts-card">
               <div class="chat-shortcuts-head">
-                <h3>Atalhos Inteligentes</h3>
-                <p>Prompts rapidos para disparar analise no chat.</p>
+                <h3>Atalhos de Analise</h3>
+                <p>Prompts rapidos para acelerar diagnostico e decisao.</p>
               </div>
 
               <div class="quick-prompts" id="quick-prompts">
@@ -533,9 +533,9 @@
             </section>
 
             <footer class="chat-context-footer">
-              <p id="auth-user-email" class="history-user-email">Conta: aguardando login.</p>
+              <p id="auth-user-email" class="history-user-email">Conta: autenticacao pendente.</p>
               <p class="chat-context-model">
-                Modelo em uso: <strong id="active-model">google/gemini-2.0-flash-001</strong>
+                Modelo ativo: <strong id="active-model">google/gemini-2.0-flash-001</strong>
               </p>
               <ul id="recent-history" class="recent-history-list is-hidden" aria-hidden="true"></ul>
             </footer>
@@ -701,10 +701,10 @@
 
     <section id="auth-gate" class="auth-gate is-hidden" aria-live="polite">
       <div class="auth-card">
-        <p class="eyebrow">Acesso da conta</p>
-        <h2>Entre para salvar seu historico</h2>
+        <p class="eyebrow">Acesso premium</p>
+        <h2>Entre para salvar seu contexto</h2>
         <p class="auth-card-subtitle">
-          Login Supabase para vincular conversas ao seu usuario e manter multiplas threads.
+          Login Supabase para sincronizar conversas e threads por usuario.
         </p>
 
         <form id="auth-form" class="auth-form" autocomplete="on">
@@ -741,7 +741,7 @@
           <p id="auth-feedback" class="auth-feedback" aria-live="polite"></p>
         </form>
 
-        <p id="auth-status" class="auth-status">Conecte sua conta para iniciar.</p>
+        <p id="auth-status" class="auth-status">Conecte sua conta para liberar o desk.</p>
       </div>
     </section>
 

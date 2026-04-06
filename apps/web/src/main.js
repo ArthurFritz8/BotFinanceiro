@@ -1221,9 +1221,9 @@ function setAuthMode(nextMode) {
   }
 
   if (authMode === AUTH_MODE_SIGN_UP) {
-    setAuthStatusMessage("Crie sua conta para iniciar com multiplas conversas.");
+    setAuthStatusMessage("Crie sua conta para iniciar com contexto persistente.");
   } else {
-    setAuthStatusMessage("Entre para sincronizar historico e threads por usuario.");
+    setAuthStatusMessage("Entre para sincronizar historico e threads do desk.");
   }
 }
 
@@ -1274,13 +1274,13 @@ function buildConversationId() {
 
 function buildConversationTitleFromPrompt(prompt) {
   if (typeof prompt !== "string") {
-    return "Nova conversa";
+    return "Nova thread";
   }
 
   const compact = prompt.replace(/\s+/g, " ").trim();
 
   if (compact.length === 0) {
-    return "Nova conversa";
+    return "Nova thread";
   }
 
   if (compact.length <= 64) {
@@ -1303,7 +1303,7 @@ function normalizeConversationRow(value) {
 
   const title = typeof value.title === "string" && value.title.trim().length > 0
     ? value.title.trim()
-    : "Nova conversa";
+    : "Nova thread";
   const createdAt = typeof value.created_at === "string" ? value.created_at : "";
   const updatedAt = typeof value.updated_at === "string" ? value.updated_at : "";
   const lastMessageAt = typeof value.last_message_at === "string"
@@ -1340,15 +1340,15 @@ function renderConversationList() {
   if (!isCloudHistoryEnabled()) {
     const localModeItem = document.createElement("li");
     localModeItem.textContent = isSupabaseConfigured
-      ? "Faca login para carregar suas conversas da conta."
-      : "Supabase nao configurado. Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.";
+      ? "Entre com sua conta para carregar conversas salvas."
+      : "Supabase indisponivel. Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.";
     conversationListElement.append(localModeItem);
     return;
   }
 
   if (conversationItems.length === 0) {
     const emptyItem = document.createElement("li");
-    emptyItem.textContent = "Nenhuma conversa ainda. Clique em Nova para iniciar.";
+    emptyItem.textContent = "Nenhuma conversa ainda. Clique em Nova thread para iniciar.";
     conversationListElement.append(emptyItem);
     return;
   }
@@ -1489,14 +1489,14 @@ async function loadConversationMessagesFromCloud(conversationId) {
   return normalizedMessages.length > 0;
 }
 
-async function createConversationInCloud(initialTitle = "Nova conversa") {
+async function createConversationInCloud(initialTitle = "Nova thread") {
   if (!isCloudHistoryEnabled() || !supabase) {
     return null;
   }
 
   const nowIso = new Date().toISOString();
   const conversationId = buildConversationId();
-  const title = initialTitle.trim().length > 0 ? initialTitle.trim() : "Nova conversa";
+  const title = initialTitle.trim().length > 0 ? initialTitle.trim() : "Nova thread";
 
   const { data, error } = await supabase
     .from(SUPABASE_CONVERSATIONS_TABLE)
@@ -1603,7 +1603,7 @@ async function setActiveConversation(conversationId, options = {}) {
 }
 
 async function createAndActivateConversation() {
-  const createdConversation = await createConversationInCloud("Nova conversa");
+  const createdConversation = await createConversationInCloud("Nova thread");
 
   if (!createdConversation) {
     return null;
@@ -1613,7 +1613,7 @@ async function createAndActivateConversation() {
     hydrateMessages: false,
   });
 
-  setStatus("", "Nova conversa iniciada");
+  setStatus("", "Nova thread iniciada");
   return createdConversation;
 }
 
@@ -7612,14 +7612,14 @@ function setSendingState(nextValue) {
 
   if (sendButton) {
     sendButton.disabled = nextValue || isChatLockedByAuth;
-    sendButton.textContent = nextValue ? "Consultando..." : "Enviar ao Copiloto";
+    sendButton.textContent = nextValue ? "Consultando desk..." : "Enviar ao desk";
   }
 
   if (chatInput) {
     chatInput.disabled = nextValue || isChatLockedByAuth;
   }
 
-  setStatus(nextValue ? "loading" : "", nextValue ? "Consultando" : "Pronto");
+  setStatus(nextValue ? "loading" : "", nextValue ? "Consultando desk" : "Desk pronto");
 }
 
 async function requestCopilotCompletion(message) {
@@ -7761,7 +7761,9 @@ async function handleSubmit(event) {
       });
 
       const currentConversation = conversationItems.find((item) => item.id === activeConversationId);
-      const shouldRefreshTitle = !currentConversation || currentConversation.title === "Nova conversa";
+      const shouldRefreshTitle = !currentConversation
+        || currentConversation.title === "Nova conversa"
+        || currentConversation.title === "Nova thread";
       const conversationTitle = shouldRefreshTitle
         ? buildConversationTitleFromPrompt(prompt)
         : currentConversation.title;
@@ -7828,7 +7830,7 @@ async function handleSubmit(event) {
       }
     }
 
-    setStatus("", "Pronto");
+    setStatus("", "Desk pronto");
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro inesperado ao consultar a IA";
 
@@ -7918,7 +7920,7 @@ function setupLocalHistoryControls() {
       localStorage.removeItem(CHAT_HISTORY_STORAGE_KEY);
       renderMessages();
       renderRecentHistory();
-      setStatus("", "Nova sessao iniciada");
+      setStatus("", "Nova sessao local iniciada");
       chatInput?.focus();
     });
   }
@@ -7944,7 +7946,7 @@ function setupLocalHistoryControls() {
         try {
           setStatus("loading", "Abrindo conversa...");
           await setActiveConversation(nextConversationId);
-          setStatus("", "Conversa carregada");
+          setStatus("", "Thread carregada");
         } catch (error) {
           setStatus(
             "error",
@@ -8445,7 +8447,7 @@ async function handleAuthenticatedUser(nextUser) {
   }
 
   if (clearLocalHistoryButton instanceof HTMLButtonElement) {
-    clearLocalHistoryButton.textContent = "Nova";
+    clearLocalHistoryButton.textContent = "Nova thread";
   }
 
   setAuthFeedback("");
@@ -8470,16 +8472,16 @@ function handleSignedOutState() {
   const hasSupabase = isSupabaseConfigured && Boolean(supabase);
 
   if (!hasSupabase) {
-    setAuthUserLabel("Supabase nao configurado.");
+    setAuthUserLabel("Supabase indisponivel.");
     setAuthStatusMessage("Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no frontend.");
-    setAuthFeedback("Nao foi possivel habilitar login: configuracao Supabase ausente.", "error");
+    setAuthFeedback("Login indisponivel: configuracao do Supabase ausente.", "error");
     setAuthFormDisabled(true);
-    setStatus("error", "Configurar Supabase para login");
+    setStatus("error", "Configurar Supabase para liberar o desk");
   } else {
     setAuthUserLabel("Login obrigatorio para historico por usuario.");
     setAuthFeedback("");
     setAuthFormDisabled(false);
-    setStatus("", "Aguardando login");
+    setStatus("", "Aguardando autenticacao");
   }
 
   setAuthGateVisible(true);
@@ -8520,12 +8522,12 @@ async function handleAuthSubmit(event) {
 
       if (!data.session) {
         setAuthFeedback("Conta criada. Verifique seu e-mail para confirmar o cadastro.");
-        setAuthStatusMessage("Aguardando confirmacao de e-mail para liberar acesso.");
+        setAuthStatusMessage("Aguardando confirmacao de e-mail para liberar o desk.");
         return;
       }
 
       await handleAuthenticatedUser(data.session.user);
-      setStatus("", "Conta conectada");
+      setStatus("", "Conta conectada ao desk");
       return;
     }
 
@@ -8543,7 +8545,7 @@ async function handleAuthSubmit(event) {
     }
 
     await handleAuthenticatedUser(data.session.user);
-    setStatus("", "Conta conectada");
+    setStatus("", "Conta conectada ao desk");
   } catch (error) {
     setAuthFeedback(error instanceof Error ? error.message : "Falha no login", "error");
   } finally {
@@ -8588,7 +8590,7 @@ async function initializeAuth() {
   }
 
   if (!isSupabaseConfigured || !supabase) {
-    setAuthStatusMessage("Supabase nao configurado. Login obrigatorio para continuar.");
+    setAuthStatusMessage("Supabase indisponivel. Login obrigatorio para continuar.");
     handleSignedOutState();
     return;
   }
@@ -8626,7 +8628,7 @@ async function initializeAuth() {
 }
 
 async function initializeChatHistory() {
-  setStatus("loading", "Sincronizando");
+  setStatus("loading", "Sincronizando contexto");
 
   if (isCloudHistoryEnabled()) {
     try {
@@ -8640,7 +8642,7 @@ async function initializeChatHistory() {
       }
 
       if (activeConversationId.length < 8) {
-        const createdConversation = await createConversationInCloud("Nova conversa");
+        const createdConversation = await createConversationInCloud("Nova thread");
         persistActiveConversationId(createdConversation?.id ?? "");
       }
 
@@ -8653,7 +8655,7 @@ async function initializeChatHistory() {
       if (messages.length === 0) {
         pushMessage(
           "assistant",
-          "Pronto para ajudar. Abra uma conversa e me diga o que voce precisa analisar.",
+          "Desk pronto para apoiar. Abra uma conversa e diga o objetivo do momento.",
           {
             meta: {
               model: "google/gemini-2.0-flash-001",
@@ -8666,12 +8668,12 @@ async function initializeChatHistory() {
         );
       }
 
-      setStatus("", "Historico da conta carregado");
+      setStatus("", "Contexto da conta carregado");
       return;
     } catch (error) {
       setStatus(
         "error",
-        error instanceof Error ? error.message : "Falha ao sincronizar historico da conta",
+        error instanceof Error ? error.message : "Falha ao sincronizar contexto da conta",
       );
       replaceMessages([]);
       return;
@@ -8682,7 +8684,7 @@ async function initializeChatHistory() {
     const loadedFromBackend = await loadMessagesFromBackend();
 
     if (loadedFromBackend) {
-      setStatus("", "Historico remoto carregado");
+      setStatus("", "Historico remoto sincronizado");
       return;
     }
   } catch {
@@ -8693,13 +8695,13 @@ async function initializeChatHistory() {
 
   if (storedMessages.length > 0) {
     replaceMessages(storedMessages);
-    setStatus("", "Historico local carregado");
+    setStatus("", "Historico local restaurado");
     return;
   }
 
   pushMessage(
     "assistant",
-    "Pronto para ajudar. Peça um resumo de mercado, riscos de curto prazo, panorama macro ou analise tecnica de grafico.",
+    "Desk pronto para ajudar. Peça um resumo de mercado, riscos de curto prazo, panorama macro ou analise tecnica.",
     {
       meta: {
         model: "google/gemini-2.0-flash-001",
@@ -8711,7 +8713,7 @@ async function initializeChatHistory() {
     },
   );
 
-  setStatus("", "Pronto");
+  setStatus("", "Desk pronto");
 }
 
 if (chatForm) {
