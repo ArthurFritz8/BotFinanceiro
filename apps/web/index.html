@@ -20,6 +20,21 @@
     <div class="bg-orb bg-orb-right" aria-hidden="true"></div>
 
     <main class="app-shell">
+      <aside id="app-sidebar" class="app-sidebar" aria-label="Navegacao principal">
+        <div class="app-sidebar-head">
+          <p class="app-sidebar-brand">BotFinanceiro</p>
+          <button type="button" id="sidebar-toggle" class="sidebar-toggle" aria-label="Colapsar menu">
+            <span aria-hidden="true">≡</span>
+          </button>
+        </div>
+
+        <nav id="app-route-nav" class="sidebar-nav" aria-label="Rotas principais">
+          <button type="button" class="sidebar-nav-button" data-route="chat">Chat</button>
+          <button type="button" class="sidebar-nav-button" data-route="chart-lab">Chart Lab</button>
+          <button type="button" class="sidebar-nav-button" data-route="radar">Radar</button>
+        </nav>
+      </aside>
+
       <section class="hero reveal">
         <p class="eyebrow">Copiloto Financeiro</p>
         <h1>Converse com sua mesa de estrategia em tempo real.</h1>
@@ -263,7 +278,7 @@
           anotacoes como nas corretoras.
         </p>
         <p class="terminal-shortcuts">
-          Atalhos: Ctrl+K simbolo • Alt+1..6 intervalo • Alt+V modo • Alt+R refresh • Alt+F recenter
+          Atalhos: Ctrl+K simbolo • Alt+1..6 intervalo • Alt+7..9 rotas • Alt+V modo • Alt+R refresh • Alt+F recenter
         </p>
 
         <div class="chart-toolbar">
@@ -441,9 +456,12 @@
 
           <div class="history-card">
             <div class="history-card-header">
-              <h3>Historico local</h3>
-              <button id="clear-local-history" type="button">Limpar</button>
+              <h3>Conversas</h3>
+              <button id="clear-local-history" type="button">Nova</button>
             </div>
+            <p id="auth-user-email" class="history-user-email">Modo local sem login.</p>
+            <ul id="conversation-list" class="conversation-list"></ul>
+            <h4 class="history-subtitle">Mensagens recentes</h4>
             <ul id="recent-history" class="recent-history-list"></ul>
           </div>
         </aside>
@@ -451,7 +469,12 @@
         <section class="chat-panel">
           <header class="chat-header">
             <h2>Conversa Geral + Mercado</h2>
-            <span class="status-pill" id="connection-status">Pronto</span>
+            <div class="chat-header-actions">
+              <span class="status-pill" id="connection-status">Pronto</span>
+              <button type="button" id="auth-logout-button" class="auth-logout-button is-hidden">
+                Sair
+              </button>
+            </div>
           </header>
 
           <div class="messages" id="messages" aria-live="polite"></div>
@@ -631,6 +654,52 @@
         </div>
       </section>
     </main>
+
+    <section id="auth-gate" class="auth-gate is-hidden" aria-live="polite">
+      <div class="auth-card">
+        <p class="eyebrow">Acesso da conta</p>
+        <h2>Entre para salvar seu historico</h2>
+        <p class="auth-card-subtitle">
+          Login Supabase para vincular conversas ao seu usuario e manter multiplas threads.
+        </p>
+
+        <form id="auth-form" class="auth-form" autocomplete="on">
+          <label for="auth-email">E-mail</label>
+          <input
+            id="auth-email"
+            name="email"
+            type="email"
+            maxlength="120"
+            autocomplete="email"
+            placeholder="voce@empresa.com"
+            required
+          />
+
+          <label for="auth-password">Senha</label>
+          <input
+            id="auth-password"
+            name="password"
+            type="password"
+            minlength="6"
+            maxlength="72"
+            autocomplete="current-password"
+            placeholder="Sua senha"
+            required
+          />
+
+          <div class="auth-form-actions">
+            <button id="auth-submit-button" type="submit">Entrar</button>
+            <button id="auth-toggle-mode" type="button" class="auth-toggle-mode-button">
+              Criar conta
+            </button>
+          </div>
+
+          <p id="auth-feedback" class="auth-feedback" aria-live="polite"></p>
+        </form>
+
+        <p id="auth-status" class="auth-status">Conecte sua conta para iniciar.</p>
+      </div>
+    </section>
 
     <script type="module" src="/src/main.js"></script>
   </body>

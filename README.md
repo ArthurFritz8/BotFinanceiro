@@ -68,6 +68,8 @@ Dados persistidos:
 
 1. snapshots de health operacional
 2. auditoria de interacoes do Copiloto (mensagem, resposta, tools usadas)
+3. conversas por usuario (`copilot_user_conversations`)
+4. mensagens por conversa (`copilot_user_messages`)
 
 Politica de retencao:
 
@@ -457,14 +459,17 @@ npm run dev:web
 VITE_DEV_API_PROXY_TARGET=http://localhost:3000 npm run dev:web
 ```
 
-5. O frontend usa `sessionId` persistido no navegador para carregar historico remoto em `GET /v1/copilot/history` e mantém fallback local.
-6. O card "Historico local" limpa mensagens da sessao atual e inicia uma nova sessao local/remota.
-7. O card "Chart Lab" permite alternar entre modo `Delay` e `Ao vivo`, visualizar preco e sinais tecnicos avancados (EMA, RSI, MACD, ATR, suporte/resistencia, acao tatica e niveis de risco) e enviar analise automatica ao chat com um clique.
-8. O bloco "Radar de oportunidades" dentro do Chart Lab carrega `/v1/airdrops/opportunities` com filtros de chain, confianca, score minimo e busca textual.
-9. Cada card do radar possui acao "Levar ao chat" para preencher automaticamente um prompt contextual (projeto, tarefas, score, confianca e fontes), acelerando analise operacional.
-10. O radar persiste filtros no navegador (chain, confianca, score, query e includeSpeculative), mantendo contexto entre reloads.
-11. Cada card agora inclui acao "Copiar prompt" para usar o contexto em qualquer fluxo externo (chat, runbook ou checklist operacional).
-12. Atalhos inteligentes incluem prompts dedicados para forex, futuros, opcoes, commodities, renda fixa, ETFs, setores globais, macro rates, carteira, B3, FIIs, equities globais, Wall Street e DeFi, acelerando consultas multi-mercado no Copiloto.
+5. Com `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` configurados, o frontend habilita login e vincula historico ao usuario autenticado.
+6. O card "Conversas" permite criar e alternar multiplas threads; cada thread e persistida por usuario no banco.
+7. Sidebar Chat-First com rotas principais: `/` (Chat), `/chart-lab` (Chart Lab) e `/radar` (Radar), com destaque visual da rota ativa.
+8. O estado da rota e do menu colapsado e persistido no navegador para manter continuidade entre refreshs.
+9. O card "Chart Lab" permite alternar entre modo `Delay` e `Ao vivo`, visualizar preco e sinais tecnicos avancados (EMA, RSI, MACD, ATR, suporte/resistencia, acao tatica e niveis de risco) e enviar analise automatica ao chat com um clique.
+10. O bloco "Radar de oportunidades" dentro do Chart Lab carrega `/v1/airdrops/opportunities` com filtros de chain, confianca, score minimo e busca textual.
+11. Cada card do radar possui acao "Levar ao chat" para preencher automaticamente um prompt contextual (projeto, tarefas, score, confianca e fontes), acelerando analise operacional.
+12. O radar persiste filtros no navegador (chain, confianca, score, query e includeSpeculative), mantendo contexto entre reloads.
+13. Cada card agora inclui acao "Copiar prompt" para usar o contexto em qualquer fluxo externo (chat, runbook ou checklist operacional).
+14. Atalhos inteligentes incluem prompts dedicados para forex, futuros, opcoes, commodities, renda fixa, ETFs, setores globais, macro rates, carteira, B3, FIIs, equities globais, Wall Street e DeFi, acelerando consultas multi-mercado no Copiloto.
+15. Atalhos de rota Chat-First: `Alt+7` abre Chat, `Alt+8` abre Chart Lab e `Alt+9` abre Radar.
 
 ## Frontend publico
 
@@ -474,6 +479,8 @@ Para publicar frontend e API em dominios diferentes:
 - `CORS_ALLOWED_ORIGINS=https://seu-frontend.exemplo.com`
 2. Configure no frontend (`apps/web/.env` ou env da plataforma):
 - `VITE_API_BASE_URL=https://sua-api.exemplo.com`
+- `VITE_SUPABASE_URL=https://SEU_PROJETO.supabase.co`
+- `VITE_SUPABASE_ANON_KEY=...`
 
 Exemplo build do frontend com URL publica da API:
 

@@ -6,17 +6,38 @@ import {
   createChart,
   LineSeries,
 } from "lightweight-charts";
+import { isSupabaseConfigured, supabase } from "./shared/supabase-client.js";
 import "./styles.css";
 
 const chatForm = document.querySelector("#chat-form");
 const chatInput = document.querySelector("#chat-input");
 const sendButton = document.querySelector("#send-button");
 const messagesContainer = document.querySelector("#messages");
+const appSidebarElement = document.querySelector("#app-sidebar");
+const appRouteNavElement = document.querySelector("#app-route-nav");
+const sidebarToggleButton = document.querySelector("#sidebar-toggle");
 const statusPill = document.querySelector("#connection-status");
 const quickPromptsContainer = document.querySelector("#quick-prompts");
 const activeModelElement = document.querySelector("#active-model");
 const recentHistoryElement = document.querySelector("#recent-history");
 const clearLocalHistoryButton = document.querySelector("#clear-local-history");
+const conversationListElement = document.querySelector("#conversation-list");
+const authUserEmailElement = document.querySelector("#auth-user-email");
+const authLogoutButton = document.querySelector("#auth-logout-button");
+const authGateElement = document.querySelector("#auth-gate");
+const authForm = document.querySelector("#auth-form");
+const authEmailInput = document.querySelector("#auth-email");
+const authPasswordInput = document.querySelector("#auth-password");
+const authSubmitButton = document.querySelector("#auth-submit-button");
+const authToggleModeButton = document.querySelector("#auth-toggle-mode");
+const authFeedbackElement = document.querySelector("#auth-feedback");
+const authStatusElement = document.querySelector("#auth-status");
+const marketNavigatorSection = document.querySelector(".market-navigator");
+const workspaceStageSection = document.querySelector(".workspace-stage");
+const chartDeskSection = document.querySelector(".chart-desk");
+const layoutGridSection = document.querySelector(".layout-grid");
+const intelligenceStageSection = document.querySelector(".intelligence-stage");
+const intelligenceSideColumnSection = document.querySelector(".intelligence-side-column");
 const chartControlsForm = document.querySelector("#chart-controls");
 const chartAssetSelect = document.querySelector("#chart-asset");
 const chartModeSelect = document.querySelector("#chart-mode");
@@ -88,13 +109,35 @@ const marketSearchFeedbackElement = document.querySelector("#market-search-feedb
 
 const CHAT_HISTORY_STORAGE_KEY = "botfinanceiro.copilot.history.v1";
 const CHAT_SESSION_STORAGE_KEY = "botfinanceiro.copilot.session.v1";
+const CHAT_CONVERSATION_STORAGE_KEY = "botfinanceiro.copilot.conversation.v1";
+const APP_ROUTE_STORAGE_KEY = "botfinanceiro.app.route.v1";
+const SIDEBAR_COLLAPSE_STORAGE_KEY = "botfinanceiro.app.sidebarCollapsed.v1";
 const CHART_PREFERENCES_STORAGE_KEY = "botfinanceiro.chart.preferences.v1";
 const AIRDROP_PREFERENCES_STORAGE_KEY = "botfinanceiro.airdrop.preferences.v1";
 const MEMECOIN_PREFERENCES_STORAGE_KEY = "botfinanceiro.memecoin.preferences.v1";
 const MARKET_NAVIGATOR_FAVORITES_STORAGE_KEY = "botfinanceiro.marketNavigator.favorites.v1";
 const MAX_STORED_MESSAGES = 60;
 const MAX_RECENT_HISTORY_ITEMS = 8;
+const MAX_CONVERSATIONS = 60;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
+const APP_ROUTE_CHAT = "chat";
+const APP_ROUTE_CHART_LAB = "chart-lab";
+const APP_ROUTE_RADAR = "radar";
+const APP_ROUTES = new Set([APP_ROUTE_CHAT, APP_ROUTE_CHART_LAB, APP_ROUTE_RADAR]);
+const APP_ROUTE_LABELS = {
+  [APP_ROUTE_CHAT]: "Chat",
+  [APP_ROUTE_CHART_LAB]: "Chart Lab",
+  [APP_ROUTE_RADAR]: "Radar",
+};
+const APP_ROUTE_SHORTCUTS = {
+  Digit7: APP_ROUTE_CHAT,
+  Digit8: APP_ROUTE_CHART_LAB,
+  Digit9: APP_ROUTE_RADAR,
+};
+const AUTH_MODE_SIGN_IN = "signin";
+const AUTH_MODE_SIGN_UP = "signup";
+const SUPABASE_CONVERSATIONS_TABLE = "copilot_user_conversations";
+const SUPABASE_MESSAGES_TABLE = "copilot_user_messages";
 const WATCHLIST_REFRESH_MIN_INTERVAL_MS = 20000;
 const TERMINAL_INTERVALS = ["1", "5", "60", "240", "1D", "1W"];
 const TERMINAL_INTERVAL_SET = new Set(TERMINAL_INTERVALS);
@@ -734,7 +777,14 @@ const ASSET_TO_TERMINAL_SYMBOL = Object.fromEntries(
 
 const messages = [];
 let isSending = false;
+let isChatLockedByAuth = false;
 let chatSessionId = getOrCreateSessionId();
+let activeConversationId = getStoredConversationId();
+let activeAppRoute = APP_ROUTE_CHAT;
+let isSidebarCollapsed = false;
+let authMode = AUTH_MODE_SIGN_IN;
+let activeAuthUser = null;
+let conversationItems = [];
 let currentChartSnapshot = null;
 let chartAutoRefreshTimer = null;
 let isChartLoading = false;
@@ -867,6 +917,706 @@ function rotateSessionId() {
   }
 }
 
+function getStoredConversationId() {
+  try {
+    const storedValue = localStorage.getItem(CHAT_CONVERSATION_STORAGE_KEY)?.trim();
+    return storedValue && storedValue.length > 0 ? storedValue : "";
+  } catch {
+    return "";
+  }
+}
+
+function normalizePathname(pathname) {
+  if (typeof pathname !== "string" || pathname.length === 0) {
+    return "/";
+  }
+
+  if (pathname.length > 1 && pathname.endsWith("/")) {
+    return pathname.slice(0, -1);
+  }
+
+  return pathname;
+}
+
+function normalizeAppRoute(value) {
+  if (typeof value !== "string") {
+    return APP_ROUTE_CHAT;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return APP_ROUTES.has(normalized) ? normalized : APP_ROUTE_CHAT;
+}
+
+function getBasePathForRouting() {
+  const base = String(import.meta.env.BASE_URL ?? "/").trim();
+
+  if (base.length === 0 || base === "/") {
+    return "";
+  }
+
+  return normalizePathname(base.startsWith("/") ? base : `/${base}`);
+}
+
+function buildPathForRoute(route) {
+  const basePath = getBasePathForRouting();
+
+  if (route === APP_ROUTE_CHAT) {
+    return basePath.length > 0 ? basePath : "/";
+  }
+
+  return `${basePath}/${route}`;
+}
+
+function resolveRouteFromLocation() {
+  const pathname = normalizePathname(window.location.pathname.toLowerCase());
+  const hash = String(window.location.hash ?? "").toLowerCase();
+
+  if (pathname.endsWith(`/${APP_ROUTE_CHART_LAB}`) || hash === "#/chart-lab") {
+    return APP_ROUTE_CHART_LAB;
+  }
+
+  if (pathname.endsWith(`/${APP_ROUTE_RADAR}`) || hash === "#/radar") {
+    return APP_ROUTE_RADAR;
+  }
+
+  return APP_ROUTE_CHAT;
+}
+
+function getStoredAppRoute() {
+  try {
+    return normalizeAppRoute(localStorage.getItem(APP_ROUTE_STORAGE_KEY) ?? "");
+  } catch {
+    return APP_ROUTE_CHAT;
+  }
+}
+
+function persistAppRoute(route) {
+  try {
+    localStorage.setItem(APP_ROUTE_STORAGE_KEY, route);
+  } catch {
+    // Ignore storage errors and keep route state in memory.
+  }
+}
+
+function getStoredSidebarCollapsed() {
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSE_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function persistSidebarCollapsed(nextValue) {
+  try {
+    localStorage.setItem(SIDEBAR_COLLAPSE_STORAGE_KEY, nextValue ? "1" : "0");
+  } catch {
+    // Ignore storage errors and keep collapse state in memory.
+  }
+}
+
+function setRouteVisibility(route) {
+  const showChartDesk = route === APP_ROUTE_CHART_LAB;
+  const showLayoutGrid = route === APP_ROUTE_CHAT;
+  const showMarketNavigator = route === APP_ROUTE_RADAR;
+  const showAnalysisPanel = route === APP_ROUTE_CHART_LAB;
+  const showIntelligenceColumn = route === APP_ROUTE_RADAR;
+
+  if (chartDeskSection instanceof HTMLElement) {
+    chartDeskSection.classList.toggle("route-hidden", !showChartDesk);
+  }
+
+  if (layoutGridSection instanceof HTMLElement) {
+    layoutGridSection.classList.toggle("route-hidden", !showLayoutGrid);
+  }
+
+  if (marketNavigatorSection instanceof HTMLElement) {
+    marketNavigatorSection.classList.toggle("route-hidden", !showMarketNavigator);
+  }
+
+  if (analysisPanel instanceof HTMLElement) {
+    analysisPanel.classList.toggle("route-hidden", !showAnalysisPanel);
+  }
+
+  if (intelligenceSideColumnSection instanceof HTMLElement) {
+    intelligenceSideColumnSection.classList.toggle("route-hidden", !showIntelligenceColumn);
+  }
+
+  if (workspaceStageSection instanceof HTMLElement) {
+    workspaceStageSection.classList.toggle("route-hidden", !(showChartDesk || showLayoutGrid));
+  }
+
+  if (intelligenceStageSection instanceof HTMLElement) {
+    intelligenceStageSection.classList.toggle("route-hidden", !(showAnalysisPanel || showIntelligenceColumn));
+  }
+}
+
+function setSidebarCollapsed(nextValue) {
+  isSidebarCollapsed = nextValue;
+  document.body.classList.toggle("sidebar-collapsed", nextValue);
+
+  if (appSidebarElement instanceof HTMLElement) {
+    appSidebarElement.classList.toggle("is-collapsed", nextValue);
+  }
+
+  if (sidebarToggleButton instanceof HTMLButtonElement) {
+    sidebarToggleButton.setAttribute("aria-expanded", String(!nextValue));
+  }
+
+  persistSidebarCollapsed(nextValue);
+}
+
+function updateActiveRouteButton(route) {
+  if (!(appRouteNavElement instanceof HTMLElement)) {
+    return;
+  }
+
+  const buttons = appRouteNavElement.querySelectorAll("button[data-route]");
+
+  for (const button of buttons) {
+    if (!(button instanceof HTMLButtonElement)) {
+      continue;
+    }
+
+    const buttonRoute = normalizeAppRoute(button.dataset.route ?? "");
+    button.classList.toggle("is-active", buttonRoute === route);
+  }
+}
+
+function navigateToRoute(route, options = {}) {
+  const safeRoute = normalizeAppRoute(route);
+  activeAppRoute = safeRoute;
+  setRouteVisibility(safeRoute);
+  updateActiveRouteButton(safeRoute);
+
+  if (options.persist !== false) {
+    persistAppRoute(safeRoute);
+  }
+
+  if (options.pushHistory === false) {
+    return;
+  }
+
+  const targetPath = normalizePathname(buildPathForRoute(safeRoute));
+  const currentPath = normalizePathname(window.location.pathname);
+
+  if (targetPath === currentPath) {
+    return;
+  }
+
+  if (options.replaceHistory === true) {
+    window.history.replaceState({
+      appRoute: safeRoute,
+    }, "", targetPath);
+    return;
+  }
+
+  window.history.pushState({
+    appRoute: safeRoute,
+  }, "", targetPath);
+}
+
+function setupAppShellRouting() {
+  const routeFromLocation = resolveRouteFromLocation();
+  const storedRoute = getStoredAppRoute();
+  const initialRoute = routeFromLocation === APP_ROUTE_CHAT ? storedRoute : routeFromLocation;
+
+  setSidebarCollapsed(getStoredSidebarCollapsed());
+  navigateToRoute(initialRoute, {
+    replaceHistory: true,
+  });
+
+  if (sidebarToggleButton instanceof HTMLButtonElement) {
+    sidebarToggleButton.addEventListener("click", () => {
+      setSidebarCollapsed(!isSidebarCollapsed);
+    });
+  }
+
+  if (appRouteNavElement instanceof HTMLElement) {
+    appRouteNavElement.addEventListener("click", (event) => {
+      const target = event.target;
+      const button = target instanceof HTMLElement ? target.closest("button[data-route]") : null;
+
+      if (!(button instanceof HTMLButtonElement)) {
+        return;
+      }
+
+      const nextRoute = normalizeAppRoute(button.dataset.route ?? APP_ROUTE_CHAT);
+
+      if (nextRoute === activeAppRoute) {
+        return;
+      }
+
+      navigateToRoute(nextRoute);
+    });
+  }
+
+  window.addEventListener("popstate", () => {
+    navigateToRoute(resolveRouteFromLocation(), {
+      pushHistory: false,
+    });
+  });
+}
+
+function persistActiveConversationId(conversationId) {
+  const safeConversationId = typeof conversationId === "string" ? conversationId.trim() : "";
+  activeConversationId = safeConversationId;
+
+  try {
+    if (safeConversationId.length === 0) {
+      localStorage.removeItem(CHAT_CONVERSATION_STORAGE_KEY);
+      return;
+    }
+
+    localStorage.setItem(CHAT_CONVERSATION_STORAGE_KEY, safeConversationId);
+  } catch {
+    // Ignore storage errors and keep conversation id in memory.
+  }
+}
+
+function isCloudHistoryEnabled() {
+  return Boolean(isSupabaseConfigured && supabase && activeAuthUser?.id);
+}
+
+function setAuthFeedback(message, mode = "") {
+  if (!(authFeedbackElement instanceof HTMLElement)) {
+    return;
+  }
+
+  authFeedbackElement.textContent = message;
+
+  if (mode.length > 0) {
+    authFeedbackElement.setAttribute("data-mode", mode);
+  } else {
+    authFeedbackElement.removeAttribute("data-mode");
+  }
+}
+
+function setAuthStatusMessage(message) {
+  if (!(authStatusElement instanceof HTMLElement)) {
+    return;
+  }
+
+  authStatusElement.textContent = message;
+}
+
+function setAuthGateVisible(isVisible) {
+  if (!(authGateElement instanceof HTMLElement)) {
+    return;
+  }
+
+  authGateElement.classList.toggle("is-hidden", !isVisible);
+}
+
+function setAuthMode(nextMode) {
+  authMode = nextMode === AUTH_MODE_SIGN_UP ? AUTH_MODE_SIGN_UP : AUTH_MODE_SIGN_IN;
+
+  if (authSubmitButton instanceof HTMLButtonElement) {
+    authSubmitButton.textContent = authMode === AUTH_MODE_SIGN_UP ? "Criar conta" : "Entrar";
+  }
+
+  if (authToggleModeButton instanceof HTMLButtonElement) {
+    authToggleModeButton.textContent = authMode === AUTH_MODE_SIGN_UP
+      ? "Tenho conta"
+      : "Criar conta";
+  }
+
+  if (authMode === AUTH_MODE_SIGN_UP) {
+    setAuthStatusMessage("Crie sua conta para iniciar com multiplas conversas.");
+  } else {
+    setAuthStatusMessage("Entre para sincronizar historico e threads por usuario.");
+  }
+}
+
+function setChatLockState(nextValue) {
+  isChatLockedByAuth = nextValue;
+
+  if (chatInput instanceof HTMLTextAreaElement) {
+    chatInput.disabled = nextValue || isSending;
+  }
+
+  if (sendButton instanceof HTMLButtonElement) {
+    sendButton.disabled = nextValue || isSending;
+  }
+
+  if (chartAnalyzeButton instanceof HTMLButtonElement) {
+    chartAnalyzeButton.disabled = nextValue;
+  }
+}
+
+function setAuthUserLabel(label) {
+  if (!(authUserEmailElement instanceof HTMLElement)) {
+    return;
+  }
+
+  authUserEmailElement.textContent = label;
+}
+
+function formatConversationTimeLabel(value) {
+  if (typeof value !== "string" || value.length === 0) {
+    return "--";
+  }
+
+  const parsedDate = new Date(value);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return "--";
+  }
+
+  return parsedDate.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function buildConversationId() {
+  return `conv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function buildConversationTitleFromPrompt(prompt) {
+  if (typeof prompt !== "string") {
+    return "Nova conversa";
+  }
+
+  const compact = prompt.replace(/\s+/g, " ").trim();
+
+  if (compact.length === 0) {
+    return "Nova conversa";
+  }
+
+  if (compact.length <= 64) {
+    return compact;
+  }
+
+  return `${compact.slice(0, 61)}...`;
+}
+
+function normalizeConversationRow(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const id = typeof value.id === "string" ? value.id.trim() : "";
+
+  if (id.length < 8) {
+    return null;
+  }
+
+  const title = typeof value.title === "string" && value.title.trim().length > 0
+    ? value.title.trim()
+    : "Nova conversa";
+  const createdAt = typeof value.created_at === "string" ? value.created_at : "";
+  const updatedAt = typeof value.updated_at === "string" ? value.updated_at : "";
+  const lastMessageAt = typeof value.last_message_at === "string"
+    ? value.last_message_at
+    : (updatedAt || createdAt);
+
+  return {
+    createdAt,
+    id,
+    lastMessageAt,
+    title,
+    updatedAt,
+  };
+}
+
+function sortConversations(items) {
+  return [...items].sort((left, right) => {
+    const leftDate = Date.parse(left.lastMessageAt || left.updatedAt || left.createdAt || "");
+    const rightDate = Date.parse(right.lastMessageAt || right.updatedAt || right.createdAt || "");
+    const safeLeft = Number.isNaN(leftDate) ? 0 : leftDate;
+    const safeRight = Number.isNaN(rightDate) ? 0 : rightDate;
+
+    return safeRight - safeLeft;
+  });
+}
+
+function renderConversationList() {
+  if (!(conversationListElement instanceof HTMLElement)) {
+    return;
+  }
+
+  conversationListElement.innerHTML = "";
+
+  if (!isCloudHistoryEnabled()) {
+    const localModeItem = document.createElement("li");
+    localModeItem.textContent = isSupabaseConfigured
+      ? "Faca login para carregar suas conversas da conta."
+      : "Modo local ativo. Configure Supabase para multiplas conversas.";
+    conversationListElement.append(localModeItem);
+    return;
+  }
+
+  if (conversationItems.length === 0) {
+    const emptyItem = document.createElement("li");
+    emptyItem.textContent = "Nenhuma conversa ainda. Clique em Nova para iniciar.";
+    conversationListElement.append(emptyItem);
+    return;
+  }
+
+  for (const conversation of conversationItems) {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "conversation-list-item-button";
+    button.dataset.conversationId = conversation.id;
+
+    if (conversation.id === activeConversationId) {
+      button.classList.add("is-active");
+    }
+
+    const titleElement = document.createElement("span");
+    titleElement.className = "conversation-list-item-title";
+    titleElement.textContent = conversation.title;
+
+    const timeElement = document.createElement("span");
+    timeElement.className = "conversation-list-item-time";
+    timeElement.textContent = formatConversationTimeLabel(conversation.lastMessageAt);
+
+    button.append(titleElement, timeElement);
+    item.append(button);
+    conversationListElement.append(item);
+  }
+}
+
+function upsertConversationState(conversation) {
+  const existingIndex = conversationItems.findIndex((item) => item.id === conversation.id);
+
+  if (existingIndex === -1) {
+    conversationItems.push(conversation);
+  } else {
+    conversationItems[existingIndex] = {
+      ...conversationItems[existingIndex],
+      ...conversation,
+    };
+  }
+
+  conversationItems = sortConversations(conversationItems);
+  renderConversationList();
+}
+
+async function loadConversationsFromCloud() {
+  if (!isCloudHistoryEnabled() || !supabase) {
+    conversationItems = [];
+    renderConversationList();
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from(SUPABASE_CONVERSATIONS_TABLE)
+    .select("id, title, created_at, updated_at, last_message_at")
+    .eq("user_id", activeAuthUser.id)
+    .order("last_message_at", {
+      ascending: false,
+    })
+    .limit(MAX_CONVERSATIONS);
+
+  if (error) {
+    throw new Error(error.message || "Falha ao carregar conversas");
+  }
+
+  conversationItems = (Array.isArray(data) ? data : [])
+    .map((item) => normalizeConversationRow(item))
+    .filter((item) => item !== null);
+  conversationItems = sortConversations(conversationItems);
+  renderConversationList();
+  return conversationItems;
+}
+
+function normalizeCloudMessageRow(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const role = value.role === "assistant" || value.role === "user" ? value.role : null;
+  const content = typeof value.content === "string" ? value.content : null;
+
+  if (!role || !content) {
+    return null;
+  }
+
+  const parsedDate = typeof value.created_at === "string" ? new Date(value.created_at) : null;
+  const formattedTime = parsedDate && !Number.isNaN(parsedDate.getTime())
+    ? parsedDate.toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+    : undefined;
+
+  const normalized = {
+    content,
+    error: value.is_error === true,
+    role,
+  };
+
+  const model = typeof value.model === "string" ? value.model : undefined;
+  const totalTokens = typeof value.total_tokens === "number" ? value.total_tokens : undefined;
+
+  if (model || formattedTime || totalTokens !== undefined) {
+    normalized.meta = {
+      model,
+      time: formattedTime,
+      totalTokens,
+    };
+  }
+
+  return normalized;
+}
+
+async function loadConversationMessagesFromCloud(conversationId) {
+  if (!isCloudHistoryEnabled() || !supabase || conversationId.trim().length < 8) {
+    return false;
+  }
+
+  const { data, error } = await supabase
+    .from(SUPABASE_MESSAGES_TABLE)
+    .select("role, content, model, total_tokens, is_error, created_at")
+    .eq("conversation_id", conversationId)
+    .eq("user_id", activeAuthUser.id)
+    .order("created_at", {
+      ascending: true,
+    })
+    .limit(MAX_STORED_MESSAGES);
+
+  if (error) {
+    throw new Error(error.message || "Falha ao carregar mensagens da conversa");
+  }
+
+  const normalizedMessages = (Array.isArray(data) ? data : [])
+    .map((item) => normalizeCloudMessageRow(item))
+    .filter((item) => item !== null);
+
+  replaceMessages(normalizedMessages);
+  return normalizedMessages.length > 0;
+}
+
+async function createConversationInCloud(initialTitle = "Nova conversa") {
+  if (!isCloudHistoryEnabled() || !supabase) {
+    return null;
+  }
+
+  const nowIso = new Date().toISOString();
+  const conversationId = buildConversationId();
+  const title = initialTitle.trim().length > 0 ? initialTitle.trim() : "Nova conversa";
+
+  const { data, error } = await supabase
+    .from(SUPABASE_CONVERSATIONS_TABLE)
+    .insert({
+      created_at: nowIso,
+      id: conversationId,
+      last_message_at: nowIso,
+      title,
+      updated_at: nowIso,
+      user_id: activeAuthUser.id,
+    })
+    .select("id, title, created_at, updated_at, last_message_at")
+    .single();
+
+  if (error) {
+    throw new Error(error.message || "Falha ao criar conversa");
+  }
+
+  const normalizedConversation = normalizeConversationRow(data);
+
+  if (!normalizedConversation) {
+    throw new Error("Falha ao normalizar conversa criada");
+  }
+
+  upsertConversationState(normalizedConversation);
+  return normalizedConversation;
+}
+
+async function updateConversationInCloud(conversationId, updates = {}) {
+  if (!isCloudHistoryEnabled() || !supabase || conversationId.trim().length < 8) {
+    return;
+  }
+
+  const payload = {
+    updated_at: new Date().toISOString(),
+    ...updates,
+  };
+
+  const { data, error } = await supabase
+    .from(SUPABASE_CONVERSATIONS_TABLE)
+    .update(payload)
+    .eq("id", conversationId)
+    .eq("user_id", activeAuthUser.id)
+    .select("id, title, created_at, updated_at, last_message_at")
+    .single();
+
+  if (error) {
+    throw new Error(error.message || "Falha ao atualizar conversa");
+  }
+
+  const normalizedConversation = normalizeConversationRow(data);
+
+  if (normalizedConversation) {
+    upsertConversationState(normalizedConversation);
+  }
+}
+
+async function persistCloudMessage(conversationId, message) {
+  if (!isCloudHistoryEnabled() || !supabase || conversationId.trim().length < 8) {
+    return;
+  }
+
+  const totalTokens = typeof message?.meta?.totalTokens === "number"
+    ? Math.max(0, Math.round(message.meta.totalTokens))
+    : null;
+
+  const { error } = await supabase
+    .from(SUPABASE_MESSAGES_TABLE)
+    .insert({
+      content: message.content,
+      conversation_id: conversationId,
+      is_error: message.error === true,
+      model: typeof message?.meta?.model === "string" ? message.meta.model : null,
+      role: message.role,
+      total_tokens: totalTokens,
+      user_id: activeAuthUser.id,
+    });
+
+  if (error) {
+    throw new Error(error.message || "Falha ao persistir mensagem");
+  }
+}
+
+async function setActiveConversation(conversationId, options = {}) {
+  const safeConversationId = typeof conversationId === "string" ? conversationId.trim() : "";
+
+  if (safeConversationId.length < 8) {
+    return;
+  }
+
+  persistActiveConversationId(safeConversationId);
+  renderConversationList();
+
+  if (options.hydrateMessages === false) {
+    replaceMessages([]);
+    return;
+  }
+
+  const loaded = await loadConversationMessagesFromCloud(safeConversationId);
+
+  if (!loaded) {
+    replaceMessages([]);
+  }
+}
+
+async function createAndActivateConversation() {
+  const createdConversation = await createConversationInCloud("Nova conversa");
+
+  if (!createdConversation) {
+    return null;
+  }
+
+  await setActiveConversation(createdConversation.id, {
+    hydrateMessages: false,
+  });
+
+  setStatus("", "Nova conversa iniciada");
+  return createdConversation;
+}
+
 function normalizeStoredMessage(value) {
   if (!value || typeof value !== "object") {
     return null;
@@ -898,6 +1648,10 @@ function normalizeStoredMessage(value) {
 }
 
 function saveMessagesToLocalStorage() {
+  if (isCloudHistoryEnabled()) {
+    return;
+  }
+
   try {
     const compactMessages = messages.slice(-MAX_STORED_MESSAGES);
     localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(compactMessages));
@@ -907,6 +1661,10 @@ function saveMessagesToLocalStorage() {
 }
 
 function loadMessagesFromLocalStorage() {
+  if (isCloudHistoryEnabled()) {
+    return [];
+  }
+
   try {
     const raw = localStorage.getItem(CHAT_HISTORY_STORAGE_KEY);
 
@@ -6853,28 +7611,47 @@ function setSendingState(nextValue) {
   isSending = nextValue;
 
   if (sendButton) {
-    sendButton.disabled = nextValue;
+    sendButton.disabled = nextValue || isChatLockedByAuth;
     sendButton.textContent = nextValue ? "Consultando..." : "Enviar ao Copiloto";
   }
 
   if (chatInput) {
-    chatInput.disabled = nextValue;
+    chatInput.disabled = nextValue || isChatLockedByAuth;
   }
 
   setStatus(nextValue ? "loading" : "", nextValue ? "Consultando" : "Pronto");
 }
 
 async function requestCopilotCompletion(message) {
+  const headers = {
+    "Content-Type": "application/json",
+  };
+
+  if (isCloudHistoryEnabled() && supabase) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const accessToken = data?.session?.access_token;
+
+      if (typeof accessToken === "string" && accessToken.length > 20) {
+        headers.Authorization = `Bearer ${accessToken}`;
+      }
+    } catch {
+      // Keep request running even if session retrieval fails.
+    }
+  }
+
+  const requestSessionId = isCloudHistoryEnabled() && activeConversationId.length > 0
+    ? activeConversationId
+    : chatSessionId;
+
   const response = await fetch(buildApiUrl("/v1/copilot/chat"), {
     body: JSON.stringify({
       maxTokens: 350,
       message,
-      sessionId: chatSessionId,
+      sessionId: requestSessionId,
       temperature: 0.1,
     }),
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers,
     method: "POST",
   });
 
@@ -6895,8 +7672,10 @@ async function requestCopilotCompletion(message) {
 }
 
 async function loadMessagesFromBackend() {
+  const historySessionId = activeConversationId.length > 0 ? activeConversationId : chatSessionId;
+
   const response = await fetch(
-    buildApiUrl(`/v1/copilot/history?sessionId=${encodeURIComponent(chatSessionId)}&limit=${MAX_STORED_MESSAGES}`),
+    buildApiUrl(`/v1/copilot/history?sessionId=${encodeURIComponent(historySessionId)}&limit=${MAX_STORED_MESSAGES}`),
     {
       method: "GET",
     },
@@ -6939,7 +7718,7 @@ async function loadMessagesFromBackend() {
 async function handleSubmit(event) {
   event.preventDefault();
 
-  if (!chatInput || isSending) {
+  if (!chatInput || isSending || isChatLockedByAuth) {
     return;
   }
 
@@ -6949,14 +7728,55 @@ async function handleSubmit(event) {
     return;
   }
 
+  if (isCloudHistoryEnabled() && activeConversationId.length < 8) {
+    try {
+      await createAndActivateConversation();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Falha ao iniciar conversa";
+      setStatus("error", message);
+      return;
+    }
+  }
+
+  const userTime = new Date().toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
   pushMessage("user", prompt, {
     meta: {
-      time: new Date().toLocaleTimeString("pt-BR", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      time: userTime,
     },
   });
+
+  if (isCloudHistoryEnabled() && activeConversationId.length > 0) {
+    try {
+      await persistCloudMessage(activeConversationId, {
+        content: prompt,
+        error: false,
+        meta: {
+          time: userTime,
+        },
+        role: "user",
+      });
+
+      const currentConversation = conversationItems.find((item) => item.id === activeConversationId);
+      const shouldRefreshTitle = !currentConversation || currentConversation.title === "Nova conversa";
+      const conversationTitle = shouldRefreshTitle
+        ? buildConversationTitleFromPrompt(prompt)
+        : currentConversation.title;
+
+      await updateConversationInCloud(activeConversationId, {
+        last_message_at: new Date().toISOString(),
+        title: conversationTitle,
+      });
+    } catch (error) {
+      setStatus(
+        "error",
+        error instanceof Error ? error.message : "Falha ao salvar mensagem na conversa",
+      );
+    }
+  }
 
   chatInput.value = "";
   setSendingState(true);
@@ -6973,30 +7793,75 @@ async function handleSubmit(event) {
       activeModelElement.textContent = aiData.model;
     }
 
-    pushMessage("assistant", aiData.answer, {
-      meta: {
-        model: aiData.model,
-        time: new Date().toLocaleTimeString("pt-BR", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-        totalTokens: aiData.usage?.totalTokens,
-      },
+    const assistantTime = new Date().toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
     });
+
+    const assistantMessageMeta = {
+      model: aiData.model,
+      time: assistantTime,
+      totalTokens: aiData.usage?.totalTokens,
+    };
+
+    pushMessage("assistant", aiData.answer, {
+      meta: assistantMessageMeta,
+    });
+
+    if (isCloudHistoryEnabled() && activeConversationId.length > 0) {
+      try {
+        await persistCloudMessage(activeConversationId, {
+          content: aiData.answer,
+          error: false,
+          meta: assistantMessageMeta,
+          role: "assistant",
+        });
+
+        await updateConversationInCloud(activeConversationId, {
+          last_message_at: new Date().toISOString(),
+        });
+      } catch (error) {
+        setStatus(
+          "error",
+          error instanceof Error ? error.message : "Falha ao salvar resposta na conversa",
+        );
+      }
+    }
 
     setStatus("", "Pronto");
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro inesperado ao consultar a IA";
 
+    const assistantErrorTime = new Date().toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
     pushMessage("assistant", message, {
       error: true,
       meta: {
-        time: new Date().toLocaleTimeString("pt-BR", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
+        time: assistantErrorTime,
       },
     });
+
+    if (isCloudHistoryEnabled() && activeConversationId.length > 0) {
+      try {
+        await persistCloudMessage(activeConversationId, {
+          content: message,
+          error: true,
+          meta: {
+            time: assistantErrorTime,
+          },
+          role: "assistant",
+        });
+
+        await updateConversationInCloud(activeConversationId, {
+          last_message_at: new Date().toISOString(),
+        });
+      } catch {
+        // Keep UI flow even when cloud persistence fails.
+      }
+    }
 
     setStatus("error", "Falha");
   } finally {
@@ -7029,19 +7894,66 @@ function setupQuickPrompts() {
 }
 
 function setupLocalHistoryControls() {
-  if (!clearLocalHistoryButton) {
-    return;
+  if (clearLocalHistoryButton instanceof HTMLButtonElement) {
+    clearLocalHistoryButton.addEventListener("click", () => {
+      if (isCloudHistoryEnabled()) {
+        void (async () => {
+          try {
+            await createAndActivateConversation();
+            chatInput?.focus();
+          } catch (error) {
+            setStatus(
+              "error",
+              error instanceof Error ? error.message : "Falha ao iniciar nova conversa",
+            );
+          }
+        })();
+
+        return;
+      }
+
+      rotateSessionId();
+      persistActiveConversationId("");
+      messages.splice(0, messages.length);
+      localStorage.removeItem(CHAT_HISTORY_STORAGE_KEY);
+      renderMessages();
+      renderRecentHistory();
+      setStatus("", "Nova sessao iniciada");
+      chatInput?.focus();
+    });
   }
 
-  clearLocalHistoryButton.addEventListener("click", () => {
-    rotateSessionId();
-    messages.splice(0, messages.length);
-    localStorage.removeItem(CHAT_HISTORY_STORAGE_KEY);
-    renderMessages();
-    renderRecentHistory();
-    setStatus("", "Nova sessao iniciada");
-    chatInput?.focus();
-  });
+  if (conversationListElement instanceof HTMLElement) {
+    conversationListElement.addEventListener("click", (event) => {
+      const target = event.target;
+      const button = target instanceof HTMLElement
+        ? target.closest("button[data-conversation-id]")
+        : null;
+
+      if (!(button instanceof HTMLButtonElement)) {
+        return;
+      }
+
+      const nextConversationId = button.dataset.conversationId;
+
+      if (!nextConversationId || nextConversationId === activeConversationId) {
+        return;
+      }
+
+      void (async () => {
+        try {
+          setStatus("loading", "Abrindo conversa...");
+          await setActiveConversation(nextConversationId);
+          setStatus("", "Conversa carregada");
+        } catch (error) {
+          setStatus(
+            "error",
+            error instanceof Error ? error.message : "Falha ao carregar conversa",
+          );
+        }
+      })();
+    });
+  }
 }
 
 function isEditableElement(target) {
@@ -7091,6 +8003,20 @@ function setupChartKeyboardShortcuts() {
       && !event.ctrlKey
       && !event.metaKey
       && !isEditableElement(event.target);
+
+    const routeShortcut = APP_ROUTE_SHORTCUTS[event.code];
+
+    if (canRunGlobalShortcuts && routeShortcut) {
+      event.preventDefault();
+
+      if (routeShortcut !== activeAppRoute) {
+        navigateToRoute(routeShortcut);
+      }
+
+      const routeLabel = APP_ROUTE_LABELS[routeShortcut] ?? routeShortcut;
+      setStatus("", `Atalho ativo: rota ${routeLabel}.`);
+      return;
+    }
 
     if (!canRunGlobalShortcuts) {
       return;
@@ -7486,8 +8412,270 @@ function setupChartLab() {
   void loadChart();
 }
 
+function setAuthFormDisabled(nextValue) {
+  if (authEmailInput instanceof HTMLInputElement) {
+    authEmailInput.disabled = nextValue;
+  }
+
+  if (authPasswordInput instanceof HTMLInputElement) {
+    authPasswordInput.disabled = nextValue;
+  }
+
+  if (authSubmitButton instanceof HTMLButtonElement) {
+    authSubmitButton.disabled = nextValue;
+  }
+
+  if (authToggleModeButton instanceof HTMLButtonElement) {
+    authToggleModeButton.disabled = nextValue;
+  }
+}
+
+async function handleAuthenticatedUser(nextUser) {
+  const wasSameUser = activeAuthUser?.id === nextUser?.id;
+  activeAuthUser = nextUser;
+
+  if (!(nextUser && typeof nextUser.id === "string" && nextUser.id.length > 0)) {
+    return;
+  }
+
+  setAuthUserLabel(`Conta: ${nextUser.email ?? nextUser.id}`);
+
+  if (authLogoutButton instanceof HTMLButtonElement) {
+    authLogoutButton.classList.remove("is-hidden");
+  }
+
+  if (clearLocalHistoryButton instanceof HTMLButtonElement) {
+    clearLocalHistoryButton.textContent = "Nova";
+  }
+
+  setAuthFeedback("");
+  setAuthGateVisible(false);
+  setChatLockState(false);
+
+  if (!wasSameUser || conversationItems.length === 0) {
+    await initializeChatHistory();
+  }
+}
+
+function handleSignedOutState() {
+  activeAuthUser = null;
+  conversationItems = [];
+  persistActiveConversationId("");
+  renderConversationList();
+
+  if (authLogoutButton instanceof HTMLButtonElement) {
+    authLogoutButton.classList.add("is-hidden");
+  }
+
+  if (!isSupabaseConfigured || !supabase) {
+    setAuthUserLabel("Modo local sem login.");
+
+    if (clearLocalHistoryButton instanceof HTMLButtonElement) {
+      clearLocalHistoryButton.textContent = "Limpar";
+    }
+
+    setAuthGateVisible(false);
+    setChatLockState(false);
+    return;
+  }
+
+  setAuthUserLabel("Login obrigatorio para historico por usuario.");
+  setAuthGateVisible(true);
+  setChatLockState(true);
+  messages.splice(0, messages.length);
+  renderMessages();
+  renderRecentHistory();
+  setStatus("", "Aguardando login");
+}
+
+async function handleAuthSubmit(event) {
+  event.preventDefault();
+
+  if (!isSupabaseConfigured || !supabase || isSending) {
+    return;
+  }
+
+  const email = authEmailInput instanceof HTMLInputElement ? authEmailInput.value.trim() : "";
+  const password = authPasswordInput instanceof HTMLInputElement ? authPasswordInput.value : "";
+
+  if (email.length < 5 || password.length < 6) {
+    setAuthFeedback("Informe e-mail valido e senha com pelo menos 6 caracteres.", "error");
+    return;
+  }
+
+  setAuthFormDisabled(true);
+  setAuthFeedback("");
+
+  try {
+    if (authMode === AUTH_MODE_SIGN_UP) {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+      });
+
+      if (error) {
+        throw new Error(error.message || "Falha ao criar conta");
+      }
+
+      if (!data.session) {
+        setAuthFeedback("Conta criada. Verifique seu e-mail para confirmar o cadastro.");
+        setAuthStatusMessage("Aguardando confirmacao de e-mail para liberar acesso.");
+        return;
+      }
+
+      await handleAuthenticatedUser(data.session.user);
+      setStatus("", "Conta conectada");
+      return;
+    }
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      throw new Error(error.message || "Falha no login");
+    }
+
+    if (!data.session) {
+      throw new Error("Sessao nao retornada pelo login");
+    }
+
+    await handleAuthenticatedUser(data.session.user);
+    setStatus("", "Conta conectada");
+  } catch (error) {
+    setAuthFeedback(error instanceof Error ? error.message : "Falha no login", "error");
+  } finally {
+    setAuthFormDisabled(false);
+  }
+}
+
+async function initializeAuth() {
+  setAuthMode(AUTH_MODE_SIGN_IN);
+
+  if (!(authForm instanceof HTMLFormElement)) {
+    return;
+  }
+
+  authForm.addEventListener("submit", (event) => {
+    void handleAuthSubmit(event);
+  });
+
+  if (authToggleModeButton instanceof HTMLButtonElement) {
+    authToggleModeButton.addEventListener("click", () => {
+      setAuthFeedback("");
+      setAuthMode(authMode === AUTH_MODE_SIGN_IN ? AUTH_MODE_SIGN_UP : AUTH_MODE_SIGN_IN);
+    });
+  }
+
+  if (authLogoutButton instanceof HTMLButtonElement) {
+    authLogoutButton.addEventListener("click", () => {
+      if (!supabase) {
+        return;
+      }
+
+      void (async () => {
+        try {
+          await supabase.auth.signOut();
+        } catch {
+          // Ignore logout error to avoid blocking local cleanup.
+        }
+
+        handleSignedOutState();
+      })();
+    });
+  }
+
+  if (!isSupabaseConfigured || !supabase) {
+    setAuthStatusMessage("Supabase nao configurado. O chat funciona em modo local.");
+    handleSignedOutState();
+    return;
+  }
+
+  setAuthGateVisible(true);
+  setChatLockState(true);
+  setAuthStatusMessage("Carregando sessao da conta...");
+
+  supabase.auth.onAuthStateChange((_event, session) => {
+    if (session?.user) {
+      void handleAuthenticatedUser(session.user);
+      return;
+    }
+
+    handleSignedOutState();
+  });
+
+  try {
+    const { data, error } = await supabase.auth.getSession();
+
+    if (error) {
+      throw new Error(error.message || "Falha ao recuperar sessao");
+    }
+
+    if (data?.session?.user) {
+      await handleAuthenticatedUser(data.session.user);
+      return;
+    }
+
+    handleSignedOutState();
+  } catch (error) {
+    setAuthFeedback(error instanceof Error ? error.message : "Falha ao carregar autenticacao", "error");
+    handleSignedOutState();
+  }
+}
+
 async function initializeChatHistory() {
   setStatus("loading", "Sincronizando");
+
+  if (isCloudHistoryEnabled()) {
+    try {
+      await loadConversationsFromCloud();
+
+      const hasActiveConversation = conversationItems.some((item) => item.id === activeConversationId);
+
+      if (!hasActiveConversation) {
+        const firstConversation = conversationItems[0];
+        persistActiveConversationId(firstConversation?.id ?? "");
+      }
+
+      if (activeConversationId.length < 8) {
+        const createdConversation = await createConversationInCloud("Nova conversa");
+        persistActiveConversationId(createdConversation?.id ?? "");
+      }
+
+      if (activeConversationId.length > 0) {
+        await setActiveConversation(activeConversationId);
+      } else {
+        replaceMessages([]);
+      }
+
+      if (messages.length === 0) {
+        pushMessage(
+          "assistant",
+          "Pronto para ajudar. Abra uma conversa e me diga o que voce precisa analisar.",
+          {
+            meta: {
+              model: "google/gemini-2.0-flash-001",
+              time: new Date().toLocaleTimeString("pt-BR", {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+            },
+          },
+        );
+      }
+
+      setStatus("", "Historico da conta carregado");
+      return;
+    } catch (error) {
+      setStatus(
+        "error",
+        error instanceof Error ? error.message : "Falha ao sincronizar historico da conta",
+      );
+      replaceMessages([]);
+      return;
+    }
+  }
 
   try {
     const loadedFromBackend = await loadMessagesFromBackend();
@@ -7553,9 +8741,16 @@ window.addEventListener("beforeunload", () => {
 });
 
 setupQuickPrompts();
+setupAppShellRouting();
 setupLocalHistoryControls();
 setupMarketNavigator();
 setupChartLab();
 setupAirdropRadarPanel();
 setupMemecoinRadarPanel();
-void initializeChatHistory();
+void (async () => {
+  await initializeAuth();
+
+  if (!isSupabaseConfigured || !supabase) {
+    await initializeChatHistory();
+  }
+})();
