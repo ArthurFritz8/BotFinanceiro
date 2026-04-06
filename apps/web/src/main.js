@@ -1239,6 +1239,42 @@ const EXCHANGE_TO_BROKER = {
   OKX: "okx",
 };
 const EXCHANGES_WITH_NATIVE_LIVE = new Set(["BINANCE", "BYBIT", "COINBASE", "KRAKEN", "OKX"]);
+const FOREX_FIAT_CODES = new Set([
+  "AED",
+  "ARS",
+  "AUD",
+  "BRL",
+  "CAD",
+  "CHF",
+  "CLP",
+  "CNY",
+  "COP",
+  "CZK",
+  "DKK",
+  "EGP",
+  "EUR",
+  "GBP",
+  "HKD",
+  "HUF",
+  "ILS",
+  "INR",
+  "JPY",
+  "KRW",
+  "MXN",
+  "NOK",
+  "NZD",
+  "PEN",
+  "PLN",
+  "QAR",
+  "RUB",
+  "SAR",
+  "SEK",
+  "SGD",
+  "THB",
+  "TRY",
+  "USD",
+  "ZAR",
+]);
 const TERMINAL_WATCHLIST = [
   {
     assetId: "bitcoin",
@@ -1359,6 +1395,7 @@ let chartLatestCandles = [];
 let chartCandleByTime = new Map();
 let chartHasInitialFit = false;
 let chartViewMode = "tv";
+let chartSymbolSourceModule = "crypto";
 let tvMountIdCounter = 0;
 let terminalRefreshTimer = null;
 let watchlistAutoRefreshTimer = null;
@@ -1412,7 +1449,11 @@ function mapSymbolToExchange(symbol, exchange) {
   const normalizedSymbol = sanitizeTerminalSymbol(symbol);
   const normalizedExchange = typeof exchange === "string" ? exchange.toUpperCase() : "BINANCE";
 
-  if (normalizedSymbol.length < 5) {
+  if (normalizedSymbol.length < 2) {
+    return normalizedSymbol;
+  }
+
+  if (!isLikelyCryptoTerminalSymbol(normalizedSymbol)) {
     return normalizedSymbol;
   }
 
@@ -1425,6 +1466,32 @@ function mapSymbolToExchange(symbol, exchange) {
   }
 
   return normalizedSymbol;
+}
+
+function isLikelyForexPairSymbol(symbol) {
+  if (typeof symbol !== "string" || symbol.length !== 6) {
+    return false;
+  }
+
+  const base = symbol.slice(0, 3);
+  const quote = symbol.slice(3, 6);
+  return FOREX_FIAT_CODES.has(base) && FOREX_FIAT_CODES.has(quote);
+}
+
+function isLikelyCryptoTerminalSymbol(symbol) {
+  if (typeof symbol !== "string" || symbol.length < 5) {
+    return false;
+  }
+
+  if (symbol.endsWith("USDT")) {
+    return true;
+  }
+
+  if (symbol.endsWith("USD") && !isLikelyForexPairSymbol(symbol)) {
+    return true;
+  }
+
+  return false;
 }
 
 function getSelectedBroker() {
@@ -4628,9 +4695,24 @@ function resolveChartTargetFromMarketItem(item) {
     return false;
   };
 
+  if (item?.kind === "news") {
+    if (typeof item.assetId === "string" && item.assetId.length > 0 && hasAssetOption(item.assetId)) {
+      return {
+        assetId: item.assetId,
+        hasNativeAsset: true,
+        module: "crypto",
+        symbol: ASSET_TO_TERMINAL_SYMBOL[item.assetId] ?? "",
+      };
+    }
+
+    return null;
+  }
+
   if (typeof item.assetId === "string" && item.assetId.length > 0 && hasAssetOption(item.assetId)) {
     return {
       assetId: item.assetId,
+      hasNativeAsset: true,
+      module: typeof item?.module === "string" ? item.module : "",
       symbol: ASSET_TO_TERMINAL_SYMBOL[item.assetId] ?? "",
     };
   }
@@ -4638,6 +4720,8 @@ function resolveChartTargetFromMarketItem(item) {
   if (typeof item.id === "string" && item.id.length > 0 && hasAssetOption(item.id)) {
     return {
       assetId: item.id,
+      hasNativeAsset: true,
+      module: typeof item?.module === "string" ? item.module : "",
       symbol: ASSET_TO_TERMINAL_SYMBOL[item.id] ?? "",
     };
   }
@@ -4660,9 +4744,28 @@ function resolveChartTargetFromMarketItem(item) {
     if (watchItem) {
       return {
         assetId: watchItem.assetId,
+        hasNativeAsset: true,
+        module: typeof item?.module === "string" ? item.module : "",
         symbol: watchItem.symbol,
       };
     }
+  }
+
+  const fallbackCandidates = [item?.symbol, item?.ticker, item?.id];
+
+  for (const candidate of fallbackCandidates) {
+    const normalizedCandidate = sanitizeTerminalSymbol(candidate);
+
+    if (normalizedCandidate.length < 2) {
+      continue;
+    }
+
+    return {
+      assetId: chartAssetSelect.value,
+      hasNativeAsset: false,
+      module: typeof item?.module === "string" ? item.module : "",
+      symbol: normalizedCandidate,
+    };
   }
 
   return null;
@@ -4679,18 +4782,32 @@ function openMarketItemInChart(item) {
     return false;
   }
 
-  chartAssetSelect.value = target.assetId;
+  navigateToRoute(APP_ROUTE_CHART_LAB);
+
+  if (target.hasNativeAsset && typeof target.assetId === "string" && target.assetId.length > 0) {
+    chartAssetSelect.value = target.assetId;
+  }
+
+  chartSymbolSourceModule = typeof target.module === "string" ? target.module : "";
 
   if (chartSymbolInput instanceof HTMLInputElement && target.symbol.length > 0) {
     chartSymbolInput.value = mapSymbolToExchange(target.symbol, getSelectedTerminalExchange());
   }
 
+  if (!target.hasNativeAsset && chartViewMode !== "tv") {
+    setChartViewMode("tv");
+  }
+
   renderWatchlist();
   chartHasInitialFit = false;
-  void loadChart();
-  void refreshWatchlistMarket({
-    silent: true,
-  });
+
+  if (target.hasNativeAsset) {
+    void loadChart();
+    void refreshWatchlistMarket({
+      silent: true,
+    });
+  }
+
   scheduleTradingViewRefresh();
   saveChartPreferences();
   return true;
@@ -6238,7 +6355,7 @@ function hydrateChartPreferences() {
   if (chartSymbolInput instanceof HTMLInputElement && typeof preferences.symbol === "string") {
     const sanitized = sanitizeTerminalSymbol(preferences.symbol);
 
-    if (sanitized.length >= 5) {
+    if (sanitized.length >= 2) {
       chartSymbolInput.value = sanitized;
     }
   }
@@ -6506,7 +6623,7 @@ function getSelectedTerminalSymbol() {
     chartSymbolInput instanceof HTMLInputElement ? chartSymbolInput.value : "",
   );
 
-  if (symbolFromInput.length >= 5) {
+  if (symbolFromInput.length >= 2) {
     return mapSymbolToExchange(symbolFromInput, selectedExchange);
   }
 
@@ -6567,8 +6684,57 @@ function getSelectedTerminalStyle() {
   return "candles";
 }
 
+function resolveTradingViewExchangePrefix(symbol) {
+  const normalizedSymbol = sanitizeTerminalSymbol(symbol);
+
+  if (normalizedSymbol.length < 2) {
+    return getSelectedTerminalExchange();
+  }
+
+  if (chartSymbolSourceModule === "b3" || chartSymbolSourceModule === "fiis") {
+    return "BMFBOVESPA";
+  }
+
+  if (/^[A-Z]{4}\d{1,2}$/.test(normalizedSymbol) || /^(IBOV|IFIX)/.test(normalizedSymbol)) {
+    return "BMFBOVESPA";
+  }
+
+  if (chartSymbolSourceModule === "forex" || isLikelyForexPairSymbol(normalizedSymbol)) {
+    return "FX_IDC";
+  }
+
+  if (/^(DXY|VIX|DJI|NDX|SPX|RUT|TNX|FVX|IRX|US0?2Y|US0?5Y|US10Y|US30Y)/.test(normalizedSymbol)) {
+    return "TVC";
+  }
+
+  if (
+    chartSymbolSourceModule === "equities"
+    || chartSymbolSourceModule === "wall-street"
+    || chartSymbolSourceModule === "etfs"
+    || chartSymbolSourceModule === "options"
+  ) {
+    return "NASDAQ";
+  }
+
+  if (
+    chartSymbolSourceModule === "fixed-income"
+    || chartSymbolSourceModule === "macro-rates"
+    || chartSymbolSourceModule === "commodities"
+    || chartSymbolSourceModule === "futures"
+  ) {
+    return "TVC";
+  }
+
+  if (isLikelyCryptoTerminalSymbol(normalizedSymbol)) {
+    return getSelectedTerminalExchange();
+  }
+
+  return "NASDAQ";
+}
+
 function buildTradingViewSymbol() {
-  return `${getSelectedTerminalExchange()}:${getSelectedTerminalSymbol()}`;
+  const symbol = getSelectedTerminalSymbol();
+  return `${resolveTradingViewExchangePrefix(symbol)}:${symbol}`;
 }
 
 function syncTerminalSymbolWithAsset() {
@@ -6585,6 +6751,7 @@ function syncTerminalSymbolWithAsset() {
     return;
   }
 
+  chartSymbolSourceModule = "crypto";
   chartSymbolInput.value = mapSymbolToExchange(mappedSymbol, getSelectedTerminalExchange());
 }
 
@@ -8839,7 +9006,7 @@ function setupChartLab() {
 
   if (
     chartSymbolInput instanceof HTMLInputElement
-    && sanitizeTerminalSymbol(chartSymbolInput.value).length < 5
+    && sanitizeTerminalSymbol(chartSymbolInput.value).length < 2
   ) {
     syncTerminalSymbolWithAsset();
   } else if (chartSymbolInput instanceof HTMLInputElement) {
@@ -8878,6 +9045,7 @@ function setupChartLab() {
 
   chartAssetSelect.addEventListener("change", () => {
     chartHasInitialFit = false;
+    chartSymbolSourceModule = "crypto";
     syncTerminalSymbolWithAsset();
     renderWatchlist();
     void loadChart();
@@ -8963,6 +9131,7 @@ function setupChartLab() {
 
   if (chartSymbolInput) {
     chartSymbolInput.addEventListener("input", () => {
+      chartSymbolSourceModule = "";
       chartSymbolInput.value = mapSymbolToExchange(
         sanitizeTerminalSymbol(chartSymbolInput.value),
         getSelectedTerminalExchange(),
