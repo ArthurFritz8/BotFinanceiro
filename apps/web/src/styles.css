@@ -840,6 +840,13 @@ body.sidebar-collapsed .app-shell {
   line-height: 1.35;
 }
 
+.conversation-list-item-row {
+  align-items: center;
+  display: grid;
+  gap: 0.36rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .conversation-list-item-button {
   align-items: center;
   background: #fff;
@@ -878,6 +885,36 @@ body.sidebar-collapsed .app-shell {
   color: #657788;
   flex-shrink: 0;
   font-size: 0.67rem;
+}
+
+.conversation-list-item-delete {
+  align-items: center;
+  background: #fff5f2;
+  border: 1px solid #efc6bc;
+  border-radius: 999px;
+  color: #a84b36;
+  cursor: pointer;
+  display: inline-flex;
+  font-family: inherit;
+  font-size: 0.92rem;
+  font-weight: 700;
+  height: 1.9rem;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  transition: border-color 0.14s ease, background-color 0.14s ease, transform 0.14s ease;
+  width: 1.9rem;
+}
+
+.conversation-list-item-delete:hover {
+  background: #ffeceb;
+  border-color: #e3a89c;
+  transform: translateY(-1px);
+}
+
+.conversation-list-item-delete:focus-visible {
+  box-shadow: 0 0 0 3px rgba(211, 109, 79, 0.2);
+  outline: none;
 }
 
 .history-subtitle {

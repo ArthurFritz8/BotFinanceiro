@@ -1355,10 +1355,17 @@ function renderConversationList() {
 
   for (const conversation of conversationItems) {
     const item = document.createElement("li");
+    item.className = "conversation-list-item";
+
+    const row = document.createElement("div");
+    row.className = "conversation-list-item-row";
+
     const button = document.createElement("button");
     button.type = "button";
+    button.dataset.action = "open-conversation";
     button.className = "conversation-list-item-button";
     button.dataset.conversationId = conversation.id;
+    button.setAttribute("aria-label", `Abrir thread: ${conversation.title}`);
 
     if (conversation.id === activeConversationId) {
       button.classList.add("is-active");
@@ -1373,7 +1380,18 @@ function renderConversationList() {
     timeElement.textContent = formatConversationTimeLabel(conversation.lastMessageAt);
 
     button.append(titleElement, timeElement);
-    item.append(button);
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "conversation-list-item-delete";
+    deleteButton.dataset.action = "delete-conversation";
+    deleteButton.dataset.conversationId = conversation.id;
+    deleteButton.title = "Apagar thread";
+    deleteButton.setAttribute("aria-label", `Apagar thread: ${conversation.title}`);
+    deleteButton.textContent = "×";
+
+    row.append(button, deleteButton);
+    item.append(row);
     conversationListElement.append(item);
   }
 }
@@ -1552,6 +1570,32 @@ async function updateConversationInCloud(conversationId, updates = {}) {
   if (normalizedConversation) {
     upsertConversationState(normalizedConversation);
   }
+}
+
+async function deleteConversationInCloud(conversationId) {
+  if (!isCloudHistoryEnabled() || !supabase) {
+    return false;
+  }
+
+  const safeConversationId = typeof conversationId === "string" ? conversationId.trim() : "";
+
+  if (safeConversationId.length < 8) {
+    return false;
+  }
+
+  const { error } = await supabase
+    .from(SUPABASE_CONVERSATIONS_TABLE)
+    .delete()
+    .eq("id", safeConversationId)
+    .eq("user_id", activeAuthUser.id);
+
+  if (error) {
+    throw new Error(error.message || "Falha ao apagar thread");
+  }
+
+  conversationItems = conversationItems.filter((item) => item.id !== safeConversationId);
+  renderConversationList();
+  return true;
 }
 
 async function persistCloudMessage(conversationId, message) {
@@ -7929,14 +7973,66 @@ function setupLocalHistoryControls() {
     conversationListElement.addEventListener("click", (event) => {
       const target = event.target;
       const button = target instanceof HTMLElement
-        ? target.closest("button[data-conversation-id]")
+        ? target.closest("button[data-action][data-conversation-id]")
         : null;
 
       if (!(button instanceof HTMLButtonElement)) {
         return;
       }
 
-      const nextConversationId = button.dataset.conversationId;
+      const action = button.dataset.action;
+      const nextConversationId = button.dataset.conversationId?.trim() ?? "";
+
+      if (nextConversationId.length < 8) {
+        return;
+      }
+
+      if (action === "delete-conversation") {
+        const conversation = conversationItems.find((item) => item.id === nextConversationId);
+        const conversationTitle = conversation?.title ?? "esta thread";
+        const shouldDelete = window.confirm(
+          `Apagar \"${conversationTitle}\"? Essa acao nao pode ser desfeita.`,
+        );
+
+        if (!shouldDelete) {
+          return;
+        }
+
+        void (async () => {
+          try {
+            setStatus("loading", "Apagando thread...");
+
+            const wasActiveConversation = nextConversationId === activeConversationId;
+            await deleteConversationInCloud(nextConversationId);
+
+            if (wasActiveConversation) {
+              if (conversationItems.length > 0) {
+                await setActiveConversation(conversationItems[0].id);
+              } else {
+                const createdConversation = await createConversationInCloud("Nova thread");
+
+                if (createdConversation) {
+                  await setActiveConversation(createdConversation.id, {
+                    hydrateMessages: false,
+                  });
+                } else {
+                  persistActiveConversationId("");
+                  replaceMessages([]);
+                }
+              }
+            }
+
+            setStatus("", "Thread apagada");
+          } catch (error) {
+            setStatus(
+              "error",
+              error instanceof Error ? error.message : "Falha ao apagar thread",
+            );
+          }
+        })();
+
+        return;
+      }
 
       if (!nextConversationId || nextConversationId === activeConversationId) {
         return;
