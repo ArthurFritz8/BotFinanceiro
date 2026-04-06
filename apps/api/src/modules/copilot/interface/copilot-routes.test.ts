@@ -1809,6 +1809,204 @@ void it("POST /v1/copilot/chat prioriza Tavily quando configurado e ordena fonte
   assert.deepEqual(body.data.toolCallsUsed, ["search_web_realtime"]);
 });
 
+void it("POST /v1/copilot/chat aplica matriz contextual e prioriza fontes de equities sobre cripto", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+  mutableEnv.WEB_SEARCH_PROVIDER_STRATEGY = "tavily_then_duckduckgo";
+  mutableEnv.WEB_SEARCH_TAVILY_API_KEY = "tvly-test-key-1234567890";
+
+  let openRouterCalls = 0;
+  let tavilyCalls = 0;
+  let duckDuckGoCalls = 0;
+  const capturedOpenRouterBodies: string[] = [];
+
+  globalThis.fetch = ((input, init) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+      capturedOpenRouterBodies.push(typeof init?.body === "string" ? init.body : "");
+
+      if (openRouterCalls === 1) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content: null,
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        function: {
+                          arguments: '{"focus":"general","maxResults":5,"query":"AAPL earnings and guidance"}',
+                          name: "search_web_realtime",
+                        },
+                        id: "call_search_web_equities_1",
+                        type: "function",
+                      },
+                    ],
+                  },
+                },
+              ],
+              id: "gen-tool-web-equities-001",
+              model: "google/gemini-1.5-flash",
+              usage: {
+                completion_tokens: 22,
+                prompt_tokens: 36,
+                total_tokens: 58,
+              },
+            }),
+            {
+              headers: {
+                "content-type": "application/json",
+              },
+              status: 200,
+            },
+          ),
+        );
+      }
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "Resumo de equities atualizado com fontes de maior confianca para earnings.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-tool-web-equities-002",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 18,
+              prompt_tokens: 44,
+              total_tokens: 62,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.tavily.com/search")) {
+      tavilyCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            results: [
+              {
+                content: "AAPL-like token sentiment and meme activity.",
+                title: "AAPL token tracker",
+                url: "https://www.coingecko.com/en/coins/aapl-token",
+              },
+              {
+                content: "Apple quarterly earnings and updated forward guidance from management.",
+                title: "Apple earnings beat expectations",
+                url: "https://www.reuters.com/markets/us/apple-earnings-update-2026-04-05/",
+              },
+            ],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.duckduckgo.com/?")) {
+      duckDuckGoCalls += 1;
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Atualize Apple earnings e guidance do ultimo trimestre.",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 2);
+  assert.equal(tavilyCalls, 1);
+  assert.equal(duckDuckGoCalls, 0);
+
+  const secondRequestPayload = JSON.parse(capturedOpenRouterBodies[1] ?? "{}") as {
+    messages?: Array<{
+      content?: string;
+      role?: string;
+    }>;
+  };
+
+  const toolMessages = (secondRequestPayload.messages ?? []).filter((messageItem) => messageItem.role === "tool");
+
+  const parsedToolPayloads = toolMessages
+    .map((messageItem) => {
+      if (typeof messageItem.content !== "string") {
+        return null;
+      }
+
+      try {
+        return JSON.parse(messageItem.content) as {
+          data?: {
+            provider?: string;
+            results?: Array<{
+              domain?: string;
+            }>;
+          };
+          ok?: boolean;
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter(
+      (
+        toolPayload,
+      ): toolPayload is {
+        data?: {
+          provider?: string;
+          results?: Array<{ domain?: string }>;
+        };
+        ok?: boolean;
+      } =>
+      toolPayload !== null,
+    );
+
+  const webSearchToolPayload = parsedToolPayloads.find(
+    (toolPayload) => toolPayload.data?.provider === "tavily" && Array.isArray(toolPayload.data.results),
+  );
+
+  assert.ok(webSearchToolPayload);
+
+  const rankedDomains = (webSearchToolPayload?.data?.results ?? []).map((resultItem) => resultItem.domain ?? "");
+  const reutersRank = rankedDomains.indexOf("reuters.com");
+  const coingeckoRank = rankedDomains.indexOf("coingecko.com");
+
+  assert.ok(reutersRank >= 0);
+  assert.ok(coingeckoRank >= 0);
+  assert.ok(reutersRank < coingeckoRank);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-tool-web-equities-002");
+  assert.deepEqual(body.data.toolCallsUsed, ["search_web_realtime"]);
+});
+
 void it("POST /v1/copilot/chat faz fallback para DuckDuckGo quando Tavily falha", async () => {
   mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
   mutableEnv.WEB_SEARCH_PROVIDER_STRATEGY = "tavily_then_duckduckgo";

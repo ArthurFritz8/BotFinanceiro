@@ -39,6 +39,8 @@ type WebSearchSourceType =
   | "research"
   | "unknown";
 
+type MarketContext = "commodities" | "crypto" | "defi" | "equities" | "fixed_income" | "forex" | "general" | "macro";
+
 interface WebSearchRawResultItem {
   snippet: string;
   title: string;
@@ -49,6 +51,16 @@ interface DomainRule {
   confidenceScore: number;
   matcher: RegExp;
   sourceType: WebSearchSourceType;
+}
+
+interface ContextMatcherRule {
+  context: Exclude<MarketContext, "general">;
+  matcher: RegExp;
+}
+
+interface ContextualDomainRule {
+  contextAdjustments: Partial<Record<MarketContext, number>>;
+  matcher: RegExp;
 }
 
 const domainRules: DomainRule[] = [
@@ -141,6 +153,159 @@ const domainRules: DomainRule[] = [
     confidenceScore: 34,
     matcher: /(^|\.)x\.com$|(^|\.)twitter\.com$|(^|\.)t\.me$|(^|\.)discord\.gg$/,
     sourceType: "community",
+  },
+];
+
+const queryContextMatcherRules: ContextMatcherRule[] = [
+  {
+    context: "crypto",
+    matcher:
+      /\b(crypto|cripto|token|altcoin|bitcoin|btc|ethereum|eth|solana|airdrop|onchain|blockchain|memecoin|meme\s*coin|cex|dex|wallet|stablecoin|swap|bridge)\b/,
+  },
+  {
+    context: "defi",
+    matcher: /\b(defi|tvl|liquidity|liquidez|pool|staking|farm|apr|apy|amm|lending|protocol)\b/,
+  },
+  {
+    context: "equities",
+    matcher:
+      /\b(acao|acoes|stock|stocks|equity|equities|nasdaq|nyse|earnings|guidance|dividend|ticker|sp500|s&p\s*500|ibovespa|b3|balanco)\b/,
+  },
+  {
+    context: "forex",
+    matcher:
+      /\b(forex|fx|cambio|exchange\s*rate|usdbrl|usdbrl|eurusd|dolar|euro|yen|iene|libra|moeda|currenc(y|ies))\b/,
+  },
+  {
+    context: "fixed_income",
+    matcher:
+      /\b(renda\s*f ixa|renda\s*fixa|bond|bonds|treasury|yield\s*curve|duration|coupon|cupom|selic|juros|ntn-b|ltn|fed\s*funds)\b/,
+  },
+  {
+    context: "commodities",
+    matcher:
+      /\b(commodity|commodities|oil|petroleo|brent|wti|gold|ouro|silver|prata|copper|cobre|soybean|soja|milho|natural\s*gas)\b/,
+  },
+  {
+    context: "macro",
+    matcher:
+      /\b(macro|inflacao|inflation|cpi|pce|payroll|gdp|pib|fomc|ecb|bce|banco\s*central|economia|vix|taxa\s*de\s*juros)\b/,
+  },
+];
+
+const sourceTypeContextAdjustments: Record<MarketContext, Partial<Record<WebSearchSourceType, number>>> = {
+  commodities: {
+    community: -5,
+    news: 5,
+    official: 4,
+    research: 4,
+  },
+  crypto: {
+    community: -4,
+    exchange: 6,
+    market_data: 5,
+    official: 2,
+  },
+  defi: {
+    community: -4,
+    market_data: 3,
+    official: 4,
+    research: 6,
+  },
+  equities: {
+    community: -5,
+    market_data: 3,
+    news: 6,
+    official: 6,
+  },
+  fixed_income: {
+    community: -5,
+    news: 3,
+    official: 8,
+    research: 5,
+  },
+  forex: {
+    community: -5,
+    market_data: 3,
+    news: 4,
+    official: 7,
+  },
+  general: {},
+  macro: {
+    community: -5,
+    news: 5,
+    official: 7,
+    research: 4,
+  },
+};
+
+const contextualDomainRules: ContextualDomainRule[] = [
+  {
+    contextAdjustments: {
+      equities: 10,
+      fixed_income: 10,
+      forex: 9,
+      macro: 10,
+    },
+    matcher: /(^|\.)[a-z0-9-]+\.gov(\.[a-z]{2})?$/,
+  },
+  {
+    contextAdjustments: {
+      crypto: 8,
+      defi: 6,
+      equities: -10,
+      fixed_income: -10,
+      forex: -8,
+      macro: -8,
+    },
+    matcher:
+      /(^|\.)coingecko\.com$|(^|\.)coinmarketcap\.com$|(^|\.)geckoterminal\.com$|(^|\.)dexscreener\.com$|(^|\.)coinbase\.com$|(^|\.)binance\.com$|(^|\.)kraken\.com$|(^|\.)okx\.com$/,
+  },
+  {
+    contextAdjustments: {
+      commodities: 8,
+      equities: 9,
+      fixed_income: 8,
+      forex: 7,
+      macro: 10,
+    },
+    matcher: /(^|\.)reuters\.com$|(^|\.)bloomberg\.com$|(^|\.)wsj\.com$|(^|\.)ft\.com$|(^|\.)cnbc\.com$/,
+  },
+  {
+    contextAdjustments: {
+      equities: 10,
+      fixed_income: 9,
+      macro: 7,
+    },
+    matcher: /(^|\.)sec\.gov$|(^|\.)investor\.[a-z0-9-]+\.[a-z]{2,}$/,
+  },
+  {
+    contextAdjustments: {
+      commodities: 4,
+      equities: 8,
+      fixed_income: 8,
+      forex: 7,
+      macro: 8,
+    },
+    matcher: /(^|\.)finance\.yahoo\.com$|(^|\.)marketwatch\.com$|(^|\.)tradingeconomics\.com$/,
+  },
+  {
+    contextAdjustments: {
+      fixed_income: 11,
+      forex: 11,
+      macro: 11,
+    },
+    matcher:
+      /(^|\.)federalreserve\.gov$|(^|\.)ecb\.europa\.eu$|(^|\.)bcb\.gov\.br$|(^|\.)bis\.org$|(^|\.)imf\.org$|(^|\.)worldbank\.org$|(^|\.)oecd\.org$/,
+  },
+  {
+    contextAdjustments: {
+      defi: 10,
+      fixed_income: -6,
+      forex: -6,
+      macro: -5,
+    },
+    matcher: /(^|\.)defillama\.com$|(^|\.)dune\.com$|(^|\.)l2beat\.com$/,
   },
 ];
 
@@ -261,6 +426,77 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function detectMarketContexts(normalizedQuery: string): Set<MarketContext> {
+  const contexts = new Set<MarketContext>();
+
+  for (const contextRule of queryContextMatcherRules) {
+    if (contextRule.matcher.test(normalizedQuery)) {
+      contexts.add(contextRule.context);
+    }
+  }
+
+  if (contexts.size === 0) {
+    contexts.add("general");
+  }
+
+  return contexts;
+}
+
+function scoreContextSignalTerms(context: Exclude<MarketContext, "general">, textBlob: string): number {
+  switch (context) {
+    case "commodities":
+      return /\b(brent|wti|futures|inventory|metals?)\b/.test(textBlob) ? 2 : 0;
+    case "crypto":
+      return /\b(token|pair|contract|onchain|chain|wallet|listing)\b/.test(textBlob) ? 2 : 0;
+    case "defi":
+      return /\b(tvl|liquidity|protocol|pool|staking|apy|apr)\b/.test(textBlob) ? 2 : 0;
+    case "equities":
+      return /\b(earnings|10-k|10-q|guidance|dividend|quarter)\b/.test(textBlob) ? 2 : 0;
+    case "fixed_income":
+      return /\b(yield|duration|coupon|treasury|curve|spread)\b/.test(textBlob) ? 2 : 0;
+    case "forex":
+      return /\b(fx|spot|exchange\s*rate|cross|usd|eur|jpy|gbp|brl)\b/.test(textBlob) ? 2 : 0;
+    case "macro":
+      return /\b(cpi|inflation|payroll|gdp|fomc|rates?|policy|central\s*bank)\b/.test(textBlob) ? 2 : 0;
+    default:
+      return 0;
+  }
+}
+
+function scoreContextualRelevance(
+  contexts: Set<MarketContext>,
+  domain: string,
+  sourceType: WebSearchSourceType,
+  textBlob: string,
+): number {
+  const effectiveContexts = Array.from(contexts).filter(
+    (context): context is Exclude<MarketContext, "general"> => context !== "general",
+  );
+
+  if (effectiveContexts.length === 0) {
+    return 0;
+  }
+
+  let totalAdjustment = 0;
+
+  for (const context of effectiveContexts) {
+    totalAdjustment += sourceTypeContextAdjustments[context]?.[sourceType] ?? 0;
+
+    for (const contextualDomainRule of contextualDomainRules) {
+      if (!contextualDomainRule.matcher.test(domain)) {
+        continue;
+      }
+
+      totalAdjustment += contextualDomainRule.contextAdjustments[context] ?? 0;
+    }
+
+    totalAdjustment += scoreContextSignalTerms(context, textBlob);
+  }
+
+  const averagedAdjustment = Math.round(totalAdjustment / effectiveContexts.length);
+  return clamp(averagedAdjustment, -16, 16);
+}
+
 function scoreDomain(domain: string): { confidenceScore: number; sourceType: WebSearchSourceType } {
   if (domain.length === 0) {
     return {
@@ -296,7 +532,12 @@ function classifyConfidenceLabel(confidenceScore: number): WebSearchConfidenceLa
   return "low";
 }
 
-function adjustConfidenceScore(baseScore: number, textBlob: string, sourceType: WebSearchSourceType): number {
+function adjustConfidenceScore(
+  baseScore: number,
+  textBlob: string,
+  sourceType: WebSearchSourceType,
+  contextualDelta: number,
+): number {
   let adjustedScore = baseScore;
 
   if (highTrustTerms.some((term) => textBlob.includes(term))) {
@@ -310,6 +551,8 @@ function adjustConfidenceScore(baseScore: number, textBlob: string, sourceType: 
   if (sourceType === "community") {
     adjustedScore = Math.min(adjustedScore, 52);
   }
+
+  adjustedScore += contextualDelta;
 
   return clamp(adjustedScore, 12, 98);
 }
@@ -347,7 +590,7 @@ export class WebSearchAdapter {
           continue;
         }
 
-        const rankedResults = this.normalizeAndRankResults(providerResults, parsedInput.maxResults);
+        const rankedResults = this.normalizeAndRankResults(providerResults, parsedInput.query, parsedInput.maxResults);
 
         if (rankedResults.length === 0) {
           continue;
@@ -398,9 +641,14 @@ export class WebSearchAdapter {
     return hasTavilyKey ? ["tavily", "duckduckgo"] : ["duckduckgo"];
   }
 
-  private normalizeAndRankResults(rawItems: WebSearchRawResultItem[], maxResults: number): WebSearchResultItem[] {
+  private normalizeAndRankResults(
+    rawItems: WebSearchRawResultItem[],
+    query: string,
+    maxResults: number,
+  ): WebSearchResultItem[] {
     const dedupe = new Set<string>();
     const rankedResults: WebSearchResultItem[] = [];
+    const queryContexts = detectMarketContexts(normalizeText(query));
 
     for (const rawItem of rawItems) {
       const url = ensureAbsoluteUrl(rawItem.url);
@@ -422,10 +670,12 @@ export class WebSearchAdapter {
       const domain = extractDomain(url);
       const baseDomainScore = scoreDomain(domain);
       const textBlob = normalizeText(`${title} ${snippet}`);
+      const contextualDelta = scoreContextualRelevance(queryContexts, domain, baseDomainScore.sourceType, textBlob);
       const confidenceScore = adjustConfidenceScore(
         baseDomainScore.confidenceScore,
         textBlob,
         baseDomainScore.sourceType,
+        contextualDelta,
       );
 
       rankedResults.push({
