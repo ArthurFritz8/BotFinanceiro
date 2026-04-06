@@ -29,9 +29,54 @@
         </div>
 
         <nav id="app-route-nav" class="sidebar-nav" aria-label="Rotas principais">
-          <button type="button" class="sidebar-nav-button" data-route="chat">Chat</button>
-          <button type="button" class="sidebar-nav-button" data-route="chart-lab">Chart Lab</button>
-          <button type="button" class="sidebar-nav-button" data-route="radar">Radar</button>
+          <button
+            type="button"
+            class="sidebar-nav-button"
+            data-route="chat"
+            data-label="Chat"
+            title="Chat"
+          >
+            <span class="sidebar-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 10h8" />
+                <path d="M8 14h5" />
+                <path d="M6 19.5 3.5 21V7.8c0-1.2.9-2.1 2.1-2.1h12.8c1.2 0 2.1.9 2.1 2.1v8.4c0 1.2-.9 2.1-2.1 2.1H6Z" />
+              </svg>
+            </span>
+            <span class="sidebar-nav-label">Chat</span>
+          </button>
+          <button
+            type="button"
+            class="sidebar-nav-button"
+            data-route="chart-lab"
+            data-label="Chart Lab"
+            title="Chart Lab"
+          >
+            <span class="sidebar-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3.5 3.5v17h17" />
+                <path d="M7 15.8 11 11.8l3.2 2.9 4.3-5.3" />
+              </svg>
+            </span>
+            <span class="sidebar-nav-label">Chart Lab</span>
+          </button>
+          <button
+            type="button"
+            class="sidebar-nav-button"
+            data-route="radar"
+            data-label="Radar"
+            title="Radar"
+          >
+            <span class="sidebar-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 21c4.97 0 9-4.03 9-9" />
+                <path d="M12 17a5 5 0 0 0 5-5" />
+                <path d="M12 13a1 1 0 0 0 1-1" />
+                <path d="M3 21h4.5a13.5 13.5 0 0 0 13.5-13.5V3" />
+              </svg>
+            </span>
+            <span class="sidebar-nav-label">Radar</span>
+          </button>
         </nav>
       </aside>
 
@@ -320,183 +365,182 @@
         </section>
 
         <section class="layout-grid">
-        <aside class="insights-card">
-          <h2>Atalhos Inteligentes</h2>
-          <p>
-            Use prompts de partida para acelerar sua analise diaria e manter consistencia.
-          </p>
+          <section class="chat-panel">
+            <header class="chat-header">
+              <h2>Conversa Geral + Mercado</h2>
+              <div class="chat-header-actions">
+                <span class="status-pill" id="connection-status">Pronto</span>
+                <button type="button" id="auth-logout-button" class="auth-logout-button is-hidden">
+                  Sair
+                </button>
+              </div>
+            </header>
 
-          <div class="quick-prompts" id="quick-prompts">
-            <button type="button" data-prompt="Resuma o mercado cripto de hoje em 5 linhas.">
-              Resumo rapido do mercado
-            </button>
-            <button
-              type="button"
-              data-prompt="Quais os principais riscos de curto prazo para Bitcoin e Ethereum?"
-            >
-              Riscos de curto prazo
-            </button>
-            <button
-              type="button"
-              data-prompt="Analise o grafico de 7 dias do bitcoin com tendencia, suporte, resistencia e volatilidade."
-            >
-              Analise tecnica do grafico
-            </button>
-            <button
-              type="button"
-              data-prompt="Me de um plano de monitoramento para hoje com 3 checkpoints."
-            >
-              Plano de monitoramento
-            </button>
-            <button
-              type="button"
-              data-prompt="Me traga um panorama global com indices, cambio, juros e commodities."
-            >
-              Panorama macro global
-            </button>
-            <button
-              type="button"
-              data-prompt="Monte um radar de airdrops desta semana com score, nivel de confianca e tarefas praticas para eu validar elegibilidade."
-            >
-              Radar de airdrops
-            </button>
-            <button
-              type="button"
-              data-prompt="Traga um snapshot de forex com pares majors e latam, destacando taxa atual, variacao 24h e leitura tatica de risco de cambio."
-            >
-              Snapshot Forex
-            </button>
-            <button
-              type="button"
-              data-prompt="Quero um snapshot de futuros cripto (BTCUSDT, ETHUSDT, SOLUSDT) com funding rate, open interest e sinais de pressao compradora/vendedora."
-            >
-              Snapshot Futuros
-            </button>
-            <button
-              type="button"
-              data-prompt="Me traga um snapshot da B3 com PETR4, VALE3 e ITUB4, incluindo variacao de 24h e leitura rapida de risco local."
-            >
-              Snapshot B3
-            </button>
-            <button
-              type="button"
-              data-prompt="Quero um snapshot de FIIs com HGLG11, KNRI11 e XPLG11, destacando preco, variacao e sinais de rotacao."
-            >
-              Snapshot FIIs
-            </button>
-            <button
-              type="button"
-              data-prompt="Monte um snapshot de acoes globais com AAPL, MSFT, NVDA e TSLA com variacao de 24h e contexto de momentum."
-            >
-              Snapshot Equities
-            </button>
-            <button
-              type="button"
-              data-prompt="Me entregue um snapshot de Wall Street com S&P 500, Nasdaq, VIX e Treasury 10Y para leitura macro de curto prazo."
-            >
-              Snapshot Wall Street
-            </button>
-            <button
-              type="button"
-              data-prompt="Quero um snapshot DeFi com ethereum, chainlink, aave e uniswap, incluindo preco, variacao e liquidez."
-            >
-              Snapshot DeFi
-            </button>
-            <button
-              type="button"
-              data-prompt="Quero um snapshot de opcoes para SPY, QQQ e AAPL com volatilidade implicita proxy, move esperado em 30 dias e bias tatico."
-            >
-              Snapshot Opcoes
-            </button>
-            <button
-              type="button"
-              data-prompt="Me traga um snapshot de commodities com ouro, prata, petroleo e gas, destacando variacao de 24h e leitura de risco."
-            >
-              Snapshot Commodities
-            </button>
-            <button
-              type="button"
-              data-prompt="Quero um snapshot de renda fixa com Treasury 3m, 5y, 10y e 30y, incluindo inclinacao da curva e sinal de risco."
-            >
-              Snapshot Renda Fixa
-            </button>
-            <button
-              type="button"
-              data-prompt="Quero um snapshot de ETFs globais com SPY, VTI, QQQ, EEM e AGG, destacando variacao de 24h e leitura de rotacao entre classes."
-            >
-              Snapshot ETFs
-            </button>
-            <button
-              type="button"
-              data-prompt="Monte uma leitura de rotacao setorial global com XLK, XLF, XLE, XLV e XLI, mostrando forca relativa e breadth (advance/decline)."
-            >
-              Snapshot Setores Globais
-            </button>
-            <button
-              type="button"
-              data-prompt="Quero um snapshot de macro rates com ^IRX, ^FVX, ^TNX, DX-Y.NYB e ^VIX, incluindo inclinacao 10y-5y e regime de risco."
-            >
-              Snapshot Macro Rates
-            </button>
-            <button
-              type="button"
-              data-prompt="Analise minha carteira com pesos SPY:30, QQQ:20, AGG:25, GLD:15 e BTC-USD:10, destacando risco ponderado, exposicao por classe e regime tatico."
-            >
-              Snapshot Carteira
-            </button>
-          </div>
+            <div class="messages" id="messages" aria-live="polite"></div>
 
-          <div class="stack-note">
-            <h3>Stack em uso</h3>
-            <p>
-              Endpoint: <strong>/v1/copilot/chat</strong><br />
-              Modelo atual: <strong id="active-model">google/gemini-2.0-flash-001</strong>
-            </p>
-          </div>
+            <form id="chat-form" class="composer">
+              <label for="chat-input">Mensagem</label>
+              <textarea
+                id="chat-input"
+                name="message"
+                rows="4"
+                maxlength="4000"
+                placeholder="Ex.: Me explique juros compostos, escreva um e-mail curto ou resuma o mercado de hoje"
+                required
+              ></textarea>
 
-          <div class="history-card">
-            <div class="history-card-header">
-              <h3>Conversas</h3>
-              <button id="clear-local-history" type="button">Nova</button>
-            </div>
-            <p id="auth-user-email" class="history-user-email">Modo local sem login.</p>
-            <ul id="conversation-list" class="conversation-list"></ul>
-            <h4 class="history-subtitle">Mensagens recentes</h4>
-            <ul id="recent-history" class="recent-history-list"></ul>
-          </div>
-        </aside>
+              <div class="composer-footer">
+                <div class="hint">Enter para enviar • Shift + Enter para quebrar linha</div>
+                <button id="send-button" type="submit">Enviar ao Copiloto</button>
+              </div>
+            </form>
+          </section>
 
-        <section class="chat-panel">
-          <header class="chat-header">
-            <h2>Conversa Geral + Mercado</h2>
-            <div class="chat-header-actions">
-              <span class="status-pill" id="connection-status">Pronto</span>
-              <button type="button" id="auth-logout-button" class="auth-logout-button is-hidden">
-                Sair
-              </button>
-            </div>
-          </header>
+          <aside class="chat-context-sidebar" aria-label="Contexto do chat">
+            <section class="chat-context-card history-card">
+              <div class="history-card-header">
+                <h3>Historico de Conversas</h3>
+                <button id="clear-local-history" type="button">Nova conversa</button>
+              </div>
+              <ul id="conversation-list" class="conversation-list"></ul>
+            </section>
 
-          <div class="messages" id="messages" aria-live="polite"></div>
+            <section class="chat-context-card chat-shortcuts-card">
+              <div class="chat-shortcuts-head">
+                <h3>Atalhos Inteligentes</h3>
+                <p>Prompts rapidos para disparar analise no chat.</p>
+              </div>
 
-          <form id="chat-form" class="composer">
-            <label for="chat-input">Mensagem</label>
-            <textarea
-              id="chat-input"
-              name="message"
-              rows="4"
-              maxlength="4000"
-              placeholder="Ex.: Me explique juros compostos, escreva um e-mail curto ou resuma o mercado de hoje"
-              required
-            ></textarea>
+              <div class="quick-prompts" id="quick-prompts">
+                <button type="button" data-prompt="Resuma o mercado cripto de hoje em 5 linhas.">
+                  Resumo rapido do mercado
+                </button>
+                <button
+                  type="button"
+                  data-prompt="Quais os principais riscos de curto prazo para Bitcoin e Ethereum?"
+                >
+                  Riscos de curto prazo
+                </button>
+                <button
+                  type="button"
+                  data-prompt="Analise o grafico de 7 dias do bitcoin com tendencia, suporte, resistencia e volatilidade."
+                >
+                  Analise tecnica do grafico
+                </button>
+                <button
+                  type="button"
+                  data-prompt="Me de um plano de monitoramento para hoje com 3 checkpoints."
+                >
+                  Plano de monitoramento
+                </button>
+                <button
+                  type="button"
+                  data-prompt="Me traga um panorama global com indices, cambio, juros e commodities."
+                >
+                  Panorama macro global
+                </button>
+                <button
+                  type="button"
+                  data-prompt="Monte um radar de airdrops desta semana com score, nivel de confianca e tarefas praticas para eu validar elegibilidade."
+                >
+                  Radar de airdrops
+                </button>
+                <button
+                  type="button"
+                  data-prompt="Traga um snapshot de forex com pares majors e latam, destacando taxa atual, variacao 24h e leitura tatica de risco de cambio."
+                >
+                  Snapshot Forex
+                </button>
+                <button
+                  type="button"
+                  data-prompt="Quero um snapshot de futuros cripto (BTCUSDT, ETHUSDT, SOLUSDT) com funding rate, open interest e sinais de pressao compradora/vendedora."
+                >
+                  Snapshot Futuros
+                </button>
+                <button
+                  type="button"
+                  data-prompt="Me traga um snapshot da B3 com PETR4, VALE3 e ITUB4, incluindo variacao de 24h e leitura rapida de risco local."
+                >
+                  Snapshot B3
+                </button>
+                <button
+                  type="button"
+                  data-prompt="Quero um snapshot de FIIs com HGLG11, KNRI11 e XPLG11, destacando preco, variacao e sinais de rotacao."
+                >
+                  Snapshot FIIs
+                </button>
+                <button
+                  type="button"
+                  data-prompt="Monte um snapshot de acoes globais com AAPL, MSFT, NVDA e TSLA com variacao de 24h e contexto de momentum."
+                >
+                  Snapshot Equities
+                </button>
+                <button
+                  type="button"
+                  data-prompt="Me entregue um snapshot de Wall Street com S&P 500, Nasdaq, VIX e Treasury 10Y para leitura macro de curto prazo."
+                >
+                  Snapshot Wall Street
+                </button>
+                <button
+                  type="button"
+                  data-prompt="Quero um snapshot DeFi com ethereum, chainlink, aave e uniswap, incluindo preco, variacao e liquidez."
+                >
+                  Snapshot DeFi
+                </button>
+                <button
+                  type="button"
+                  data-prompt="Quero um snapshot de opcoes para SPY, QQQ e AAPL com volatilidade implicita proxy, move esperado em 30 dias e bias tatico."
+                >
+                  Snapshot Opcoes
+                </button>
+                <button
+                  type="button"
+                  data-prompt="Me traga um snapshot de commodities com ouro, prata, petroleo e gas, destacando variacao de 24h e leitura de risco."
+                >
+                  Snapshot Commodities
+                </button>
+                <button
+                  type="button"
+                  data-prompt="Quero um snapshot de renda fixa com Treasury 3m, 5y, 10y e 30y, incluindo inclinacao da curva e sinal de risco."
+                >
+                  Snapshot Renda Fixa
+                </button>
+                <button
+                  type="button"
+                  data-prompt="Quero um snapshot de ETFs globais com SPY, VTI, QQQ, EEM e AGG, destacando variacao de 24h e leitura de rotacao entre classes."
+                >
+                  Snapshot ETFs
+                </button>
+                <button
+                  type="button"
+                  data-prompt="Monte uma leitura de rotacao setorial global com XLK, XLF, XLE, XLV e XLI, mostrando forca relativa e breadth (advance/decline)."
+                >
+                  Snapshot Setores Globais
+                </button>
+                <button
+                  type="button"
+                  data-prompt="Quero um snapshot de macro rates com ^IRX, ^FVX, ^TNX, DX-Y.NYB e ^VIX, incluindo inclinacao 10y-5y e regime de risco."
+                >
+                  Snapshot Macro Rates
+                </button>
+                <button
+                  type="button"
+                  data-prompt="Analise minha carteira com pesos SPY:30, QQQ:20, AGG:25, GLD:15 e BTC-USD:10, destacando risco ponderado, exposicao por classe e regime tatico."
+                >
+                  Snapshot Carteira
+                </button>
+              </div>
+            </section>
 
-            <div class="composer-footer">
-              <div class="hint">Enter para enviar • Shift + Enter para quebrar linha</div>
-              <button id="send-button" type="submit">Enviar ao Copiloto</button>
-            </div>
-          </form>
+            <footer class="chat-context-footer">
+              <p id="auth-user-email" class="history-user-email">Conta: aguardando login.</p>
+              <p class="chat-context-model">
+                Modelo em uso: <strong id="active-model">google/gemini-2.0-flash-001</strong>
+              </p>
+              <ul id="recent-history" class="recent-history-list is-hidden" aria-hidden="true"></ul>
+            </footer>
+          </aside>
         </section>
-      </section>
 
       </section>
 
