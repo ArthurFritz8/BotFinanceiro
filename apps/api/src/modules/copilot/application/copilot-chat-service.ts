@@ -649,6 +649,10 @@ function extractExchangeMentionsFromWebResults(results: WebSearchResultItem[]): 
   const mentions = new Set<string>();
 
   for (const result of results) {
+    if (result.confidenceScore < 55) {
+      continue;
+    }
+
     const normalizedBlob = normalizeText(`${result.title} ${result.snippet} ${result.url}`);
 
     for (const exchangeMatcher of knownExchangeMatchers) {
@@ -3055,6 +3059,7 @@ export class CopilotChatService {
     });
     const topResults = searchResponse.results.slice(0, 5);
     const exchangeMentions = extractExchangeMentionsFromWebResults(topResults);
+    const highConfidenceSources = topResults.filter((result) => result.confidenceLabel === "high").length;
     const displayAssetHint = normalizedAssetHint.toUpperCase();
 
     if (topResults.length === 0) {
@@ -3067,12 +3072,13 @@ export class CopilotChatService {
     const sourceLines = topResults
       .map((result, index) => {
         const snippet = result.snippet.length > 0 ? result.snippet : "sem snippet relevante";
-        return `${index + 1}. ${result.title} | ${result.url} | ${snippet}`;
+        return `${index + 1}. [${result.confidenceLabel.toUpperCase()} ${result.confidenceScore}] ${result.title} | dominio: ${result.domain || "n/d"} | ${result.url} | ${snippet}`;
       })
       .join("\n");
 
     return [
       `Pesquisa global em tempo real para ${displayAssetHint}.`,
+      `Provider usado: ${searchResponse.provider}. Fontes de alta confianca: ${highConfidenceSources}/${topResults.length}.`,
       exchangeMentions.length > 0
         ? `Possiveis locais de compra/listagem identificados: ${exchangeMentions.join(", ")}.`
         : "Nao houve confirmacao clara de listagem em corretoras grandes nas fontes coletadas agora.",

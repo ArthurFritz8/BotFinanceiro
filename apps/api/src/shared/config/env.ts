@@ -121,7 +121,12 @@ const environmentSchema = z
     OPENROUTER_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
     OPENROUTER_APP_NAME: z.string().trim().default("BotFinanceiro"),
     OPENROUTER_APP_URL: z.union([z.string().url(), z.literal("")]).default(""),
+    WEB_SEARCH_PROVIDER_STRATEGY: z
+      .enum(["duckduckgo_only", "duckduckgo_then_tavily", "tavily_then_duckduckgo"])
+      .default("tavily_then_duckduckgo"),
     WEB_SEARCH_DUCKDUCKGO_API_BASE_URL: z.string().url().default("https://api.duckduckgo.com"),
+    WEB_SEARCH_TAVILY_API_BASE_URL: z.string().url().default("https://api.tavily.com"),
+    WEB_SEARCH_TAVILY_API_KEY: z.string().trim().default(""),
     WEB_SEARCH_TIMEOUT_MS: z.coerce.number().int().positive().default(7000),
     COPILOT_CHAT_AUDIT_ENABLED: booleanFromString.default("true"),
     COPILOT_CHAT_AUDIT_MAX_ITEMS: z.coerce.number().int().min(50).max(200000).default(5000),

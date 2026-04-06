@@ -61,6 +61,9 @@ interface MutableEnv {
   OPENROUTER_APP_URL: string;
   OPENROUTER_MODEL: string;
   OPENROUTER_TIMEOUT_MS: number;
+  WEB_SEARCH_PROVIDER_STRATEGY: "duckduckgo_only" | "duckduckgo_then_tavily" | "tavily_then_duckduckgo";
+  WEB_SEARCH_TAVILY_API_BASE_URL: string;
+  WEB_SEARCH_TAVILY_API_KEY: string;
 }
 
 const mutableEnv = env as unknown as MutableEnv;
@@ -72,6 +75,9 @@ const originalOpenRouterConfig: MutableEnv = {
   OPENROUTER_APP_URL: mutableEnv.OPENROUTER_APP_URL,
   OPENROUTER_MODEL: mutableEnv.OPENROUTER_MODEL,
   OPENROUTER_TIMEOUT_MS: mutableEnv.OPENROUTER_TIMEOUT_MS,
+  WEB_SEARCH_PROVIDER_STRATEGY: mutableEnv.WEB_SEARCH_PROVIDER_STRATEGY,
+  WEB_SEARCH_TAVILY_API_BASE_URL: mutableEnv.WEB_SEARCH_TAVILY_API_BASE_URL,
+  WEB_SEARCH_TAVILY_API_KEY: mutableEnv.WEB_SEARCH_TAVILY_API_KEY,
 };
 
 void beforeEach(() => {
@@ -81,6 +87,9 @@ void beforeEach(() => {
   mutableEnv.OPENROUTER_APP_URL = "";
   mutableEnv.OPENROUTER_MODEL = "google/gemini-1.5-flash";
   mutableEnv.OPENROUTER_TIMEOUT_MS = 15_000;
+  mutableEnv.WEB_SEARCH_PROVIDER_STRATEGY = "tavily_then_duckduckgo";
+  mutableEnv.WEB_SEARCH_TAVILY_API_BASE_URL = "https://api.tavily.com";
+  mutableEnv.WEB_SEARCH_TAVILY_API_KEY = "";
   globalThis.fetch = originalFetch;
   memoryCache.clear();
 });
@@ -93,6 +102,9 @@ void after(async () => {
   mutableEnv.OPENROUTER_APP_URL = originalOpenRouterConfig.OPENROUTER_APP_URL;
   mutableEnv.OPENROUTER_MODEL = originalOpenRouterConfig.OPENROUTER_MODEL;
   mutableEnv.OPENROUTER_TIMEOUT_MS = originalOpenRouterConfig.OPENROUTER_TIMEOUT_MS;
+  mutableEnv.WEB_SEARCH_PROVIDER_STRATEGY = originalOpenRouterConfig.WEB_SEARCH_PROVIDER_STRATEGY;
+  mutableEnv.WEB_SEARCH_TAVILY_API_BASE_URL = originalOpenRouterConfig.WEB_SEARCH_TAVILY_API_BASE_URL;
+  mutableEnv.WEB_SEARCH_TAVILY_API_KEY = originalOpenRouterConfig.WEB_SEARCH_TAVILY_API_KEY;
   await app.close();
 });
 
@@ -1643,6 +1655,271 @@ void it("POST /v1/copilot/chat executa tool de busca web global", async () => {
   assert.deepEqual(body.data.toolCallsUsed, ["search_web_realtime"]);
   assert.equal(body.data.responseId, "gen-tool-web-002");
   assert.equal(body.data.usage.totalTokens, 70);
+});
+
+void it("POST /v1/copilot/chat prioriza Tavily quando configurado e ordena fontes por confianca", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+  mutableEnv.WEB_SEARCH_PROVIDER_STRATEGY = "tavily_then_duckduckgo";
+  mutableEnv.WEB_SEARCH_TAVILY_API_KEY = "tvly-test-key-1234567890";
+
+  let openRouterCalls = 0;
+  let tavilyCalls = 0;
+  let duckDuckGoCalls = 0;
+  const capturedOpenRouterBodies: string[] = [];
+
+  globalThis.fetch = ((input, init) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+      capturedOpenRouterBodies.push(typeof init?.body === "string" ? init.body : "");
+
+      if (openRouterCalls === 1) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content: null,
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        function: {
+                          arguments: '{"focus":"where_to_buy","maxResults":5,"query":"BMFOUR"}',
+                          name: "search_web_realtime",
+                        },
+                        id: "call_search_web_tavily_1",
+                        type: "function",
+                      },
+                    ],
+                  },
+                },
+              ],
+              id: "gen-tool-web-tavily-001",
+              model: "google/gemini-1.5-flash",
+              usage: {
+                completion_tokens: 22,
+                prompt_tokens: 33,
+                total_tokens: 55,
+              },
+            }),
+            {
+              headers: {
+                "content-type": "application/json",
+              },
+              status: 200,
+            },
+          ),
+        );
+      }
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "Busca Tavily concluida com fontes priorizadas por confianca.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-tool-web-tavily-002",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 19,
+              prompt_tokens: 49,
+              total_tokens: 68,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.tavily.com/search")) {
+      tavilyCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            results: [
+              {
+                content: "Rumor thread sobre BMFOUR no X.",
+                title: "BMFOUR thread",
+                url: "https://x.com/someuser/status/123",
+              },
+              {
+                content: "Official listing and market references for BMFOUR.",
+                title: "Base Meme Four (BMFOUR) - CoinGecko",
+                url: "https://www.coingecko.com/en/coins/base-meme-four",
+              },
+            ],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.duckduckgo.com/?")) {
+      duckDuckGoCalls += 1;
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Onde comprar BMFOUR com fontes confiaveis?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 2);
+  assert.equal(tavilyCalls, 1);
+  assert.equal(duckDuckGoCalls, 0);
+  assert.match(capturedOpenRouterBodies[1] ?? "", /provider\\":\\"tavily/);
+  assert.match(capturedOpenRouterBodies[1] ?? "", /confidenceScore/);
+
+  const rankedToolPayload = capturedOpenRouterBodies[1] ?? "";
+  const firstCoingeckoOccurrence = rankedToolPayload.indexOf("coingecko.com");
+  const firstXOccurrence = rankedToolPayload.indexOf("x.com");
+
+  assert.ok(firstCoingeckoOccurrence >= 0);
+  assert.ok(firstXOccurrence >= 0);
+  assert.ok(firstCoingeckoOccurrence < firstXOccurrence);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-tool-web-tavily-002");
+  assert.deepEqual(body.data.toolCallsUsed, ["search_web_realtime"]);
+});
+
+void it("POST /v1/copilot/chat faz fallback para DuckDuckGo quando Tavily falha", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+  mutableEnv.WEB_SEARCH_PROVIDER_STRATEGY = "tavily_then_duckduckgo";
+  mutableEnv.WEB_SEARCH_TAVILY_API_KEY = "tvly-test-key-1234567890";
+
+  let openRouterCalls = 0;
+  let tavilyCalls = 0;
+  let duckDuckGoCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "Sem mais informacoes sobre esse token no momento.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-passive-broker-fallback-provider-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 15,
+              prompt_tokens: 26,
+              total_tokens: 41,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.tavily.com/search")) {
+      tavilyCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            error: "temporary unavailable",
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 503,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.duckduckgo.com/?")) {
+      duckDuckGoCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            AbstractText: "",
+            AbstractURL: "",
+            Heading: "",
+            RelatedTopics: [
+              {
+                FirstURL: "https://www.coingecko.com/en/coins/base-meme-four",
+                Text: "Base Meme Four listing and token references.",
+              },
+            ],
+            Results: [],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "aonde posso comprar BMFOUR?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 1);
+  assert.equal(tavilyCalls, 2);
+  assert.equal(duckDuckGoCalls, 1);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-passive-broker-fallback-provider-001");
+  assert.match(body.data.answer, /Provider usado: duckduckgo/);
+  assert.match(body.data.answer, /Fontes verificadas agora/);
 });
 
 void it("POST /v1/copilot/chat executa tool de cotacao por corretora", async () => {
