@@ -1,8 +1,13 @@
 import {
   OpenRouterChatAdapter,
   type OpenRouterChatCompletion,
+  type OpenRouterConversationMessage,
   type OpenRouterToolDefinition,
 } from "../../../integrations/ai/openrouter-chat-adapter.js";
+import {
+  WebSearchAdapter,
+  type WebSearchResultItem,
+} from "../../../integrations/search/web-search-adapter.js";
 import {
   CoinCapMarketDataAdapter,
   type CoinCapMarketAsset,
@@ -94,6 +99,7 @@ export interface CopilotChatInput {
 }
 
 const openRouterChatAdapter = new OpenRouterChatAdapter();
+const webSearchAdapter = new WebSearchAdapter();
 const coinCapMarketDataAdapter = new CoinCapMarketDataAdapter();
 const yahooMarketDataAdapter = new YahooMarketDataAdapter();
 const brokerMarketService = new BrokerMarketService();
@@ -142,6 +148,9 @@ const copilotDefaultSystemPrompt = [
   "Quando a pergunta pedir comprar/vender, responda com sinal tatico informativo (buy/sell/wait), confianca e niveis de risco, sem tratar como recomendacao de investimento.",
   "Quando a pergunta envolver indices, acoes, cambio, juros ou commodities, use get_financial_market_snapshot.",
   "Quando a pergunta envolver risco de curto prazo, entregue analise por fatores (volatilidade, liquidez, macro e operacao), sem recomendacao de investimento.",
+  "Quando houver ativo/ticker desconhecido, anafora (ex.: 'essa moeda') ou duvida sobre onde comprar/listagem, use obrigatoriamente a tool search_web_realtime antes de responder.",
+  "E proibido delegar o trabalho com frases como 'pesquise no Google', 'procure no Google' ou equivalentes.",
+  "Ao usar dados de busca web, sintetize e cite as principais fontes com URL no corpo da resposta.",
   "Nao recuse genericamente se houver dados disponiveis nas tools; entregue resposta concisa com numeros e contexto.",
   "Se algum dado estiver indisponivel, explicite a limitacao e continue com os dados que conseguiu coletar.",
   "Nao forneca recomendacao de investimento; mantenha tom analitico e neutro.",
@@ -205,6 +214,12 @@ const copilotFinancialMarketSnapshotToolInputSchema = z.object({
 const copilotBrokerLiveQuoteToolInputSchema = z.object({
   assetId: z.string().trim().min(1).default("bitcoin"),
   broker: z.enum(["binance", "bybit", "coinbase", "kraken", "okx", "iqoption"]).default("binance"),
+});
+
+const copilotWebSearchToolInputSchema = z.object({
+  focus: z.enum(["general", "news", "token_lookup", "where_to_buy"]).default("general"),
+  maxResults: z.number().int().min(3).max(10).default(6),
+  query: z.string().trim().min(2).max(180),
 });
 
 const copilotForexMarketSnapshotToolInputSchema = z.object({
@@ -341,6 +356,10 @@ const copilotDefiMarketSnapshotToolInputSchema = z.object({
 
 type FinancialMarketPreset = z.infer<typeof copilotFinancialMarketSnapshotToolInputSchema>["preset"];
 
+const copilotConversationHistoryLimit = 24;
+const copilotConversationMaxChars = 12_000;
+const copilotIntentContextUserTurns = 3;
+
 interface MultiSpotPriceSuccessResult {
   assetId: string;
   cacheState: SpotPriceResponse["cache"]["state"];
@@ -416,6 +435,99 @@ const riskAssetAliases: Array<{ aliases: string[]; assetId: string }> = [
   },
 ];
 
+const brokerWhereToBuyAliases = [
+  "onde comprar",
+  "aonde comprar",
+  "onde compra",
+  "aonde compra",
+  "qual corretora",
+  "qual broker",
+  "qual exchange",
+  "em qual corretora",
+  "em qual exchange",
+  "onde negocia",
+  "onde negociar",
+  "onde listar",
+  "onde listado",
+  "listado em qual",
+];
+
+const assetHintNoiseTokens = new Set([
+  "token",
+  "moeda",
+  "coin",
+  "cripto",
+  "crypto",
+  "essa",
+  "esse",
+  "isto",
+  "isso",
+  "onde",
+  "aonde",
+  "comprar",
+  "corretora",
+  "exchange",
+  "broker",
+  "qual",
+  "como",
+  "para",
+  "com",
+  "sobre",
+  "hoje",
+  "agora",
+]);
+
+const knownExchangeMatchers: Array<{ aliases: string[]; label: string }> = [
+  {
+    aliases: ["binance"],
+    label: "Binance",
+  },
+  {
+    aliases: ["bybit"],
+    label: "Bybit",
+  },
+  {
+    aliases: ["coinbase"],
+    label: "Coinbase",
+  },
+  {
+    aliases: ["kraken"],
+    label: "Kraken",
+  },
+  {
+    aliases: ["okx", "ok-ex", "ok ex"],
+    label: "OKX",
+  },
+  {
+    aliases: ["mexc"],
+    label: "MEXC",
+  },
+  {
+    aliases: ["gate.io", "gateio", "gate io"],
+    label: "Gate.io",
+  },
+  {
+    aliases: ["kucoin"],
+    label: "KuCoin",
+  },
+  {
+    aliases: ["bitget"],
+    label: "Bitget",
+  },
+  {
+    aliases: ["uniswap"],
+    label: "Uniswap",
+  },
+  {
+    aliases: ["pancakeswap"],
+    label: "PancakeSwap",
+  },
+  {
+    aliases: ["raydium"],
+    label: "Raydium",
+  },
+];
+
 const airdropNoiseTokens = new Set([
   "airdrop",
   "airdrops",
@@ -451,6 +563,102 @@ function normalizeText(value: string): string {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+}
+
+function hasWhereToBuyIntent(normalizedMessage: string): boolean {
+  if (brokerWhereToBuyAliases.some((alias) => normalizedMessage.includes(alias))) {
+    return true;
+  }
+
+  return (
+    /(?:onde|aonde)[^a-z0-9]{0,4}(?:eu\s+)?(?:posso\s+)?compr/.test(normalizedMessage) ||
+    /(?:qual|em\s+qual)[^a-z0-9]{0,4}(?:a\s+)?(?:melhor\s+)?(?:corretora|broker|exchange)/.test(normalizedMessage)
+  );
+}
+
+function extractAssetHintCandidates(message: string): string[] {
+  const explicitCandidates: string[] = [];
+  const explicitRegex = /(?:token|ticker|ativo|asset|moeda)\s*[:=-]\s*([a-zA-Z0-9-]{2,24})/gi;
+
+  for (const match of message.matchAll(explicitRegex)) {
+    const candidate = typeof match[1] === "string" ? match[1].trim().toLowerCase() : "";
+
+    if (candidate.length > 1 && !assetHintNoiseTokens.has(candidate)) {
+      explicitCandidates.push(candidate);
+    }
+  }
+
+  const uppercaseCandidates = (message.match(/\b[A-Z][A-Z0-9]{2,14}\b/g) ?? [])
+    .map((token) => token.trim().toLowerCase())
+    .filter((token) => !assetHintNoiseTokens.has(token));
+
+  const looseTagMatch = normalizeText(message).match(/(?:token|ticker|ativo|asset|moeda)\s+([a-z0-9-]{2,24})/);
+  const looseCandidate =
+    looseTagMatch && typeof looseTagMatch[1] === "string" ? looseTagMatch[1].trim().toLowerCase() : "";
+
+  const mergedCandidates = [
+    ...explicitCandidates,
+    ...uppercaseCandidates,
+    ...(looseCandidate.length > 0 && !assetHintNoiseTokens.has(looseCandidate) ? [looseCandidate] : []),
+  ];
+
+  return [...new Set(mergedCandidates)].slice(0, 8);
+}
+
+function resolvePrimaryAssetHint(message: string): string {
+  const normalizedMessage = normalizeText(message);
+  const mappedAlias = riskAssetAliases.find((assetAlias) =>
+    assetAlias.aliases.some((alias) => hasExactAlias(normalizedMessage, alias)),
+  );
+
+  if (mappedAlias) {
+    return mappedAlias.assetId;
+  }
+
+  const candidates = extractAssetHintCandidates(message);
+
+  if (candidates.length > 0) {
+    return candidates[0] ?? "bitcoin";
+  }
+
+  return resolvePrimaryAssetIdForChart(message);
+}
+
+function buildFocusedWebSearchQuery(
+  query: string,
+  focus: "general" | "news" | "token_lookup" | "where_to_buy",
+): string {
+  const trimmedQuery = query.trim();
+
+  if (focus === "where_to_buy") {
+    return `${trimmedQuery} token where to buy exchange listing liquidity`;
+  }
+
+  if (focus === "token_lookup") {
+    return `${trimmedQuery} crypto token overview official website contract`;
+  }
+
+  if (focus === "news") {
+    return `${trimmedQuery} crypto market latest news today`;
+  }
+
+  return trimmedQuery;
+}
+
+function extractExchangeMentionsFromWebResults(results: WebSearchResultItem[]): string[] {
+  const mentions = new Set<string>();
+
+  for (const result of results) {
+    const normalizedBlob = normalizeText(`${result.title} ${result.snippet} ${result.url}`);
+
+    for (const exchangeMatcher of knownExchangeMatchers) {
+      if (exchangeMatcher.aliases.some((alias) => normalizedBlob.includes(alias))) {
+        mentions.add(exchangeMatcher.label);
+      }
+    }
+  }
+
+  return [...mentions].slice(0, 8);
 }
 
 const financialIntentKeywords = [
@@ -686,19 +894,7 @@ function hasBrokerIntegrationIntent(message: string): boolean {
     normalizedMessage.includes("integracao") ||
     normalizedMessage.includes("conectar") ||
     normalizedMessage.includes("api");
-
-  const asksWhereToBuy =
-    normalizedMessage.includes("onde comprar") ||
-    normalizedMessage.includes("aonde comprar") ||
-    normalizedMessage.includes("onde compra") ||
-    normalizedMessage.includes("aonde compra") ||
-    normalizedMessage.includes("qual corretora") ||
-    normalizedMessage.includes("qual broker") ||
-    normalizedMessage.includes("qual exchange") ||
-    normalizedMessage.includes("em qual corretora") ||
-    normalizedMessage.includes("em qual exchange") ||
-    normalizedMessage.includes("onde negocia") ||
-    normalizedMessage.includes("onde negociar");
+  const asksWhereToBuy = hasWhereToBuyIntent(normalizedMessage);
 
   const hasTokenContext =
     normalizedMessage.includes("token") ||
@@ -707,6 +903,7 @@ function hasBrokerIntegrationIntent(message: string): boolean {
     normalizedMessage.includes("cripto") ||
     normalizedMessage.includes("crypto") ||
     normalizedMessage.includes("memecoin") ||
+    extractAssetHintCandidates(message).length > 0 ||
     hasFinancialIntent(message);
 
   return (mentionsBroker && asksForLiveQuote) || (asksWhereToBuy && hasTokenContext);
@@ -878,6 +1075,14 @@ function hasGenericLimitationAnswer(answer: string): boolean {
     normalizedAnswer.includes("falha ao obter") ||
     normalizedAnswer.includes("panorama do mercado") ||
     normalizedAnswer.includes("dados do coincap") ||
+    normalizedAnswer.includes("sem mais informacoes") ||
+    normalizedAnswer.includes("dificil dizer") ||
+    normalizedAnswer.includes("pesquise no google") ||
+    normalizedAnswer.includes("pesquisar no google") ||
+    normalizedAnswer.includes("procure no google") ||
+    normalizedAnswer.includes("pesquise na internet") ||
+    normalizedAnswer.includes("pesquisar na internet") ||
+    normalizedAnswer.includes("voce pode tentar pesquisar") ||
     normalizedAnswer.includes("tente novamente mais tarde")
   );
 }
@@ -1457,6 +1662,50 @@ const copilotTools: OpenRouterToolDefinition[] = [
     },
     run: (input: z.infer<typeof copilotBrokerLiveQuoteToolInputSchema>) => {
       return brokerMarketService.getLiveQuote(input);
+    },
+  },
+  {
+    description:
+      "Executa busca web global em tempo real para descobrir informacoes fora da base local, incluindo listagem de tokens, onde comprar e contexto de projetos desconhecidos.",
+    inputSchema: copilotWebSearchToolInputSchema,
+    name: "search_web_realtime",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        focus: {
+          default: "general",
+          description: "Foco da busca: general, news, token_lookup ou where_to_buy",
+          enum: ["general", "news", "token_lookup", "where_to_buy"],
+          type: "string",
+        },
+        maxResults: {
+          default: 6,
+          description: "Quantidade maxima de resultados retornados",
+          maximum: 10,
+          minimum: 3,
+          type: "number",
+        },
+        query: {
+          description: "Consulta textual livre para pesquisa global",
+          type: "string",
+        },
+      },
+      required: ["query"],
+      type: "object",
+    },
+    run: async (input: z.infer<typeof copilotWebSearchToolInputSchema>) => {
+      const focusedQuery = buildFocusedWebSearchQuery(input.query, input.focus);
+      const searchResponse = await webSearchAdapter.search({
+        maxResults: input.maxResults,
+        query: focusedQuery,
+      });
+
+      return {
+        ...searchResponse,
+        exchangeMentions: extractExchangeMentionsFromWebResults(searchResponse.results),
+        focus: input.focus,
+        focusedQuery,
+      };
     },
   },
   {
@@ -2133,9 +2382,25 @@ const copilotTools: OpenRouterToolDefinition[] = [
 export class CopilotChatService {
   public async chat(input: CopilotChatInput): Promise<OpenRouterChatCompletion> {
     const preparedInput = this.withDefaultSystemPrompt(input);
-    const contextualInput = await this.withConversationContext(preparedInput, input.sessionId);
-    const completion = await openRouterChatAdapter.createCompletionWithTools(contextualInput, copilotTools);
-    const completionWithFallback = await this.applyIntentFallback(contextualInput, completion);
+    const conversationMessages = await this.buildConversationMessages(preparedInput, input.sessionId);
+    const completion = await openRouterChatAdapter.createCompletionWithTools(
+      {
+        maxTokens: preparedInput.maxTokens,
+        messages: conversationMessages,
+        systemPrompt: preparedInput.systemPrompt,
+        temperature: preparedInput.temperature,
+      },
+      copilotTools,
+    );
+    const intentContextMessage = this.buildIntentContextMessage(preparedInput.message, conversationMessages);
+    const completionWithFallback = await this.applyIntentFallback(
+      {
+        ...preparedInput,
+        message: intentContextMessage,
+      },
+      completion,
+      conversationMessages,
+    );
 
     try {
       await copilotChatAuditStore.append({
@@ -2178,73 +2443,117 @@ export class CopilotChatService {
     };
   }
 
-  private async withConversationContext(
+  private async buildConversationMessages(
     input: CopilotChatInput,
     sessionId?: string,
-  ): Promise<CopilotChatInput> {
+  ): Promise<OpenRouterConversationMessage[]> {
+    const currentMessage = input.message.trim();
     const safeSessionId = typeof sessionId === "string" ? sessionId.trim() : "";
 
-    if (safeSessionId.length < 8 || input.message.length > 3200) {
-      return input;
+    if (safeSessionId.length < 8) {
+      return [
+        {
+          content: currentMessage,
+          role: "user",
+        },
+      ];
     }
 
     try {
       const sessionHistory = await copilotChatAuditStore.getSessionHistory({
-        limit: 8,
+        limit: copilotConversationHistoryLimit,
         sessionId: safeSessionId,
       });
 
-      if (!Array.isArray(sessionHistory.messages) || sessionHistory.messages.length === 0) {
-        return input;
+      const historicalMessages = Array.isArray(sessionHistory.messages)
+        ? sessionHistory.messages
+            .filter((message) => message.role === "assistant" || message.role === "user")
+            .map((message) => ({
+              content: message.content.trim(),
+              role: message.role,
+            }))
+            .filter((message) => message.content.length > 0)
+        : [];
+      const mergedMessages: OpenRouterConversationMessage[] = [
+        ...historicalMessages,
+        {
+          content: currentMessage,
+          role: "user",
+        },
+      ];
+      const boundedMessages: OpenRouterConversationMessage[] = [];
+      let usedChars = 0;
+
+      for (let index = mergedMessages.length - 1; index >= 0; index -= 1) {
+        const candidateMessage = mergedMessages[index];
+
+        if (!candidateMessage) {
+          continue;
+        }
+
+        const candidateChars = candidateMessage.content.length;
+
+        if (boundedMessages.length > 0 && usedChars + candidateChars > copilotConversationMaxChars) {
+          break;
+        }
+
+        boundedMessages.unshift(candidateMessage);
+        usedChars += candidateChars;
       }
 
-      const recentMessages = sessionHistory.messages.slice(-4);
-      const compactContext = recentMessages
-        .map((message) => {
-          const speaker = message.role === "assistant" ? "Assistente" : "Usuario";
-          const compactContent = message.content.replace(/\s+/g, " ").trim();
-
-          if (compactContent.length === 0) {
-            return "";
-          }
-
-          return `${speaker}: ${compactContent.slice(0, 320)}`;
-        })
-        .filter((line) => line.length > 0)
-        .join("\n");
-
-      if (compactContext.length === 0) {
-        return input;
+      while (boundedMessages.length > 1 && boundedMessages[0]?.role === "assistant") {
+        boundedMessages.shift();
       }
 
-      const availableContextChars = Math.max(0, 3900 - input.message.length);
-
-      if (availableContextChars < 120) {
-        return input;
+      if (boundedMessages.length > 0) {
+        return boundedMessages;
       }
 
-      const boundedContext = compactContext.slice(0, availableContextChars);
-
-      return {
-        ...input,
-        message: `${input.message}\n\nContexto recente da conversa:\n${boundedContext}`,
-      };
+      return [
+        {
+          content: currentMessage,
+          role: "user",
+        },
+      ];
     } catch (error) {
       logger.warn(
         {
           err: error,
           sessionId: safeSessionId,
         },
-        "Failed to load copilot session context, continuing without context",
+        "Failed to load structured chat history, falling back to single-message mode",
       );
 
-      return input;
+      return [
+        {
+          content: currentMessage,
+          role: "user",
+        },
+      ];
     }
+  }
+
+  private buildIntentContextMessage(
+    currentMessage: string,
+    conversationMessages: OpenRouterConversationMessage[],
+  ): string {
+    const recentUserMessages = conversationMessages
+      .filter((message) => message.role === "user")
+      .slice(-copilotIntentContextUserTurns)
+      .map((message) => message.content.trim())
+      .filter((message) => message.length > 0);
+
+    if (recentUserMessages.length === 0) {
+      return currentMessage;
+    }
+
+    return recentUserMessages.join("\n");
   }
 
   private async applyIntentFallback(
     input: CopilotChatInput,
     completion: OpenRouterChatCompletion,
+    conversationMessages: OpenRouterConversationMessage[],
   ): Promise<OpenRouterChatCompletion> {
     if (shouldForceChartFallback(input.message, completion)) {
       try {
@@ -2266,7 +2575,7 @@ export class CopilotChatService {
 
     if (shouldForceGeneralAssistantFallback(input.message, completion)) {
       try {
-        const fallbackAnswer = await this.buildGeneralAssistantFallback(input);
+        const fallbackAnswer = await this.buildGeneralAssistantFallback(input, conversationMessages);
 
         return {
           ...completion,
@@ -2399,10 +2708,13 @@ export class CopilotChatService {
     return completion;
   }
 
-  private async buildGeneralAssistantFallback(input: CopilotChatInput): Promise<string> {
+  private async buildGeneralAssistantFallback(
+    input: CopilotChatInput,
+    conversationMessages: OpenRouterConversationMessage[],
+  ): Promise<string> {
     const fallbackCompletion = await openRouterChatAdapter.createCompletion({
       maxTokens: input.maxTokens,
-      message: input.message,
+      messages: conversationMessages,
       systemPrompt: copilotGeneralAssistantSystemPrompt,
       temperature: typeof input.temperature === "number" ? Math.max(0.2, input.temperature) : 0.3,
     });
@@ -2661,27 +2973,112 @@ export class CopilotChatService {
 
   private async buildBrokerIntegrationFallback(message: string): Promise<string> {
     const broker = resolveBrokerFromMessage(message);
-    const assetId = resolvePrimaryAssetIdForChart(message);
-    const quote = await brokerMarketService.getLiveQuote({
-      assetId,
-      broker,
-    });
+    const normalizedMessage = normalizeText(message);
+    const assetHint = resolvePrimaryAssetHint(message);
+    const asksWhereToBuy = hasWhereToBuyIntent(normalizedMessage);
 
-    if (quote.market.price === null) {
+    if (asksWhereToBuy) {
+      try {
+        return await this.buildWebWhereToBuyFallback(message, assetHint);
+      } catch (error) {
+        logger.warn(
+          {
+            assetHint,
+            err: error,
+          },
+          "Web where-to-buy fallback failed, trying broker quote fallback",
+        );
+      }
+    }
+
+    try {
+      const quote = await brokerMarketService.getLiveQuote({
+        assetId: assetHint,
+        broker,
+      });
+
+      if (quote.market.price === null) {
+        return [
+          `Broker ${broker.toUpperCase()} mapeado no bot, mas ainda em modo ${quote.status}.`,
+          `Ativo consultado: ${capitalizeAssetId(quote.assetId)} | cotacao ao vivo indisponivel nesta build.`,
+          `Status tecnico: ${quote.notes}`,
+          "Proximo passo de integracao: habilitar bridge privada autenticada da corretora para saldo, ordens e stream de preco em tempo real.",
+        ].join("\n");
+      }
+
       return [
-        `Broker ${broker.toUpperCase()} mapeado no bot, mas ainda em modo ${quote.status}.`,
-        `Ativo consultado: ${capitalizeAssetId(quote.assetId)} | cotacao ao vivo indisponivel nesta build.`,
-        `Status tecnico: ${quote.notes}`,
-        "Proximo passo de integracao: habilitar bridge privada autenticada da corretora para saldo, ordens e stream de preco em tempo real.",
+        `Cotacao via broker ${quote.broker.toUpperCase()} para ${capitalizeAssetId(quote.assetId)}.`,
+        `Preco: ${formatSpotPrice(quote.market.price, quote.currency)} | 24h: ${formatPercent(quote.market.changePercent24h)} | volume 24h: ${formatCompactUsd(quote.market.volume24h)} | simbolo: ${quote.market.symbol ?? "n/d"}.`,
+        `Capacidades disponiveis nesta integracao: liveQuote=${quote.capabilities.liveQuote ? "sim" : "nao"}, orderExecution=${quote.capabilities.orderExecution ? "sim" : "nao"}, accountBalance=${quote.capabilities.accountBalance ? "sim" : "nao"}.`,
+        `Observacao operacional: ${quote.notes}`,
+        "Leitura profissional: use cotacao de broker como referencia de execucao e confirme liquidez/spread antes de qualquer decisao.",
       ].join("\n");
+    } catch (error) {
+      logger.warn(
+        {
+          assetHint,
+          broker,
+          err: error,
+        },
+        "Broker quote lookup failed, falling back to web where-to-buy discovery",
+      );
+    }
+
+    try {
+      return await this.buildWebWhereToBuyFallback(message, assetHint);
+    } catch (error) {
+      logger.warn(
+        {
+          assetHint,
+          err: error,
+        },
+        "Web fallback for broker integration failed",
+      );
     }
 
     return [
-      `Cotacao via broker ${quote.broker.toUpperCase()} para ${capitalizeAssetId(quote.assetId)}.`,
-      `Preco: ${formatSpotPrice(quote.market.price, quote.currency)} | 24h: ${formatPercent(quote.market.changePercent24h)} | volume 24h: ${formatCompactUsd(quote.market.volume24h)} | simbolo: ${quote.market.symbol ?? "n/d"}.`,
-      `Capacidades disponiveis nesta integracao: liveQuote=${quote.capabilities.liveQuote ? "sim" : "nao"}, orderExecution=${quote.capabilities.orderExecution ? "sim" : "nao"}, accountBalance=${quote.capabilities.accountBalance ? "sim" : "nao"}.`,
-      `Observacao operacional: ${quote.notes}`,
-      "Leitura profissional: use cotacao de broker como referencia de execucao e confirme liquidez/spread antes de qualquer decisao.",
+      `Nao foi possivel confirmar disponibilidade para ${assetHint.toUpperCase()} no momento.`,
+      `Broker alvo: ${broker.toUpperCase()}.`,
+      "Tente novamente em alguns instantes para nova varredura de fontes e cotacao.",
+    ].join("\n");
+  }
+
+  private async buildWebWhereToBuyFallback(message: string, assetHint: string): Promise<string> {
+    const normalizedAssetHint = assetHint.trim().length > 0 ? assetHint.trim().toLowerCase() : "token";
+    const focusedQuery = buildFocusedWebSearchQuery(
+      `${normalizedAssetHint} ${message}`.trim(),
+      "where_to_buy",
+    );
+    const searchResponse = await webSearchAdapter.search({
+      maxResults: 6,
+      query: focusedQuery,
+    });
+    const topResults = searchResponse.results.slice(0, 5);
+    const exchangeMentions = extractExchangeMentionsFromWebResults(topResults);
+    const displayAssetHint = normalizedAssetHint.toUpperCase();
+
+    if (topResults.length === 0) {
+      return [
+        `Pesquisa global em tempo real executada para ${displayAssetHint}, sem resultados estruturados nesta rodada.`,
+        "Nao delego pesquisa para o usuario: posso continuar varrendo em nova tentativa imediatamente.",
+      ].join("\n");
+    }
+
+    const sourceLines = topResults
+      .map((result, index) => {
+        const snippet = result.snippet.length > 0 ? result.snippet : "sem snippet relevante";
+        return `${index + 1}. ${result.title} | ${result.url} | ${snippet}`;
+      })
+      .join("\n");
+
+    return [
+      `Pesquisa global em tempo real para ${displayAssetHint}.`,
+      exchangeMentions.length > 0
+        ? `Possiveis locais de compra/listagem identificados: ${exchangeMentions.join(", ")}.`
+        : "Nao houve confirmacao clara de listagem em corretoras grandes nas fontes coletadas agora.",
+      "Fontes verificadas agora:",
+      sourceLines,
+      "Checklist profissional: valide contrato oficial, rede correta, liquidez, volume real e risco de spoofing antes de qualquer execucao.",
     ].join("\n");
   }
 

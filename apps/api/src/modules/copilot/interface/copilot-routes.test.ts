@@ -176,6 +176,99 @@ void it("POST /v1/copilot/chat retorna resposta da IA quando OpenRouter esta con
   assert.equal(body.data.usage.totalTokens, 32);
 });
 
+void it("POST /v1/copilot/chat envia historico recente no payload do OpenRouter", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  const sessionId = `sessao_contexto_${Date.now()}`;
+  const capturedBodies: string[] = [];
+  let openRouterCalls = 0;
+
+  globalThis.fetch = ((input, init) => {
+    const requestUrl = String(input);
+
+    if (!requestUrl.includes("/chat/completions")) {
+      return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+    }
+
+    openRouterCalls += 1;
+    capturedBodies.push(typeof init?.body === "string" ? init.body : "");
+
+    const assistantAnswer =
+      openRouterCalls === 1
+        ? "Contexto registrado para BMFOUR."
+        : "Consigo seguir com BMFOUR usando o contexto desta sessao.";
+
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: assistantAnswer,
+                role: "assistant",
+              },
+            },
+          ],
+          id: `gen-history-context-${openRouterCalls}`,
+          model: "google/gemini-1.5-flash",
+          usage: {
+            completion_tokens: 18,
+            prompt_tokens: 30,
+            total_tokens: 48,
+          },
+        }),
+        {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 200,
+        },
+      ),
+    );
+  }) as typeof fetch;
+
+  const firstResponse = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Token: BMFOUR. Quero acompanhamento profissional.",
+      sessionId,
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(firstResponse.statusCode, 200);
+
+  const secondResponse = await app.inject({
+    method: "POST",
+    payload: {
+      message: "aonde posso comprar essa moeda?",
+      sessionId,
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(secondResponse.statusCode, 200);
+  assert.equal(openRouterCalls, 2);
+
+  const secondRequestPayload = JSON.parse(capturedBodies[1] ?? "{}") as {
+    messages?: Array<{
+      content?: string;
+      role?: string;
+    }>;
+  };
+  const secondRequestMessages = Array.isArray(secondRequestPayload.messages)
+    ? secondRequestPayload.messages
+    : [];
+
+  assert.ok(secondRequestMessages.length >= 3);
+  assert.ok(secondRequestMessages.some((item) => item.role === "user" && item.content?.includes("BMFOUR")));
+  assert.ok(secondRequestMessages.some((item) => item.role === "assistant" && item.content?.includes("Contexto registrado")));
+  assert.equal(secondRequestMessages[secondRequestMessages.length - 1]?.role, "user");
+  assert.equal(secondRequestMessages[secondRequestMessages.length - 1]?.content, "aonde posso comprar essa moeda?");
+});
+
 void it("POST /v1/copilot/chat aplica fallback geral para pergunta nao financeira", async () => {
   mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
 
@@ -1311,6 +1404,245 @@ void it("POST /v1/copilot/chat aplica fallback de corretora para IQ Option", asy
   assert.match(body.data.answer, /requires_configuration/);
   assert.match(body.data.answer, /bridge privada/);
   assert.doesNotMatch(body.data.answer, /Nao tenho informacoes suficientes/);
+});
+
+void it("POST /v1/copilot/chat evita resposta passiva com busca global para onde comprar", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let openRouterCalls = 0;
+  let duckDuckGoCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    "BMFOUR parece um projeto de meme. Sem mais informacoes, e dificil dizer exatamente onde comprar.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-passive-broker-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 18,
+              prompt_tokens: 26,
+              total_tokens: 44,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.duckduckgo.com/?")) {
+      duckDuckGoCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            AbstractText: "",
+            AbstractURL: "",
+            Heading: "",
+            RelatedTopics: [
+              {
+                FirstURL: "https://www.coingecko.com/en/coins/base-meme-four",
+                Text: "Base Meme Four (BMFOUR) market page with exchange pairs and liquidity references.",
+              },
+              {
+                FirstURL: "https://www.geckoterminal.com/base/pools/0xabc",
+                Text: "BMFOUR pool on Base network with trading activity and liquidity metrics.",
+              },
+            ],
+            Results: [],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "aonde posso comprar a BMFOUR?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 1);
+  assert.equal(duckDuckGoCalls, 1);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-passive-broker-001");
+  assert.match(body.data.answer, /Pesquisa global em tempo real/);
+  assert.match(body.data.answer, /Fontes verificadas agora/);
+  assert.doesNotMatch(body.data.answer, /pesquise no google/i);
+  assert.doesNotMatch(body.data.answer, /dificil dizer/i);
+});
+
+void it("POST /v1/copilot/chat executa tool de busca web global", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let openRouterCalls = 0;
+  let duckDuckGoCalls = 0;
+  const capturedOpenRouterBodies: string[] = [];
+
+  globalThis.fetch = ((input, init) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+      capturedOpenRouterBodies.push(typeof init?.body === "string" ? init.body : "");
+
+      if (openRouterCalls === 1) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content: null,
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        function: {
+                          arguments: '{"focus":"where_to_buy","maxResults":5,"query":"BMFOUR"}',
+                          name: "search_web_realtime",
+                        },
+                        id: "call_search_web_1",
+                        type: "function",
+                      },
+                    ],
+                  },
+                },
+              ],
+              id: "gen-tool-web-001",
+              model: "google/gemini-1.5-flash",
+              usage: {
+                completion_tokens: 21,
+                prompt_tokens: 34,
+                total_tokens: 55,
+              },
+            }),
+            {
+              headers: {
+                "content-type": "application/json",
+              },
+              status: 200,
+            },
+          ),
+        );
+      }
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    "BMFOUR aparece com referencias de negociacao em fontes de mercado e monitoramento de pools na Base.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-tool-web-002",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 23,
+              prompt_tokens: 47,
+              total_tokens: 70,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.duckduckgo.com/?")) {
+      duckDuckGoCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            AbstractText: "",
+            AbstractURL: "",
+            Heading: "",
+            RelatedTopics: [
+              {
+                FirstURL: "https://www.coingecko.com/en/coins/base-meme-four",
+                Text: "BMFOUR listing and market references.",
+              },
+            ],
+            Results: [],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Onde comprar BMFOUR hoje?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 2);
+  assert.equal(duckDuckGoCalls, 1);
+  assert.match(capturedOpenRouterBodies[0] ?? "", /"name":"search_web_realtime"/);
+  assert.match(capturedOpenRouterBodies[1] ?? "", /"name":"search_web_realtime"/);
+  assert.match(capturedOpenRouterBodies[1] ?? "", /"role":"tool"/);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(
+    body.data.answer,
+    "BMFOUR aparece com referencias de negociacao em fontes de mercado e monitoramento de pools na Base.",
+  );
+  assert.deepEqual(body.data.toolCallsUsed, ["search_web_realtime"]);
+  assert.equal(body.data.responseId, "gen-tool-web-002");
+  assert.equal(body.data.usage.totalTokens, 70);
 });
 
 void it("POST /v1/copilot/chat executa tool de cotacao por corretora", async () => {

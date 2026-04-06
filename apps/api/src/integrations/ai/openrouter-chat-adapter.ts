@@ -4,12 +4,34 @@ import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
 import { retryWithExponentialBackoff } from "../../shared/resilience/retry-with-backoff.js";
 
-const openRouterChatInputSchema = z.object({
-  maxTokens: z.number().int().min(1).max(2000).default(500),
-  message: z.string().trim().min(1).max(4000),
-  systemPrompt: z.string().trim().min(1).max(4000).optional(),
-  temperature: z.number().min(0).max(2).default(0.2),
+const openRouterConversationMessageSchema = z.object({
+  content: z.string().trim().min(1).max(4000),
+  role: z.enum(["assistant", "user"]),
 });
+
+const openRouterChatInputSchema = z
+  .object({
+    maxTokens: z.number().int().min(1).max(2000).default(500),
+    message: z.string().trim().min(1).max(4000).optional(),
+    messages: z.array(openRouterConversationMessageSchema).min(1).max(80).optional(),
+    systemPrompt: z.string().trim().min(1).max(4000).optional(),
+    temperature: z.number().min(0).max(2).default(0.2),
+  })
+  .superRefine((value, ctx) => {
+    if (typeof value.message === "string" && value.message.trim().length > 0) {
+      return;
+    }
+
+    if (Array.isArray(value.messages) && value.messages.length > 0) {
+      return;
+    }
+
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Either message or messages must be provided",
+      path: ["message"],
+    });
+  });
 
 const openRouterMessageContentSchema = z.union([
   z.string(),
@@ -94,6 +116,11 @@ export interface OpenRouterToolDefinition<TInputSchema extends z.ZodTypeAny = z.
   name: string;
   parameters: Record<string, unknown>;
   run: (input: z.infer<TInputSchema>) => Promise<unknown>;
+}
+
+export interface OpenRouterConversationMessage {
+  content: string;
+  role: "assistant" | "user";
 }
 
 function isRetryableStatusCode(statusCode: number): boolean {
@@ -237,10 +264,29 @@ export class OpenRouterChatAdapter {
       });
     }
 
-    messages.push({
-      content: parsedInput.message,
-      role: "user",
-    });
+    const conversationMessages: OpenRouterConversationMessage[] =
+      parsedInput.messages && parsedInput.messages.length > 0
+        ? parsedInput.messages
+        : [
+            {
+              content: parsedInput.message ?? "",
+              role: "user",
+            },
+          ];
+
+    for (const conversationMessage of conversationMessages) {
+      if (conversationMessage.role === "assistant") {
+        messages.push({
+          content: conversationMessage.content,
+          role: "assistant",
+        });
+      } else {
+        messages.push({
+          content: conversationMessage.content,
+          role: "user",
+        });
+      }
+    }
 
     const usedTools = new Set<string>();
     const maxToolRounds = tools.length > 0 ? 3 : 0;
