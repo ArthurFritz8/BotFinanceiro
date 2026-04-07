@@ -825,6 +825,14 @@ function formatChainLabel(chain: MemeRadarChain): string {
   return chain === "solana" ? "Solana" : "Base";
 }
 
+function resolveDexChainId(value: string | null): MemeRadarChain | null {
+  if (value === "base" || value === "solana") {
+    return value;
+  }
+
+  return null;
+}
+
 function buildFingerprint(chain: MemeRadarChain, pairAddress: string): string {
   return `${chain}:${pairAddress.trim().toLowerCase()}`;
 }
@@ -1615,6 +1623,36 @@ export class MemeRadarService {
     );
 
     if (!matched) {
+      const liveCandidate = await this.resolveLiveContractCandidate(chainScope, normalizedContractAddress);
+
+      if (liveCandidate) {
+        const report = this.buildBundleRiskReport(liveCandidate.candidate);
+        const consensus = this.buildInstitutionalRiskConsensus(
+          {
+            pair: liveCandidate.candidate,
+          },
+          report,
+        );
+        const nowIso = new Date().toISOString();
+
+        return {
+          bundleRiskReport: report,
+          chain: liveCandidate.candidate.chain,
+          checklistMarkdown: formatBundleRiskChecklistMarkdown(report),
+          consensus,
+          contractAddress: normalizedContractAddress,
+          found: true,
+          matchedNotificationId: liveCandidate.candidate.fingerprint,
+          matchedOn: liveCandidate.matchedOn,
+          token: {
+            address: liveCandidate.candidate.token.address,
+            name: liveCandidate.candidate.token.name,
+            symbol: liveCandidate.candidate.token.symbol,
+          },
+          updatedAt: nowIso,
+        };
+      }
+
       const report = buildUnknownBundleRiskReport();
       const consensus = this.buildInstitutionalRiskConsensus(null, report);
 
@@ -1712,8 +1750,90 @@ export class MemeRadarService {
     return null;
   }
 
+  private async resolveLiveContractCandidate(
+    chainScope: "all" | MemeRadarChain,
+    contractAddress: string,
+  ): Promise<{
+    candidate: MemeRadarPairCandidate;
+    matchedOn: "pair_address" | "token_address";
+  } | null> {
+    const endpoint = `https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(contractAddress)}`;
+    const payload = await this.requestJson(endpoint);
+
+    if (!isRecord(payload)) {
+      return null;
+    }
+
+    const pairs = Array.isArray(payload.pairs) ? payload.pairs : [];
+    let bestMatch:
+      | {
+        candidate: MemeRadarPairCandidate;
+        matchedOn: "pair_address" | "token_address";
+        score: number;
+      }
+      | null = null;
+
+    for (const pairEntry of pairs) {
+      if (!isRecord(pairEntry)) {
+        continue;
+      }
+
+      const candidate = this.parseCandidateFromDexPairRecord(pairEntry);
+
+      if (!candidate) {
+        continue;
+      }
+
+      if (chainScope !== "all" && candidate.chain !== chainScope) {
+        continue;
+      }
+
+      const tokenAddress = candidate.token.address;
+      const tokenMatch = tokenAddress ? hasEquivalentContractAddress(tokenAddress, contractAddress) : false;
+      const pairMatch = hasEquivalentContractAddress(candidate.pairAddress, contractAddress);
+
+      if (!tokenMatch && !pairMatch) {
+        continue;
+      }
+
+      const score =
+        (candidate.metrics.liquidityUsd ?? 0)
+        + (candidate.metrics.volume24hUsd ?? 0) * 0.15
+        + (candidate.metrics.txns24h ?? 0) * 60;
+      const matchedOn = tokenMatch ? "token_address" : "pair_address";
+
+      if (!bestMatch || score > bestMatch.score) {
+        bestMatch = {
+          candidate,
+          matchedOn,
+          score,
+        };
+      }
+    }
+
+    if (!bestMatch) {
+      return null;
+    }
+
+    const selectedCandidate = bestMatch.candidate;
+
+    await this.enrichCandidatesWithSecuritySignals([selectedCandidate]);
+    await this.enrichCandidatesWithWebSignals([selectedCandidate]);
+
+    selectedCandidate.sources = mergeUniqueStrings(
+      selectedCandidate.sources,
+      ["dexscreener_live_contract_lookup"],
+      6,
+    );
+
+    return {
+      candidate: selectedCandidate,
+      matchedOn: bestMatch.matchedOn,
+    };
+  }
+
   private buildInstitutionalRiskConsensus(
-    notification: StoredMemeRadarNotificationRecord | null,
+    notification: Pick<StoredMemeRadarNotificationRecord, "pair"> | null,
     report: BundleRiskReport,
   ): InstitutionalRiskConsensus {
     const weights = this.resolveInstitutionalConsensusWeights();
@@ -1786,7 +1906,7 @@ export class MemeRadarService {
   }
 
   private resolveSecurityConsensusSignal(
-    notification: StoredMemeRadarNotificationRecord | null,
+    notification: Pick<StoredMemeRadarNotificationRecord, "pair"> | null,
   ): { rationale: string; score: number } {
     if (!notification) {
       return {
@@ -1826,7 +1946,7 @@ export class MemeRadarService {
   }
 
   private resolveLiquidityConsensusSignal(
-    notification: StoredMemeRadarNotificationRecord | null,
+    notification: Pick<StoredMemeRadarNotificationRecord, "pair"> | null,
   ): { rationale: string; score: number } {
     if (!notification) {
       return {
@@ -1897,7 +2017,7 @@ export class MemeRadarService {
   }
 
   private resolveWebConsensusSignal(
-    notification: StoredMemeRadarNotificationRecord | null,
+    notification: Pick<StoredMemeRadarNotificationRecord, "pair"> | null,
     report: BundleRiskReport,
   ): { rationale: string; score: number } {
     if (!notification) {
@@ -2773,6 +2893,81 @@ export class MemeRadarService {
         address: readString(readRecord(pair, "baseToken") ?? {}, "address"),
         name: readString(readRecord(pair, "baseToken") ?? {}, "name"),
         symbol: readString(readRecord(pair, "baseToken") ?? {}, "symbol"),
+      },
+    };
+  }
+
+  private parseCandidateFromDexPairRecord(pair: Record<string, unknown>): MemeRadarPairCandidate | null {
+    const chain = resolveDexChainId(readString(pair, "chainId"));
+    const pairAddress = readString(pair, "pairAddress");
+
+    if (!chain || !pairAddress) {
+      return null;
+    }
+
+    const info = readRecord(pair, "info");
+    const socials = info ? parseSocialLinks(Array.isArray(info.socials) ? info.socials : []) : [];
+    const websites = info ? parseSocialLinks(Array.isArray(info.websites) ? info.websites : []) : [];
+    const pairUrl = readString(pair, "url");
+    const liquidityUsd = readNestedNumber(pair, "liquidity", "usd");
+    const pairCreatedAtMs = readNumber(pair, "pairCreatedAt");
+    let launchedAt: string | null = null;
+
+    if (pairCreatedAtMs !== null && Number.isFinite(pairCreatedAtMs) && pairCreatedAtMs > 0) {
+      const parsedDate = new Date(pairCreatedAtMs);
+
+      if (!Number.isNaN(parsedDate.getTime())) {
+        launchedAt = parsedDate.toISOString();
+      }
+    }
+
+    let poolStatus: MemeRadarPoolStatus = "alive";
+    let poolStatusReason: string | null = null;
+
+    if (!pairUrl) {
+      poolStatus = "delisted";
+      poolStatusReason = "Pool sem URL valida no DexScreener.";
+    } else if (liquidityUsd !== null && liquidityUsd > 0 && liquidityUsd <= 1_200) {
+      poolStatus = "rugged";
+      poolStatusReason = `Liquidez critica detectada (${Math.round(liquidityUsd)} USD).`;
+    }
+
+    const baseToken = readRecord(pair, "baseToken") ?? {};
+    const tokenSymbol = (readString(baseToken, "symbol") ?? "UNKNOWN").slice(0, 16).toUpperCase();
+    const tokenName = (readString(baseToken, "name") ?? "Unknown Meme").slice(0, 64);
+
+    return {
+      chain,
+      dexId: readString(pair, "dexId"),
+      discoveredAt: new Date().toISOString(),
+      fingerprint: buildFingerprint(chain, pairAddress),
+      launchedAt,
+      metrics: {
+        fdvUsd: readNumber(pair, "fdv"),
+        liquidityUsd,
+        marketCapUsd: readNumber(pair, "marketCap"),
+        priceChange24hPct: readNestedNumber(pair, "priceChange", "h24"),
+        txns24h:
+          (readNestedNumberDeep(pair, "txns", "h24", "buys") ?? 0)
+          + (readNestedNumberDeep(pair, "txns", "h24", "sells") ?? 0),
+        volume24hUsd: readNestedNumber(pair, "volume", "h24"),
+      },
+      pairAddress,
+      pairUrl,
+      poolStatus,
+      poolStatusReason,
+      quoteSymbol: readString(readRecord(pair, "quoteToken") ?? {}, "symbol"),
+      securityStatus: "unknown",
+      securityStatusReason: null,
+      socialWebEvidence: [],
+      socialWebMentions: 0,
+      socialWebScore: 0,
+      socials: mergeSocialLinks(socials, websites),
+      sources: ["dexscreener"],
+      token: {
+        address: readString(baseToken, "address"),
+        name: tokenName,
+        symbol: tokenSymbol,
       },
     };
   }

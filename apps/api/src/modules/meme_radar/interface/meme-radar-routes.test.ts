@@ -814,7 +814,207 @@ void it("GET /v1/meme-radar/risk-audit/by-contract retorna checklist para endere
   assert.match(auditBody.data.checklistMarkdown, /Checklist de Seguranca/);
 });
 
+void it("GET /v1/meme-radar/risk-audit/by-contract resolve fallback live via DexScreener quando contrato nao esta no snapshot", async () => {
+  const targetContract = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const livePairAddress = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes(`api.dexscreener.com/latest/dex/tokens/${targetContract}`)) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            pairs: [
+              {
+                baseToken: {
+                  address: targetContract,
+                  name: "Audit Live Token",
+                  symbol: "ALIVE",
+                },
+                chainId: "base",
+                dexId: "aerodrome",
+                info: {
+                  socials: [
+                    {
+                      type: "twitter",
+                      url: "https://x.com/alive_token",
+                    },
+                  ],
+                  websites: [
+                    {
+                      label: "website",
+                      url: "https://alive-token.fun",
+                    },
+                  ],
+                },
+                liquidity: {
+                  usd: 56000,
+                },
+                marketCap: 250000,
+                pairAddress: livePairAddress,
+                priceChange: {
+                  h24: 15.2,
+                },
+                quoteToken: {
+                  symbol: "USDC",
+                },
+                txns: {
+                  h24: {
+                    buys: 84,
+                    sells: 41,
+                  },
+                },
+                url: `https://dexscreener.com/base/${livePairAddress}`,
+                volume: {
+                  h24: 380000,
+                },
+              },
+            ],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.gopluslabs.io/api/v1/token_security/8453")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            result: {
+              [targetContract]: {
+                cannot_sell_all: "0",
+                is_honeypot: "0",
+              },
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("duckduckgo.com") || requestUrl.includes("tavily") || requestUrl.includes("serper") || requestUrl.includes("serpapi")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            AbstractText: "",
+            Heading: "",
+            RelatedTopics: [],
+            Results: [],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("geckoterminal.com/api/v2/networks/solana/new_pools") || requestUrl.includes("geckoterminal.com/api/v2/networks/base/new_pools")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            data: [],
+            included: [],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.dexscreener.com/latest/dex/pairs/")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            pairs: [],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "GET",
+    url: `/v1/meme-radar/risk-audit/by-contract?refresh=true&contractAddress=${targetContract}`,
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<{
+    data: {
+      bundleRiskReport: {
+        riskScore: number;
+      };
+      consensus: {
+        score: number;
+      };
+      found: boolean;
+      matchedNotificationId: string | null;
+      matchedOn: "pair_address" | "token_address" | "vamp_contract_candidate" | null;
+      token: {
+        symbol: string | null;
+      };
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.found, true);
+  assert.equal(body.data.matchedOn, "token_address");
+  assert.equal(body.data.token.symbol, "ALIVE");
+  assert.ok(typeof body.data.bundleRiskReport.riskScore === "number");
+  assert.ok(typeof body.data.consensus.score === "number");
+  assert.equal(typeof body.data.matchedNotificationId, "string");
+});
+
 void it("GET /v1/meme-radar/risk-audit/by-contract retorna modo UNKNOWN para endereco nao encontrado", async () => {
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("api.dexscreener.com/latest/dex/tokens/0x9999999999999999999999999999999999999999")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            pairs: [],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
   const response = await app.inject({
     method: "GET",
     url: "/v1/meme-radar/risk-audit/by-contract?contractAddress=0x9999999999999999999999999999999999999999",
