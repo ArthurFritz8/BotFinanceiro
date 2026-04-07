@@ -66,6 +66,7 @@ interface MutableEnv {
     | "duckduckgo_then_tavily"
     | "tavily_then_duckduckgo"
     | "tavily_then_serper_then_serpapi_then_duckduckgo";
+  WEB_SEARCH_DEXSCREENER_API_BASE_URL: string;
   WEB_SEARCH_SERPER_API_BASE_URL: string;
   WEB_SEARCH_SERPER_API_KEY: string;
   WEB_SEARCH_SERPAPI_API_BASE_URL: string;
@@ -84,6 +85,7 @@ const originalOpenRouterConfig: MutableEnv = {
   OPENROUTER_MODEL: mutableEnv.OPENROUTER_MODEL,
   OPENROUTER_TIMEOUT_MS: mutableEnv.OPENROUTER_TIMEOUT_MS,
   WEB_SEARCH_PROVIDER_STRATEGY: mutableEnv.WEB_SEARCH_PROVIDER_STRATEGY,
+  WEB_SEARCH_DEXSCREENER_API_BASE_URL: mutableEnv.WEB_SEARCH_DEXSCREENER_API_BASE_URL,
   WEB_SEARCH_SERPER_API_BASE_URL: mutableEnv.WEB_SEARCH_SERPER_API_BASE_URL,
   WEB_SEARCH_SERPER_API_KEY: mutableEnv.WEB_SEARCH_SERPER_API_KEY,
   WEB_SEARCH_SERPAPI_API_BASE_URL: mutableEnv.WEB_SEARCH_SERPAPI_API_BASE_URL,
@@ -100,6 +102,7 @@ void beforeEach(() => {
   mutableEnv.OPENROUTER_MODEL = "google/gemini-1.5-flash";
   mutableEnv.OPENROUTER_TIMEOUT_MS = 15_000;
   mutableEnv.WEB_SEARCH_PROVIDER_STRATEGY = "tavily_then_serper_then_serpapi_then_duckduckgo";
+  mutableEnv.WEB_SEARCH_DEXSCREENER_API_BASE_URL = "https://api.dexscreener.com";
   mutableEnv.WEB_SEARCH_SERPER_API_BASE_URL = "https://google.serper.dev";
   mutableEnv.WEB_SEARCH_SERPER_API_KEY = "";
   mutableEnv.WEB_SEARCH_SERPAPI_API_BASE_URL = "https://serpapi.com";
@@ -119,6 +122,7 @@ void after(async () => {
   mutableEnv.OPENROUTER_MODEL = originalOpenRouterConfig.OPENROUTER_MODEL;
   mutableEnv.OPENROUTER_TIMEOUT_MS = originalOpenRouterConfig.OPENROUTER_TIMEOUT_MS;
   mutableEnv.WEB_SEARCH_PROVIDER_STRATEGY = originalOpenRouterConfig.WEB_SEARCH_PROVIDER_STRATEGY;
+  mutableEnv.WEB_SEARCH_DEXSCREENER_API_BASE_URL = originalOpenRouterConfig.WEB_SEARCH_DEXSCREENER_API_BASE_URL;
   mutableEnv.WEB_SEARCH_SERPER_API_BASE_URL = originalOpenRouterConfig.WEB_SEARCH_SERPER_API_BASE_URL;
   mutableEnv.WEB_SEARCH_SERPER_API_KEY = originalOpenRouterConfig.WEB_SEARCH_SERPER_API_KEY;
   mutableEnv.WEB_SEARCH_SERPAPI_API_BASE_URL = originalOpenRouterConfig.WEB_SEARCH_SERPAPI_API_BASE_URL;
@@ -1436,6 +1440,245 @@ void it("POST /v1/copilot/chat aplica fallback de corretora para IQ Option", asy
   assert.match(body.data.answer, /requires_configuration/);
   assert.match(body.data.answer, /bridge privada/);
   assert.doesNotMatch(body.data.answer, /Nao tenho informacoes suficientes/);
+});
+
+void it("POST /v1/copilot/chat prioriza DexScreener para responder onde comprar token", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let openRouterCalls = 0;
+  let dexScreenerCalls = 0;
+  let tavilyCalls = 0;
+  let serperCalls = 0;
+  let serpApiCalls = 0;
+  let duckDuckGoCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "Sem mais informacoes sobre esse token no momento.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-passive-dex-where-to-buy-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 16,
+              prompt_tokens: 24,
+              total_tokens: 40,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.dexscreener.com/latest/dex/search/")) {
+      dexScreenerCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            pairs: [
+              {
+                baseToken: {
+                  address: "0xbase",
+                  name: "Base Meme Four",
+                  symbol: "BMFOUR",
+                },
+                chainId: "base",
+                dexId: "uniswap",
+                liquidity: {
+                  usd: 125000,
+                },
+                pairAddress: "0xabc",
+                quoteToken: {
+                  symbol: "WETH",
+                },
+                url: "https://dexscreener.com/base/0xabc",
+                volume: {
+                  h24: 98000,
+                },
+              },
+            ],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.tavily.com/search")) {
+      tavilyCalls += 1;
+    }
+
+    if (requestUrl.startsWith("https://google.serper.dev/search")) {
+      serperCalls += 1;
+    }
+
+    if (requestUrl.startsWith("https://serpapi.com/search.json")) {
+      serpApiCalls += 1;
+    }
+
+    if (requestUrl.startsWith("https://api.duckduckgo.com/?")) {
+      duckDuckGoCalls += 1;
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "aonde posso comprar a BMFOUR?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 1);
+  assert.equal(dexScreenerCalls, 1);
+  assert.equal(tavilyCalls, 0);
+  assert.equal(serperCalls, 0);
+  assert.equal(serpApiCalls, 0);
+  assert.equal(duckDuckGoCalls, 0);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-passive-dex-where-to-buy-001");
+  assert.match(body.data.answer, /DexScreener \(API em tempo real\)/);
+  assert.match(body.data.answer, /Voce pode comprar BMFOUR na Uniswap \(Rede Base\)\./);
+  assert.doesNotMatch(body.data.answer, /pesquise no google/i);
+});
+
+void it("POST /v1/copilot/chat usa busca web global quando DexScreener nao encontra listing", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let openRouterCalls = 0;
+  let dexScreenerCalls = 0;
+  let duckDuckGoCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "Sem mais informacoes sobre esse token no momento.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-passive-dex-where-to-buy-002",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 16,
+              prompt_tokens: 24,
+              total_tokens: 40,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.dexscreener.com/latest/dex/search/")) {
+      dexScreenerCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            pairs: [],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.duckduckgo.com/?")) {
+      duckDuckGoCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            AbstractText: "",
+            AbstractURL: "",
+            Heading: "",
+            RelatedTopics: [
+              {
+                FirstURL: "https://www.coingecko.com/en/coins/base-meme-four",
+                Text: "Base Meme Four listing and token references.",
+              },
+            ],
+            Results: [],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "aonde posso comprar BMFOUR?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 1);
+  assert.equal(dexScreenerCalls, 1);
+  assert.equal(duckDuckGoCalls, 1);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-passive-dex-where-to-buy-002");
+  assert.match(body.data.answer, /Pesquisa global em tempo real/);
+  assert.match(body.data.answer, /Provider usado: duckduckgo/);
 });
 
 void it("POST /v1/copilot/chat evita resposta passiva com busca global para onde comprar", async () => {

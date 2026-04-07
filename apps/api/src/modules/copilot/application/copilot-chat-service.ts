@@ -9,6 +9,9 @@ import {
   type WebSearchResultItem,
 } from "../../../integrations/search/web-search-adapter.js";
 import {
+  DexScreenerSearchAdapter,
+} from "../../../integrations/search/dexscreener-search-adapter.js";
+import {
   CoinCapMarketDataAdapter,
   type CoinCapMarketAsset,
   type CoinCapMarketOverview,
@@ -100,6 +103,7 @@ export interface CopilotChatInput {
 
 const openRouterChatAdapter = new OpenRouterChatAdapter();
 const webSearchAdapter = new WebSearchAdapter();
+const dexScreenerSearchAdapter = new DexScreenerSearchAdapter();
 const coinCapMarketDataAdapter = new CoinCapMarketDataAdapter();
 const yahooMarketDataAdapter = new YahooMarketDataAdapter();
 const brokerMarketService = new BrokerMarketService();
@@ -148,7 +152,8 @@ const copilotDefaultSystemPrompt = [
   "Quando a pergunta pedir comprar/vender, responda com sinal tatico informativo (buy/sell/wait), confianca e niveis de risco, sem tratar como recomendacao de investimento.",
   "Quando a pergunta envolver indices, acoes, cambio, juros ou commodities, use get_financial_market_snapshot.",
   "Quando a pergunta envolver risco de curto prazo, entregue analise por fatores (volatilidade, liquidez, macro e operacao), sem recomendacao de investimento.",
-  "Quando houver ativo/ticker desconhecido, anafora (ex.: 'essa moeda') ou duvida sobre onde comprar/listagem, use obrigatoriamente a tool search_web_realtime antes de responder.",
+  "Quando houver duvida sobre onde comprar/listagem de token, use primeiro a tool search_token_listings_dexscreener e so depois search_web_realtime se nao houver resposta suficiente.",
+  "Quando houver ativo/ticker desconhecido ou anafora (ex.: 'essa moeda'), use obrigatoriamente a tool search_web_realtime antes de responder.",
   "E proibido delegar o trabalho com frases como 'pesquise no Google', 'procure no Google' ou equivalentes.",
   "Ao usar dados de busca web, sintetize e cite as principais fontes com URL no corpo da resposta.",
   "Nao recuse genericamente se houver dados disponiveis nas tools; entregue resposta concisa com numeros e contexto.",
@@ -214,6 +219,11 @@ const copilotFinancialMarketSnapshotToolInputSchema = z.object({
 const copilotBrokerLiveQuoteToolInputSchema = z.object({
   assetId: z.string().trim().min(1).default("bitcoin"),
   broker: z.enum(["binance", "bybit", "coinbase", "kraken", "okx", "iqoption"]).default("binance"),
+});
+
+const copilotDexScreenerTokenLookupToolInputSchema = z.object({
+  maxResults: z.number().int().min(1).max(8).default(4),
+  query: z.string().trim().min(2).max(120),
 });
 
 const copilotWebSearchToolInputSchema = z.object({
@@ -1670,6 +1680,38 @@ const copilotTools: OpenRouterToolDefinition[] = [
   },
   {
     description:
+      "Consulta DexScreener em tempo real para descobrir em qual DEX/rede um token esta negociando. Priorize em perguntas de onde comprar memecoin/token desconhecido.",
+    inputSchema: copilotDexScreenerTokenLookupToolInputSchema,
+    name: "search_token_listings_dexscreener",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        maxResults: {
+          default: 4,
+          description: "Quantidade maxima de pares/venues retornados",
+          maximum: 8,
+          minimum: 1,
+          type: "number",
+        },
+        query: {
+          description: "Ticker, nome do token ou endereco de contrato",
+          type: "string",
+        },
+      },
+      required: ["query"],
+      type: "object",
+    },
+    run: async (input: z.infer<typeof copilotDexScreenerTokenLookupToolInputSchema>) => {
+      const response = await dexScreenerSearchAdapter.searchTokenListings(input);
+
+      return {
+        ...response,
+        primaryVenue: response.venues[0] ?? null,
+      };
+    },
+  },
+  {
+    description:
       "Executa busca web global em tempo real para descobrir informacoes fora da base local, incluindo listagem de tokens, onde comprar e contexto de projetos desconhecidos.",
     inputSchema: copilotWebSearchToolInputSchema,
     name: "search_web_realtime",
@@ -3047,8 +3089,63 @@ export class CopilotChatService {
     ].join("\n");
   }
 
+  private async buildDexScreenerWhereToBuyFallback(assetHint: string, message: string): Promise<string | null> {
+    const normalizedAssetHint = assetHint.trim().length > 0 ? assetHint.trim().toLowerCase() : "token";
+    const tokenLookupQuery = normalizedAssetHint === "token"
+      ? message.trim()
+      : `${normalizedAssetHint} ${message}`.trim();
+    const lookupResponse = await dexScreenerSearchAdapter.searchTokenListings({
+      maxResults: 5,
+      query: tokenLookupQuery,
+    });
+    const topVenues = lookupResponse.venues.slice(0, 4);
+
+    if (topVenues.length === 0) {
+      return null;
+    }
+
+    const bestVenue = topVenues[0];
+    const primaryTokenSymbol = bestVenue?.baseTokenSymbol ?? normalizedAssetHint.toUpperCase();
+    const primaryBuyLine = bestVenue
+      ? `Voce pode comprar ${primaryTokenSymbol} na ${bestVenue.dexName} (Rede ${bestVenue.chainName}).`
+      : `Voce pode comprar ${primaryTokenSymbol} em DEX da rede identificada.`;
+    const venueLines = topVenues
+      .map((venue, index) => {
+        const liquidityLabel = formatCompactUsd(venue.liquidityUsd);
+        const volumeLabel = formatCompactUsd(venue.volume24hUsd);
+        return `${index + 1}. ${venue.dexName} (Rede ${venue.chainName}) | par ${venue.baseTokenSymbol}/${venue.quoteTokenSymbol} | liquidez ${liquidityLabel} | volume 24h ${volumeLabel} | ${venue.pairUrl}`;
+      })
+      .join("\n");
+
+    return [
+      `DexScreener (API em tempo real) confirmou venues para ${primaryTokenSymbol}.`,
+      primaryBuyLine,
+      "Melhores pares encontrados agora:",
+      venueLines,
+      "Fallback inteligente habilitado: se DexScreener falhar ou nao tiver venues suficientes, eu complemento automaticamente com busca web global.",
+      "Checklist profissional: valide contrato oficial, rede correta e liquidez antes de executar qualquer compra.",
+    ].join("\n");
+  }
+
   private async buildWebWhereToBuyFallback(message: string, assetHint: string): Promise<string> {
     const normalizedAssetHint = assetHint.trim().length > 0 ? assetHint.trim().toLowerCase() : "token";
+
+    try {
+      const dexScreenerFallback = await this.buildDexScreenerWhereToBuyFallback(normalizedAssetHint, message);
+
+      if (dexScreenerFallback) {
+        return dexScreenerFallback;
+      }
+    } catch (error) {
+      logger.warn(
+        {
+          assetHint: normalizedAssetHint,
+          err: error,
+        },
+        "DexScreener where-to-buy fallback failed, continuing with global web search",
+      );
+    }
+
     const focusedQuery = buildFocusedWebSearchQuery(
       `${normalizedAssetHint} ${message}`.trim(),
       "where_to_buy",

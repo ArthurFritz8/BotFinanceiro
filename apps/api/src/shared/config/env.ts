@@ -129,6 +129,7 @@ const environmentSchema = z
         "tavily_then_serper_then_serpapi_then_duckduckgo",
       ])
       .default("tavily_then_serper_then_serpapi_then_duckduckgo"),
+    WEB_SEARCH_DEXSCREENER_API_BASE_URL: z.string().url().default("https://api.dexscreener.com"),
     WEB_SEARCH_DUCKDUCKGO_API_BASE_URL: z.string().url().default("https://api.duckduckgo.com"),
     WEB_SEARCH_SERPER_API_BASE_URL: z.string().url().default("https://google.serper.dev"),
     WEB_SEARCH_SERPER_API_KEY: z.string().trim().default(""),
