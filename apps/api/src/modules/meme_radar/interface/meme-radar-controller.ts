@@ -23,6 +23,12 @@ const getMemeRadarRiskAuditQuerySchema = z.object({
   refresh: booleanQuerySchema,
 });
 
+const getMemeRadarRiskAuditByContractQuerySchema = z.object({
+  chain: z.enum(["all", "base", "solana"]).default("all"),
+  contractAddress: z.string().trim().min(8).max(180),
+  refresh: booleanQuerySchema,
+});
+
 const setMemeRadarPinParamsSchema = z.object({
   notificationId: z.string().trim().min(6).max(180),
 });
@@ -47,6 +53,16 @@ export async function getMemeRadarRiskAudit(
 ): Promise<void> {
   const parsedQuery = getMemeRadarRiskAuditQuerySchema.parse(request.query);
   const audit = await memeRadarService.getInstitutionalRiskAudit(parsedQuery);
+
+  void reply.send(buildSuccessResponse(request.id, audit));
+}
+
+export async function getMemeRadarRiskAuditByContract(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const parsedQuery = getMemeRadarRiskAuditByContractQuerySchema.parse(request.query);
+  const audit = await memeRadarService.getInstitutionalRiskAuditByContract(parsedQuery);
 
   void reply.send(buildSuccessResponse(request.id, audit));
 }

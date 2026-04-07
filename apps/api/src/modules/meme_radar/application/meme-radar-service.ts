@@ -287,6 +287,22 @@ export interface MemeRadarInstitutionalRiskAuditResponse {
   updatedAt: string;
 }
 
+export interface MemeRadarInstitutionalRiskAuditByContractResponse {
+  bundleRiskReport: BundleRiskReport;
+  chain: MemeRadarChain | null;
+  checklistMarkdown: string;
+  contractAddress: string;
+  found: boolean;
+  matchedNotificationId: string | null;
+  matchedOn: "pair_address" | "token_address" | "vamp_contract_candidate" | null;
+  token: {
+    address: string | null;
+    name: string | null;
+    symbol: string | null;
+  };
+  updatedAt: string;
+}
+
 interface CachedMemeRadarSnapshot {
   fetchedAt: string;
   notifications: StoredMemeRadarNotificationRecord[];
@@ -384,6 +400,27 @@ function normalizeToken(value: string): string {
 
 function normalizeAssetIdForLookup(value: string): string {
   return normalizeSignalText(value).replace(/[^a-z0-9]/g, "");
+}
+
+function normalizeContractAddressForLookup(value: string): string {
+  const normalized = normalizeWhitespace(value);
+
+  if (isEvmAddress(normalized)) {
+    return normalized.toLowerCase();
+  }
+
+  return normalized;
+}
+
+function hasEquivalentContractAddress(left: string, right: string): boolean {
+  const normalizedLeft = normalizeContractAddressForLookup(left);
+  const normalizedRight = normalizeContractAddressForLookup(right);
+
+  if (normalizedLeft === normalizedRight) {
+    return true;
+  }
+
+  return normalizedLeft.toLowerCase() === normalizedRight.toLowerCase();
 }
 
 function normalizeSignalText(value: string): string {
@@ -1482,6 +1519,70 @@ export class MemeRadarService {
     };
   }
 
+  public async getInstitutionalRiskAuditByContract(input: {
+    chain?: "all" | MemeRadarChain;
+    contractAddress: string;
+    refresh?: boolean;
+  }): Promise<MemeRadarInstitutionalRiskAuditByContractResponse> {
+    const normalizedContractAddress = normalizeContractAddressForLookup(input.contractAddress);
+
+    if (normalizedContractAddress.length < 8) {
+      throw new AppError({
+        code: "MEME_RADAR_CONTRACT_ADDRESS_INVALID",
+        message: "Contract address is invalid",
+        statusCode: 400,
+      });
+    }
+
+    const chainScope = input.chain ?? "all";
+    const resolvedSnapshot = await this.resolveSnapshot(input.refresh === true);
+    const scopedNotifications = resolvedSnapshot.snapshot.notifications.filter((record) =>
+      chainScope === "all" ? true : record.pair.chain === chainScope,
+    );
+    const matched = this.resolveNotificationByContractAddress(
+      scopedNotifications,
+      normalizedContractAddress,
+    );
+
+    if (!matched) {
+      const report = buildUnknownBundleRiskReport();
+
+      return {
+        bundleRiskReport: report,
+        chain: null,
+        checklistMarkdown: formatBundleRiskChecklistMarkdown(report),
+        contractAddress: normalizedContractAddress,
+        found: false,
+        matchedNotificationId: null,
+        matchedOn: null,
+        token: {
+          address: null,
+          name: null,
+          symbol: null,
+        },
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    const report = matched.notification.bundleRiskReport ?? buildUnknownBundleRiskReport();
+
+    return {
+      bundleRiskReport: report,
+      chain: matched.notification.pair.chain,
+      checklistMarkdown: formatBundleRiskChecklistMarkdown(report),
+      contractAddress: normalizedContractAddress,
+      found: true,
+      matchedNotificationId: matched.notification.pair.fingerprint,
+      matchedOn: matched.matchedOn,
+      token: {
+        address: matched.notification.pair.token.address,
+        name: matched.notification.pair.token.name,
+        symbol: matched.notification.pair.token.symbol,
+      },
+      updatedAt: matched.notification.updatedAt,
+    };
+  }
+
   private resolveNotificationByAssetId(
     notifications: StoredMemeRadarNotificationRecord[],
     normalizedAssetId: string,
@@ -1492,6 +1593,45 @@ export class MemeRadarService {
 
       if (symbol === normalizedAssetId || name.includes(normalizedAssetId)) {
         return notification;
+      }
+    }
+
+    return null;
+  }
+
+  private resolveNotificationByContractAddress(
+    notifications: StoredMemeRadarNotificationRecord[],
+    contractAddress: string,
+  ):
+    | {
+      matchedOn: "pair_address" | "token_address" | "vamp_contract_candidate";
+      notification: StoredMemeRadarNotificationRecord;
+    }
+    | null {
+    for (const notification of notifications) {
+      const tokenAddress = notification.pair.token.address;
+
+      if (tokenAddress && hasEquivalentContractAddress(tokenAddress, contractAddress)) {
+        return {
+          matchedOn: "token_address",
+          notification,
+        };
+      }
+
+      if (hasEquivalentContractAddress(notification.pair.pairAddress, contractAddress)) {
+        return {
+          matchedOn: "pair_address",
+          notification,
+        };
+      }
+
+      const vampContracts = notification.pair.bundleSignals?.vamp.contractCandidates ?? [];
+
+      if (vampContracts.some((candidate) => hasEquivalentContractAddress(candidate, contractAddress))) {
+        return {
+          matchedOn: "vamp_contract_candidate",
+          notification,
+        };
       }
     }
 

@@ -636,3 +636,172 @@ void it("GET /v1/meme-radar/risk-audit retorna 400 para assetId invalido", async
 
   assert.equal(response.statusCode, 400);
 });
+
+void it("GET /v1/meme-radar/risk-audit/by-contract retorna checklist para endereco monitorado", async () => {
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("geckoterminal.com/api/v2/networks/solana/new_pools")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(
+            buildGeckoPoolPayload({
+              chain: "solana",
+              pairAddress: "SoPaIr777777777777777777777777777777777",
+              quoteId: "token_sol",
+              quoteName: "Solana",
+              quoteSymbol: "SOL",
+              tokenAddress: "SoToken7777777777777777777777777777777777",
+              tokenId: "token_sol_meme_7",
+              tokenName: "Solana Meme Seven",
+              tokenSymbol: "SMSEVEN",
+            }),
+          ),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("geckoterminal.com/api/v2/networks/base/new_pools")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(
+            buildGeckoPoolPayload({
+              chain: "base",
+              pairAddress: "BaSePaIr88888888888888888888888888888888",
+              quoteId: "token_usdc",
+              quoteName: "USD Coin",
+              quoteSymbol: "USDC",
+              tokenAddress: "0x8888888888888888888888888888888888888888",
+              tokenId: "token_base_meme_8",
+              tokenName: "Base Meme Eight",
+              tokenSymbol: "BMEIGHT",
+            }),
+          ),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.dexscreener.com/latest/dex/pairs/")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(
+            buildDexPayload({
+              chain: requestUrl.includes("/solana/") ? "solana" : "base",
+              pairAddress: requestUrl.includes("/solana/")
+                ? "SoPaIr777777777777777777777777777777777"
+                : "BaSePaIr88888888888888888888888888888888",
+              tokenAddress: requestUrl.includes("/solana/")
+                ? "SoToken7777777777777777777777777777777777"
+                : "0x8888888888888888888888888888888888888888",
+              tokenName: requestUrl.includes("/solana/") ? "Solana Meme Seven" : "Base Meme Eight",
+              tokenSymbol: requestUrl.includes("/solana/") ? "SMSEVEN" : "BMEIGHT",
+            }),
+          ),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("duckduckgo.com") || requestUrl.includes("tavily") || requestUrl.includes("serper") || requestUrl.includes("serpapi")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            AbstractText: "",
+            Heading: "",
+            RelatedTopics: [],
+            Results: [],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const refreshResponse = await app.inject({
+    method: "GET",
+    url: "/v1/meme-radar/notifications?refresh=true&limit=20",
+  });
+
+  assert.equal(refreshResponse.statusCode, 200);
+
+  const auditResponse = await app.inject({
+    method: "GET",
+    url: "/v1/meme-radar/risk-audit/by-contract?contractAddress=0x8888888888888888888888888888888888888888",
+  });
+
+  assert.equal(auditResponse.statusCode, 200);
+
+  const auditBody = auditResponse.json<{
+    data: {
+      checklistMarkdown: string;
+      contractAddress: string;
+      found: boolean;
+      matchedOn: "pair_address" | "token_address" | "vamp_contract_candidate" | null;
+      token: {
+        symbol: string | null;
+      };
+    };
+    status: "success";
+  }>();
+
+  assert.equal(auditBody.status, "success");
+  assert.equal(auditBody.data.found, true);
+  assert.equal(auditBody.data.matchedOn, "token_address");
+  assert.equal(auditBody.data.token.symbol, "BMEIGHT");
+  assert.equal(auditBody.data.contractAddress, "0x8888888888888888888888888888888888888888");
+  assert.match(auditBody.data.checklistMarkdown, /Checklist de Seguranca/);
+});
+
+void it("GET /v1/meme-radar/risk-audit/by-contract retorna modo UNKNOWN para endereco nao encontrado", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/meme-radar/risk-audit/by-contract?contractAddress=0x9999999999999999999999999999999999999999",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<{
+    data: {
+      found: boolean;
+      matchedOn: "pair_address" | "token_address" | "vamp_contract_candidate" | null;
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.found, false);
+  assert.equal(body.data.matchedOn, null);
+});
+
+void it("GET /v1/meme-radar/risk-audit/by-contract retorna 400 para endereco invalido", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/meme-radar/risk-audit/by-contract?contractAddress=0x123",
+  });
+
+  assert.equal(response.statusCode, 400);
+});
