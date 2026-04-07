@@ -75,7 +75,6 @@ body {
   width: min(98vw, 2100px);
   padding: 2rem 1.1rem 2.2rem calc(1.1rem + 220px);
   position: relative;
-  z-index: 1;
 }
 
 .app-shell > :not(.app-sidebar) {
@@ -101,7 +100,7 @@ body {
   position: fixed;
   text-transform: uppercase;
   top: 0.72rem;
-  z-index: 53;
+  z-index: 80;
 }
 
 .mobile-menu-toggle:focus-visible {
@@ -141,7 +140,7 @@ body.sidebar-collapsed .app-shell {
   position: fixed;
   top: 0;
   width: 200px;
-  z-index: 60;
+  z-index: 70;
 }
 
 .app-sidebar-head {
@@ -2742,7 +2741,7 @@ body.sidebar-collapsed .app-shell {
   height: 100%;
   min-height: 0;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: auto;
   padding: 1rem 1rem 1.1rem;
   scrollbar-color: #c0b192 #f6efe1;
   scrollbar-width: thin;
@@ -3456,8 +3455,21 @@ body.sidebar-collapsed .app-shell {
   }
 
   .chat-panel {
+    height: auto;
     min-width: 0;
+    overflow: visible;
     width: 100%;
+  }
+
+  .messages {
+    flex: 0 0 auto;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .composer {
+    position: static;
   }
 }
 
