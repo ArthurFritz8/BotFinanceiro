@@ -49,6 +49,12 @@ type BundleRiskFlag =
   | "HIGH_CONCENTRATION_RISK"
   | "SYMMETRIC_BUNDLE_DETECTED"
   | "VAMP_SCAM";
+type InstitutionalRiskConsensusSource =
+  | "bundle_risk"
+  | "community_health"
+  | "liquidity_depth"
+  | "security_status"
+  | "web_signal";
 
 type MemeRadarQueryInput = z.input<typeof memeRadarQuerySchema>;
 
@@ -115,6 +121,20 @@ export interface BundleRiskReport {
   riskScore: number;
   summary: string[];
   warningMessage: string | null;
+}
+
+interface InstitutionalRiskConsensusBreakdownItem {
+  contribution: number;
+  rationale: string;
+  score: number;
+  source: InstitutionalRiskConsensusSource;
+  weight: number;
+}
+
+interface InstitutionalRiskConsensus {
+  breakdown: InstitutionalRiskConsensusBreakdownItem[];
+  score: number;
+  weights: Record<InstitutionalRiskConsensusSource, number>;
 }
 
 interface MemeRadarWebSignalEvidence {
@@ -277,6 +297,7 @@ export interface MemeRadarInstitutionalRiskAuditResponse {
   bundleRiskReport: BundleRiskReport;
   chain: MemeRadarChain | null;
   checklistMarkdown: string;
+  consensus: InstitutionalRiskConsensus;
   found: boolean;
   matchedNotificationId: string | null;
   token: {
@@ -291,6 +312,7 @@ export interface MemeRadarInstitutionalRiskAuditByContractResponse {
   bundleRiskReport: BundleRiskReport;
   chain: MemeRadarChain | null;
   checklistMarkdown: string;
+  consensus: InstitutionalRiskConsensus;
   contractAddress: string;
   found: boolean;
   matchedNotificationId: string | null;
@@ -372,6 +394,13 @@ const MEME_RADAR_EARLY_DUMP_TRAP_MAX_MARKET_CAP_USD = 10_000;
 const MEME_RADAR_COORDINATED_BUNDLE_MIN_WALLETS = 2;
 const MEME_RADAR_SYMMETRIC_DUPLICATE_MIN_WALLETS = 3;
 const MEME_RADAR_SNIPER_TRAP_MIN_WALLETS = 2;
+const MEME_RADAR_CONSENSUS_DEFAULT_WEIGHTS: Record<InstitutionalRiskConsensusSource, number> = {
+  bundle_risk: 35,
+  community_health: 10,
+  liquidity_depth: 20,
+  security_status: 25,
+  web_signal: 10,
+};
 
 type StrictIngestionDropReason =
   | "AGE_OUTSIDE_SNIPE_WINDOW"
@@ -1338,6 +1367,43 @@ function buildUnknownBundleRiskReport(): BundleRiskReport {
   };
 }
 
+function normalizeInstitutionalConsensusWeights(
+  input: Record<InstitutionalRiskConsensusSource, number>,
+): Record<InstitutionalRiskConsensusSource, number> {
+  const fallback = MEME_RADAR_CONSENSUS_DEFAULT_WEIGHTS;
+  const fallbackTotal =
+    fallback.bundle_risk
+    + fallback.community_health
+    + fallback.liquidity_depth
+    + fallback.security_status
+    + fallback.web_signal;
+  const inputTotal =
+    input.bundle_risk
+    + input.community_health
+    + input.liquidity_depth
+    + input.security_status
+    + input.web_signal;
+  const source = inputTotal > 0 ? input : fallback;
+  const total = inputTotal > 0 ? inputTotal : fallbackTotal;
+  const bundleRisk = toRounded((source.bundle_risk / total) * 100, 2);
+  const securityStatus = toRounded((source.security_status / total) * 100, 2);
+  const liquidityDepth = toRounded((source.liquidity_depth / total) * 100, 2);
+  const webSignal = toRounded((source.web_signal / total) * 100, 2);
+  const communityHealth = clamp(
+    toRounded(100 - bundleRisk - securityStatus - liquidityDepth - webSignal, 2),
+    0,
+    100,
+  );
+
+  return {
+    bundle_risk: bundleRisk,
+    community_health: communityHealth,
+    liquidity_depth: liquidityDepth,
+    security_status: securityStatus,
+    web_signal: webSignal,
+  };
+}
+
 export class MemeRadarService {
   private readonly openRouterChatAdapter = new OpenRouterChatAdapter();
 
@@ -1484,12 +1550,14 @@ export class MemeRadarService {
 
     if (!matched) {
       const report = buildUnknownBundleRiskReport();
+      const consensus = this.buildInstitutionalRiskConsensus(null, report);
 
       return {
         assetId: normalizedAssetId,
         bundleRiskReport: report,
         chain: null,
         checklistMarkdown: formatBundleRiskChecklistMarkdown(report),
+        consensus,
         found: false,
         matchedNotificationId: null,
         token: {
@@ -1502,12 +1570,14 @@ export class MemeRadarService {
     }
 
     const report = matched.bundleRiskReport ?? buildUnknownBundleRiskReport();
+    const consensus = this.buildInstitutionalRiskConsensus(matched, report);
 
     return {
       assetId: normalizedAssetId,
       bundleRiskReport: report,
       chain: matched.pair.chain,
       checklistMarkdown: formatBundleRiskChecklistMarkdown(report),
+      consensus,
       found: true,
       matchedNotificationId: matched.pair.fingerprint,
       token: {
@@ -1546,11 +1616,13 @@ export class MemeRadarService {
 
     if (!matched) {
       const report = buildUnknownBundleRiskReport();
+      const consensus = this.buildInstitutionalRiskConsensus(null, report);
 
       return {
         bundleRiskReport: report,
         chain: null,
         checklistMarkdown: formatBundleRiskChecklistMarkdown(report),
+        consensus,
         contractAddress: normalizedContractAddress,
         found: false,
         matchedNotificationId: null,
@@ -1565,11 +1637,13 @@ export class MemeRadarService {
     }
 
     const report = matched.notification.bundleRiskReport ?? buildUnknownBundleRiskReport();
+    const consensus = this.buildInstitutionalRiskConsensus(matched.notification, report);
 
     return {
       bundleRiskReport: report,
       chain: matched.notification.pair.chain,
       checklistMarkdown: formatBundleRiskChecklistMarkdown(report),
+      consensus,
       contractAddress: normalizedContractAddress,
       found: true,
       matchedNotificationId: matched.notification.pair.fingerprint,
@@ -1636,6 +1710,247 @@ export class MemeRadarService {
     }
 
     return null;
+  }
+
+  private buildInstitutionalRiskConsensus(
+    notification: StoredMemeRadarNotificationRecord | null,
+    report: BundleRiskReport,
+  ): InstitutionalRiskConsensus {
+    const weights = this.resolveInstitutionalConsensusWeights();
+    const bundleRiskScore = clamp(report.riskScore, 0, 100);
+    const securitySignal = this.resolveSecurityConsensusSignal(notification);
+    const liquiditySignal = this.resolveLiquidityConsensusSignal(notification);
+    const webSignal = this.resolveWebConsensusSignal(notification, report);
+    const communitySignal = this.resolveCommunityConsensusSignal(report);
+    const bundleRiskRationale =
+      report.flags.length > 0
+        ? `Bundle heuristics com ${report.flags.length} flag(s): ${report.flags.join(", ")}.`
+        : "Bundle heuristics sem flags criticas nesta rodada.";
+    const breakdown: InstitutionalRiskConsensusBreakdownItem[] = [
+      {
+        contribution: toRounded((bundleRiskScore * weights.bundle_risk) / 100, 2),
+        rationale: bundleRiskRationale,
+        score: toRounded(bundleRiskScore, 1),
+        source: "bundle_risk",
+        weight: weights.bundle_risk,
+      },
+      {
+        contribution: toRounded((securitySignal.score * weights.security_status) / 100, 2),
+        rationale: securitySignal.rationale,
+        score: securitySignal.score,
+        source: "security_status",
+        weight: weights.security_status,
+      },
+      {
+        contribution: toRounded((liquiditySignal.score * weights.liquidity_depth) / 100, 2),
+        rationale: liquiditySignal.rationale,
+        score: liquiditySignal.score,
+        source: "liquidity_depth",
+        weight: weights.liquidity_depth,
+      },
+      {
+        contribution: toRounded((webSignal.score * weights.web_signal) / 100, 2),
+        rationale: webSignal.rationale,
+        score: webSignal.score,
+        source: "web_signal",
+        weight: weights.web_signal,
+      },
+      {
+        contribution: toRounded((communitySignal.score * weights.community_health) / 100, 2),
+        rationale: communitySignal.rationale,
+        score: communitySignal.score,
+        source: "community_health",
+        weight: weights.community_health,
+      },
+    ];
+    const score = toRounded(
+      breakdown.reduce((accumulator, item) => accumulator + item.contribution, 0),
+      1,
+    );
+
+    return {
+      breakdown,
+      score,
+      weights,
+    };
+  }
+
+  private resolveInstitutionalConsensusWeights(): Record<InstitutionalRiskConsensusSource, number> {
+    return normalizeInstitutionalConsensusWeights({
+      bundle_risk: env.MEME_RADAR_CONSENSUS_WEIGHT_BUNDLE_RISK,
+      community_health: env.MEME_RADAR_CONSENSUS_WEIGHT_COMMUNITY_HEALTH,
+      liquidity_depth: env.MEME_RADAR_CONSENSUS_WEIGHT_LIQUIDITY_DEPTH,
+      security_status: env.MEME_RADAR_CONSENSUS_WEIGHT_SECURITY_STATUS,
+      web_signal: env.MEME_RADAR_CONSENSUS_WEIGHT_WEB_SIGNAL,
+    });
+  }
+
+  private resolveSecurityConsensusSignal(
+    notification: StoredMemeRadarNotificationRecord | null,
+  ): { rationale: string; score: number } {
+    if (!notification) {
+      return {
+        rationale: "Status de seguranca indisponivel para o contrato nesta rodada.",
+        score: 50,
+      };
+    }
+
+    const reason = notification.pair.securityStatusReason;
+
+    if (notification.pair.securityStatus === "honeypot") {
+      return {
+        rationale: reason
+          ? `Security provider marcou HONEYPOT: ${reason}`
+          : "Security provider marcou HONEYPOT para o contrato.",
+        score: 0,
+      };
+    }
+
+    if (notification.pair.securityStatus === "safe") {
+      const score = notification.pair.poolStatus === "alive" ? 90 : 70;
+
+      return {
+        rationale: reason
+          ? `Security provider marcou SAFE: ${reason}`
+          : "Security provider marcou SAFE sem ressalvas criticas.",
+        score,
+      };
+    }
+
+    return {
+      rationale: reason
+        ? `Security provider retornou UNKNOWN: ${reason}`
+        : "Security provider sem conclusao definitiva de seguranca.",
+      score: 52,
+    };
+  }
+
+  private resolveLiquidityConsensusSignal(
+    notification: StoredMemeRadarNotificationRecord | null,
+  ): { rationale: string; score: number } {
+    if (!notification) {
+      return {
+        rationale: "Liquidez indisponivel para o contrato nesta rodada.",
+        score: 50,
+      };
+    }
+
+    if (notification.pair.poolStatus === "rugged") {
+      return {
+        rationale: "Pool marcado como RUGGED, liquidez considerada comprometida.",
+        score: 0,
+      };
+    }
+
+    if (notification.pair.poolStatus === "delisted") {
+      return {
+        rationale: "Pool marcado como DELISTED, confiabilidade de liquidez reduzida.",
+        score: 12,
+      };
+    }
+
+    const liquidityUsd = notification.pair.metrics.liquidityUsd;
+
+    if (liquidityUsd === null || !Number.isFinite(liquidityUsd)) {
+      return {
+        rationale: "Sem leitura de liquidez USD para calibrar profundidade do book.",
+        score: 50,
+      };
+    }
+
+    let score = 45;
+
+    if (liquidityUsd >= 200_000) {
+      score = 90;
+    } else if (liquidityUsd >= 100_000) {
+      score = 82;
+    } else if (liquidityUsd >= 50_000) {
+      score = 72;
+    } else if (liquidityUsd >= 20_000) {
+      score = 62;
+    } else if (liquidityUsd >= 10_000) {
+      score = 55;
+    }
+
+    const txns24h = notification.pair.metrics.txns24h;
+
+    if (typeof txns24h === "number" && Number.isFinite(txns24h)) {
+      if (txns24h >= 400) {
+        score += 5;
+      } else if (txns24h >= 150) {
+        score += 3;
+      } else if (txns24h < 30) {
+        score -= 6;
+      }
+    }
+
+    const normalizedScore = clamp(toRounded(score, 1), 0, 100);
+    const txnsDescriptor =
+      typeof txns24h === "number" && Number.isFinite(txns24h)
+        ? ` | txns24h=${Math.round(txns24h)}`
+        : "";
+
+    return {
+      rationale: `Liquidez observada ${Math.round(liquidityUsd)} USD${txnsDescriptor}.`,
+      score: normalizedScore,
+    };
+  }
+
+  private resolveWebConsensusSignal(
+    notification: StoredMemeRadarNotificationRecord | null,
+    report: BundleRiskReport,
+  ): { rationale: string; score: number } {
+    if (!notification) {
+      return {
+        rationale: "Sem evidencia web/comunidade suficiente para o contrato nesta rodada.",
+        score: 50,
+      };
+    }
+
+    const socialWebScore = clamp(notification.pair.socialWebScore, 0, 100);
+    const socialWebMentions = Math.max(0, notification.pair.socialWebMentions);
+    const mentionsScore =
+      socialWebMentions > 0
+        ? clamp(35 + Math.min(socialWebMentions, 40) * 1.1, 35, 80)
+        : 45;
+    let score = socialWebScore > 0 ? socialWebScore : mentionsScore;
+
+    if (report.flags.includes("VAMP_SCAM")) {
+      score = Math.min(score, 12);
+
+      return {
+        rationale: "Sinal web penalizado por VAMP_SCAM detectado no cruzamento de ticker/contrato.",
+        score: toRounded(score, 1),
+      };
+    }
+
+    return {
+      rationale: `Sinal web com social_web_score=${toRounded(socialWebScore, 1)} e mentions=${socialWebMentions}.`,
+      score: toRounded(score, 1),
+    };
+  }
+
+  private resolveCommunityConsensusSignal(report: BundleRiskReport): { rationale: string; score: number } {
+    const status = report.checklist.communityHealth.status;
+
+    if (status === "pass") {
+      return {
+        rationale: "Checklist de comunidade em PASS (moderacao e comunicacao operacionais).",
+        score: 86,
+      };
+    }
+
+    if (status === "fail") {
+      return {
+        rationale: "Checklist de comunidade em FAIL (risco de manipulacao social).",
+        score: 15,
+      };
+    }
+
+    return {
+      rationale: "Checklist de comunidade sem dados suficientes (UNKNOWN).",
+      score: 50,
+    };
   }
 
   private async resolveSnapshot(forceRefresh: boolean): Promise<{

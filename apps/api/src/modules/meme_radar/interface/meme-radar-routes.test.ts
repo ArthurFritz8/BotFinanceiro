@@ -9,6 +9,11 @@ process.env.OPENROUTER_API_KEY = "";
 process.env.MEME_RADAR_AI_MAX_ITEMS = "0";
 process.env.MEME_RADAR_NEW_POOLS_PER_CHAIN = "4";
 process.env.MEME_RADAR_DEX_ENRICH_LIMIT = "4";
+process.env.MEME_RADAR_CONSENSUS_WEIGHT_BUNDLE_RISK = "60";
+process.env.MEME_RADAR_CONSENSUS_WEIGHT_SECURITY_STATUS = "20";
+process.env.MEME_RADAR_CONSENSUS_WEIGHT_LIQUIDITY_DEPTH = "10";
+process.env.MEME_RADAR_CONSENSUS_WEIGHT_WEB_SIGNAL = "5";
+process.env.MEME_RADAR_CONSENSUS_WEIGHT_COMMUNITY_HEALTH = "5";
 
 const { buildApp } = await import("../../../main/app.js");
 
@@ -758,6 +763,27 @@ void it("GET /v1/meme-radar/risk-audit/by-contract retorna checklist para endere
   const auditBody = auditResponse.json<{
     data: {
       checklistMarkdown: string;
+      consensus: {
+        breakdown: Array<{
+          contribution: number;
+          score: number;
+          source:
+            | "bundle_risk"
+            | "community_health"
+            | "liquidity_depth"
+            | "security_status"
+            | "web_signal";
+          weight: number;
+        }>;
+        score: number;
+        weights: {
+          bundle_risk: number;
+          community_health: number;
+          liquidity_depth: number;
+          security_status: number;
+          web_signal: number;
+        };
+      };
       contractAddress: string;
       found: boolean;
       matchedOn: "pair_address" | "token_address" | "vamp_contract_candidate" | null;
@@ -773,6 +799,18 @@ void it("GET /v1/meme-radar/risk-audit/by-contract retorna checklist para endere
   assert.equal(auditBody.data.matchedOn, "token_address");
   assert.equal(auditBody.data.token.symbol, "BMEIGHT");
   assert.equal(auditBody.data.contractAddress, "0x8888888888888888888888888888888888888888");
+  assert.ok(typeof auditBody.data.consensus.score === "number");
+  assert.equal(auditBody.data.consensus.weights.bundle_risk, 60);
+  assert.equal(auditBody.data.consensus.weights.security_status, 20);
+  assert.equal(auditBody.data.consensus.weights.liquidity_depth, 10);
+  assert.equal(auditBody.data.consensus.weights.web_signal, 5);
+  assert.equal(auditBody.data.consensus.weights.community_health, 5);
+  assert.equal(auditBody.data.consensus.breakdown.length, 5);
+  assert.ok(auditBody.data.consensus.breakdown.some((item) => item.source === "bundle_risk"));
+  assert.ok(auditBody.data.consensus.breakdown.some((item) => item.source === "security_status"));
+  assert.ok(auditBody.data.consensus.breakdown.some((item) => item.source === "liquidity_depth"));
+  assert.ok(auditBody.data.consensus.breakdown.some((item) => item.source === "web_signal"));
+  assert.ok(auditBody.data.consensus.breakdown.some((item) => item.source === "community_health"));
   assert.match(auditBody.data.checklistMarkdown, /Checklist de Seguranca/);
 });
 
@@ -786,6 +824,9 @@ void it("GET /v1/meme-radar/risk-audit/by-contract retorna modo UNKNOWN para end
 
   const body = response.json<{
     data: {
+      consensus: {
+        score: number;
+      };
       found: boolean;
       matchedOn: "pair_address" | "token_address" | "vamp_contract_candidate" | null;
     };
@@ -793,6 +834,7 @@ void it("GET /v1/meme-radar/risk-audit/by-contract retorna modo UNKNOWN para end
   }>();
 
   assert.equal(body.status, "success");
+  assert.ok(typeof body.data.consensus.score === "number");
   assert.equal(body.data.found, false);
   assert.equal(body.data.matchedOn, null);
 });
