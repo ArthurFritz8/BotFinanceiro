@@ -29,6 +29,7 @@ void after(async () => {
 function buildGeckoPoolPayload(input: {
   chain: "base" | "solana";
   pairAddress: string;
+  poolCreatedAt?: string;
   quoteId: string;
   quoteName: string;
   quoteSymbol: string;
@@ -45,7 +46,7 @@ function buildGeckoPoolPayload(input: {
           fdv_usd: "1800000",
           market_cap_usd: "900000",
           name: `${input.tokenSymbol} / ${input.quoteSymbol}`,
-          pool_created_at: "2026-04-05T09:15:00.000Z",
+          pool_created_at: input.poolCreatedAt ?? new Date(Date.now() - 10 * 60_000).toISOString(),
           price_change_percentage: {
             h24: "32.6",
           },
@@ -464,4 +465,174 @@ void it("POST /v1/meme-radar/notifications/:id/pin fixa e lista em pinnedOnly", 
   assert.ok(pinnedOnlyBody.data.notifications.length >= 1);
   assert.ok(pinnedOnlyBody.data.notifications.every((item) => item.pinned));
   assert.ok(pinnedOnlyBody.data.notifications.some((item) => item.id === targetNotificationId));
+});
+
+void it("GET /v1/meme-radar/risk-audit retorna checklist institucional para ativo monitorado", async () => {
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("geckoterminal.com/api/v2/networks/solana/new_pools")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(
+            buildGeckoPoolPayload({
+              chain: "solana",
+              pairAddress: "SoPaIr555555555555555555555555555555555",
+              quoteId: "token_sol",
+              quoteName: "Solana",
+              quoteSymbol: "SOL",
+              tokenAddress: "SoToken5555555555555555555555555555555555",
+              tokenId: "token_sol_meme_5",
+              tokenName: "Solana Meme Five",
+              tokenSymbol: "SMFIVE",
+            }),
+          ),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("geckoterminal.com/api/v2/networks/base/new_pools")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(
+            buildGeckoPoolPayload({
+              chain: "base",
+              pairAddress: "BaSePaIr66666666666666666666666666666666",
+              quoteId: "token_usdc",
+              quoteName: "USD Coin",
+              quoteSymbol: "USDC",
+              tokenAddress: "BaseToken66666666666666666666666666666666",
+              tokenId: "token_base_meme_6",
+              tokenName: "Base Meme Six",
+              tokenSymbol: "BMSIX",
+            }),
+          ),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.dexscreener.com/latest/dex/pairs/")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(
+            buildDexPayload({
+              chain: requestUrl.includes("/solana/") ? "solana" : "base",
+              pairAddress: requestUrl.includes("/solana/")
+                ? "SoPaIr555555555555555555555555555555555"
+                : "BaSePaIr66666666666666666666666666666666",
+              tokenAddress: requestUrl.includes("/solana/")
+                ? "SoToken5555555555555555555555555555555555"
+                : "BaseToken66666666666666666666666666666666",
+              tokenName: requestUrl.includes("/solana/") ? "Solana Meme Five" : "Base Meme Six",
+              tokenSymbol: requestUrl.includes("/solana/") ? "SMFIVE" : "BMSIX",
+            }),
+          ),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("duckduckgo.com") || requestUrl.includes("tavily") || requestUrl.includes("serper") || requestUrl.includes("serpapi")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            AbstractText: "",
+            Heading: "",
+            RelatedTopics: [],
+            Results: [],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const refreshResponse = await app.inject({
+    method: "GET",
+    url: "/v1/meme-radar/notifications?refresh=true&limit=20",
+  });
+
+  assert.equal(refreshResponse.statusCode, 200);
+
+  const auditResponse = await app.inject({
+    method: "GET",
+    url: "/v1/meme-radar/risk-audit?assetId=SMFIVE",
+  });
+
+  assert.equal(auditResponse.statusCode, 200);
+
+  const auditBody = auditResponse.json<{
+    data: {
+      bundleRiskReport: {
+        riskScore: number;
+      };
+      checklistMarkdown: string;
+      found: boolean;
+      token: {
+        symbol: string | null;
+      };
+    };
+    status: "success";
+  }>();
+
+  assert.equal(auditBody.status, "success");
+  assert.equal(auditBody.data.found, true);
+  assert.equal(auditBody.data.token.symbol, "SMFIVE");
+  assert.ok(typeof auditBody.data.bundleRiskReport.riskScore === "number");
+  assert.match(auditBody.data.checklistMarkdown, /\[RISK SCORE:\s*\d+\/100\]/);
+  assert.match(auditBody.data.checklistMarkdown, /Checklist de Seguranca/);
+});
+
+void it("GET /v1/meme-radar/risk-audit retorna modo UNKNOWN quando ativo nao existe", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/meme-radar/risk-audit?assetId=UNKNOWN_TOKEN_777",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<{
+    data: {
+      found: boolean;
+      checklistMarkdown: string;
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.found, false);
+  assert.match(body.data.checklistMarkdown, /UNKNOWN/);
+});
+
+void it("GET /v1/meme-radar/risk-audit retorna 400 para assetId invalido", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/meme-radar/risk-audit?assetId=a",
+  });
+
+  assert.equal(response.statusCode, 400);
 });

@@ -272,6 +272,21 @@ export interface MemeRadarBoardResponse {
   sources: MemeRadarSourceSnapshot[];
 }
 
+export interface MemeRadarInstitutionalRiskAuditResponse {
+  assetId: string;
+  bundleRiskReport: BundleRiskReport;
+  chain: MemeRadarChain | null;
+  checklistMarkdown: string;
+  found: boolean;
+  matchedNotificationId: string | null;
+  token: {
+    address: string | null;
+    name: string | null;
+    symbol: string | null;
+  };
+  updatedAt: string;
+}
+
 interface CachedMemeRadarSnapshot {
   fetchedAt: string;
   notifications: StoredMemeRadarNotificationRecord[];
@@ -365,6 +380,10 @@ function normalizeToken(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "")
     .trim();
+}
+
+function normalizeAssetIdForLookup(value: string): string {
+  return normalizeSignalText(value).replace(/[^a-z0-9]/g, "");
 }
 
 function normalizeSignalText(value: string): string {
@@ -1255,6 +1274,33 @@ export function formatBundleRiskChecklistMarkdown(report: BundleRiskReport): str
   return lines.join("\n");
 }
 
+function buildUnknownBundleRiskReport(): BundleRiskReport {
+  const unknownCheck = buildRiskCheck("unknown", "Sem dados suficientes para validar esta regra nesta rodada.");
+
+  return {
+    checklist: {
+      communityHealth: unknownCheck,
+      coordinatedFunding: unknownCheck,
+      earlyDumpTrap: unknownCheck,
+      fakeHolders: unknownCheck,
+      highConcentration: unknownCheck,
+      symmetricBundle: unknownCheck,
+    },
+    flags: [],
+    generatedAt: new Date().toISOString(),
+    metrics: {
+      activeViewerToHolderRatio: null,
+      coordinatedFundingWallets: 0,
+      duplicateTopHolderPercentages: 0,
+      flaggedSniperOrDevWallets: 0,
+      largestNonLpHolderPercent: null,
+    },
+    riskScore: 50,
+    summary: ["Ativo fora do radar atual. Relatorio retornado em modo UNKNOWN para auditoria inicial."],
+    warningMessage: null,
+  };
+}
+
 export class MemeRadarService {
   private readonly openRouterChatAdapter = new OpenRouterChatAdapter();
 
@@ -1375,6 +1421,81 @@ export class MemeRadarService {
       pinned: input.pinned,
       updatedAt,
     };
+  }
+
+  public async getInstitutionalRiskAudit(input: {
+    assetId: string;
+    chain?: "all" | MemeRadarChain;
+    refresh?: boolean;
+  }): Promise<MemeRadarInstitutionalRiskAuditResponse> {
+    const normalizedAssetId = normalizeAssetIdForLookup(input.assetId);
+
+    if (normalizedAssetId.length < 2) {
+      throw new AppError({
+        code: "MEME_RADAR_ASSET_ID_INVALID",
+        message: "Asset id is invalid",
+        statusCode: 400,
+      });
+    }
+
+    const chainScope = input.chain ?? "all";
+    const resolvedSnapshot = await this.resolveSnapshot(input.refresh === true);
+    const scopedNotifications = resolvedSnapshot.snapshot.notifications.filter((record) =>
+      chainScope === "all" ? true : record.pair.chain === chainScope,
+    );
+    const matched = this.resolveNotificationByAssetId(scopedNotifications, normalizedAssetId);
+
+    if (!matched) {
+      const report = buildUnknownBundleRiskReport();
+
+      return {
+        assetId: normalizedAssetId,
+        bundleRiskReport: report,
+        chain: null,
+        checklistMarkdown: formatBundleRiskChecklistMarkdown(report),
+        found: false,
+        matchedNotificationId: null,
+        token: {
+          address: null,
+          name: null,
+          symbol: null,
+        },
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    const report = matched.bundleRiskReport ?? buildUnknownBundleRiskReport();
+
+    return {
+      assetId: normalizedAssetId,
+      bundleRiskReport: report,
+      chain: matched.pair.chain,
+      checklistMarkdown: formatBundleRiskChecklistMarkdown(report),
+      found: true,
+      matchedNotificationId: matched.pair.fingerprint,
+      token: {
+        address: matched.pair.token.address,
+        name: matched.pair.token.name,
+        symbol: matched.pair.token.symbol,
+      },
+      updatedAt: matched.updatedAt,
+    };
+  }
+
+  private resolveNotificationByAssetId(
+    notifications: StoredMemeRadarNotificationRecord[],
+    normalizedAssetId: string,
+  ): StoredMemeRadarNotificationRecord | null {
+    for (const notification of notifications) {
+      const symbol = normalizeAssetIdForLookup(notification.pair.token.symbol);
+      const name = normalizeAssetIdForLookup(notification.pair.token.name);
+
+      if (symbol === normalizedAssetId || name.includes(normalizedAssetId)) {
+        return notification;
+      }
+    }
+
+    return null;
   }
 
   private async resolveSnapshot(forceRefresh: boolean): Promise<{

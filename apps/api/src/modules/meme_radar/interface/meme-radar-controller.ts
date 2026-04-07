@@ -17,6 +17,12 @@ const getMemeRadarNotificationsQuerySchema = z.object({
   refresh: booleanQuerySchema,
 });
 
+const getMemeRadarRiskAuditQuerySchema = z.object({
+  assetId: z.string().trim().min(2).max(64),
+  chain: z.enum(["all", "base", "solana"]).default("all"),
+  refresh: booleanQuerySchema,
+});
+
 const setMemeRadarPinParamsSchema = z.object({
   notificationId: z.string().trim().min(6).max(180),
 });
@@ -33,6 +39,16 @@ export async function getMemeRadarNotifications(
   const board = await memeRadarService.getNotificationBoard(parsedQuery);
 
   void reply.send(buildSuccessResponse(request.id, board));
+}
+
+export async function getMemeRadarRiskAudit(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const parsedQuery = getMemeRadarRiskAuditQuerySchema.parse(request.query);
+  const audit = await memeRadarService.getInstitutionalRiskAudit(parsedQuery);
+
+  void reply.send(buildSuccessResponse(request.id, audit));
 }
 
 export async function setMemeRadarNotificationPinned(
