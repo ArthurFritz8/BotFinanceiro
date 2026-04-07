@@ -1565,7 +1565,7 @@ void it("POST /v1/copilot/chat prioriza DexScreener para responder onde comprar 
   const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
   assert.equal(body.status, "success");
   assert.equal(body.data.responseId, "gen-passive-dex-where-to-buy-001");
-  assert.match(body.data.answer, /DexScreener \(API em tempo real\)/);
+  assert.match(body.data.answer, /DexScreener \(API on-chain em tempo real\)/);
   assert.match(body.data.answer, /Voce pode comprar BMFOUR na Uniswap \(Rede Base\)\./);
   assert.doesNotMatch(body.data.answer, /pesquise no google/i);
 });
@@ -1679,6 +1679,303 @@ void it("POST /v1/copilot/chat usa busca web global quando DexScreener nao encon
   assert.equal(body.data.responseId, "gen-passive-dex-where-to-buy-002");
   assert.match(body.data.answer, /Pesquisa global em tempo real/);
   assert.match(body.data.answer, /Provider usado: duckduckgo/);
+});
+
+void it("POST /v1/copilot/chat recupera contrato na web e reconsulta DexScreener automaticamente", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let openRouterCalls = 0;
+  let dexScreenerCalls = 0;
+  let duckDuckGoCalls = 0;
+  const recoveredContractAddress = "0x1234567890abcdef1234567890abcdef12345678";
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "Sem mais informacoes sobre esse token no momento.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-detective-contract-recovery-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 18,
+              prompt_tokens: 28,
+              total_tokens: 46,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.dexscreener.com/latest/dex/search/")) {
+      dexScreenerCalls += 1;
+      const query = new URL(requestUrl).searchParams.get("q")?.toLowerCase() ?? "";
+
+      if (query.includes(recoveredContractAddress)) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              pairs: [
+                {
+                  baseToken: {
+                    address: recoveredContractAddress,
+                    name: "Base Meme Four",
+                    symbol: "BMFOUR",
+                  },
+                  chainId: "base",
+                  dexId: "uniswap",
+                  liquidity: {
+                    usd: 210000,
+                  },
+                  pairAddress: "0xpaircontract001",
+                  quoteToken: {
+                    symbol: "WETH",
+                  },
+                  url: "https://dexscreener.com/base/0xpaircontract001",
+                  volume: {
+                    h24: 145000,
+                  },
+                },
+              ],
+            }),
+            {
+              headers: {
+                "content-type": "application/json",
+              },
+              status: 200,
+            },
+          ),
+        );
+      }
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            pairs: [],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.duckduckgo.com/?")) {
+      duckDuckGoCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            AbstractText: "",
+            AbstractURL: "",
+            Heading: "",
+            RelatedTopics: [
+              {
+                FirstURL: "https://www.geckoterminal.com/base/tokens/0x1234567890abcdef1234567890abcdef12345678",
+                Text: "BMFOUR contract on Base: 0x1234567890abcdef1234567890abcdef12345678",
+              },
+            ],
+            Results: [],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "aonde posso comprar BMFOUR hoje?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 1);
+  assert.equal(dexScreenerCalls, 2);
+  assert.equal(duckDuckGoCalls, 1);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-detective-contract-recovery-001");
+  assert.match(body.data.answer, /Encontrei os detalhes da BMFOUR atraves de uma busca em tempo real/);
+  assert.match(body.data.answer, /Contrato identificado: 0x1234567890abcdef1234567890abcdef12345678/);
+  assert.doesNotMatch(body.data.answer, /Provider usado:/);
+});
+
+void it("POST /v1/copilot/chat usa link enviado no historico para recuperar contrato e evitar web extra", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  const sessionId = `sessao_detective_link_${Date.now()}`;
+  const historyContractAddress = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd";
+  let openRouterCalls = 0;
+  let dexScreenerCalls = 0;
+  let duckDuckGoCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+      const answer =
+        openRouterCalls === 1
+          ? "Link registrado. Vou usar essa referencia nas proximas respostas."
+          : "Sem mais informacoes sobre esse token no momento.";
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: answer,
+                  role: "assistant",
+                },
+              },
+            ],
+            id: `gen-detective-history-link-${openRouterCalls}`,
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 20,
+              prompt_tokens: 31,
+              total_tokens: 51,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.dexscreener.com/latest/dex/search/")) {
+      dexScreenerCalls += 1;
+      const query = new URL(requestUrl).searchParams.get("q")?.toLowerCase() ?? "";
+
+      if (query.includes(historyContractAddress)) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              pairs: [
+                {
+                  baseToken: {
+                    address: historyContractAddress,
+                    name: "History Meme Four",
+                    symbol: "HMF",
+                  },
+                  chainId: "base",
+                  dexId: "aerodrome",
+                  liquidity: {
+                    usd: 99000,
+                  },
+                  pairAddress: "0xpairhistory001",
+                  quoteToken: {
+                    symbol: "USDC",
+                  },
+                  url: "https://dexscreener.com/base/0xpairhistory001",
+                  volume: {
+                    h24: 52000,
+                  },
+                },
+              ],
+            }),
+            {
+              headers: {
+                "content-type": "application/json",
+              },
+              status: 200,
+            },
+          ),
+        );
+      }
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            pairs: [],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.duckduckgo.com/?")) {
+      duckDuckGoCalls += 1;
+      return Promise.reject(new Error("DuckDuckGo nao deveria ser chamado quando historico resolve contrato"));
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const firstResponse = await app.inject({
+    method: "POST",
+    payload: {
+      message: `Guarde este link oficial: https://dexscreener.com/base/${historyContractAddress}`,
+      sessionId,
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(firstResponse.statusCode, 200);
+
+  const secondResponse = await app.inject({
+    method: "POST",
+    payload: {
+      message: "aonde posso comprar esse token?",
+      sessionId,
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(secondResponse.statusCode, 200);
+  assert.equal(openRouterCalls, 2);
+  assert.equal(dexScreenerCalls, 2);
+  assert.equal(duckDuckGoCalls, 0);
+
+  const body = secondResponse.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-detective-history-link-2");
+  assert.match(body.data.answer, /usando o link enviado anteriormente/);
+  assert.match(body.data.answer, /Contrato identificado: 0xabcdefabcdefabcdefabcdefabcdefabcdefabcd/);
 });
 
 void it("POST /v1/copilot/chat evita resposta passiva com busca global para onde comprar", async () => {

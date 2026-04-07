@@ -10,6 +10,7 @@ import {
 } from "../../../integrations/search/web-search-adapter.js";
 import {
   DexScreenerSearchAdapter,
+  type DexScreenerTokenLookupResponse,
 } from "../../../integrations/search/dexscreener-search-adapter.js";
 import {
   CoinCapMarketDataAdapter,
@@ -149,16 +150,16 @@ const copilotDefaultSystemPrompt = [
   "Quando a pergunta envolver acoes globais por ticker (AAPL, MSFT, NVDA etc), use get_equities_market_snapshot.",
   "Quando a pergunta envolver Wall Street (indices/setores/rates/risk-on), use get_wall_street_market_snapshot.",
   "Quando a pergunta envolver DeFi (tokens, DEX, lending), use get_defi_market_snapshot.",
-  "Quando a pergunta pedir comprar/vender, responda com sinal tatico informativo (buy/sell/wait), confianca e niveis de risco, sem tratar como recomendacao de investimento.",
+  "Fluxo detetive: identificar intencao, investigar com tools e sintetizar resposta humana direta.",
+  "Se o usuario nao pediu analise tecnica formal, responda de forma objetiva e sem template rigido.",
+  "Quando a pergunta pedir comprar/vender, responda com sinal tatico informativo (buy/sell/wait), confianca e risco, sem recomendacao de investimento.",
   "Quando a pergunta envolver indices, acoes, cambio, juros ou commodities, use get_financial_market_snapshot.",
   "Quando a pergunta envolver risco de curto prazo, entregue analise por fatores (volatilidade, liquidez, macro e operacao), sem recomendacao de investimento.",
-  "Quando houver duvida sobre onde comprar/listagem de token, use primeiro a tool search_token_listings_dexscreener e so depois search_web_realtime se nao houver resposta suficiente.",
-  "Quando houver ativo/ticker desconhecido ou anafora (ex.: 'essa moeda'), use obrigatoriamente a tool search_web_realtime antes de responder.",
-  "E proibido delegar o trabalho com frases como 'pesquise no Google', 'procure no Google' ou equivalentes.",
-  "Ao usar dados de busca web, sintetize e cite as principais fontes com URL no corpo da resposta.",
-  "Nao recuse genericamente se houver dados disponiveis nas tools; entregue resposta concisa com numeros e contexto.",
-  "Se algum dado estiver indisponivel, explicite a limitacao e continue com os dados que conseguiu coletar.",
-  "Nao forneca recomendacao de investimento; mantenha tom analitico e neutro.",
+  "Para onde comprar/listagem: use search_token_listings_dexscreener; se falhar por ticker/nome, use search_web_realtime para achar contrato/link oficial e tente Dex novamente.",
+  "Use links enviados no historico como fonte primaria; para ativo desconhecido ou anafora, faca busca web antes de concluir.",
+  "Nunca delegue com 'pesquise no Google' e nunca diga 'nao encontrei informacoes' sem investigacao web e nova tentativa on-chain.",
+  "Ao usar busca web, cite URLs principais; se faltar dado, explicite limitacao e siga com o que foi confirmado.",
+  "Nao recuse genericamente se houver dados disponiveis nas tools; mantenha tom analitico e neutro.",
 ].join(" ");
 
 const copilotGeneralAssistantSystemPrompt = [
@@ -673,6 +674,121 @@ function extractExchangeMentionsFromWebResults(results: WebSearchResultItem[]): 
   }
 
   return [...mentions].slice(0, 8);
+}
+
+function extractUrlsFromText(value: string): string[] {
+  const rawMatches = value.match(/https?:\/\/[^\s<>"]+/gi) ?? [];
+  const dedupe = new Set<string>();
+  const sanitizedUrls: string[] = [];
+
+  for (const rawMatch of rawMatches) {
+    let normalizedUrl = rawMatch.trim();
+
+    while (/[),.;!?]$/.test(normalizedUrl)) {
+      normalizedUrl = normalizedUrl.slice(0, -1);
+    }
+
+    try {
+      const validatedUrl = new URL(normalizedUrl).toString();
+
+      if (!dedupe.has(validatedUrl)) {
+        dedupe.add(validatedUrl);
+        sanitizedUrls.push(validatedUrl);
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return sanitizedUrls;
+}
+
+function extractDomainsFromUrls(urls: string[]): string[] {
+  const dedupe = new Set<string>();
+  const domains: string[] = [];
+
+  for (const url of urls) {
+    try {
+      const host = new URL(url).hostname.trim().toLowerCase().replace(/^www\./, "");
+
+      if (host.length === 0 || dedupe.has(host)) {
+        continue;
+      }
+
+      dedupe.add(host);
+      domains.push(host);
+    } catch {
+      continue;
+    }
+  }
+
+  return domains;
+}
+
+function extractLatestUserTurn(message: string): string {
+  const turns = message
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  if (turns.length === 0) {
+    return message.trim();
+  }
+
+  return turns[turns.length - 1] ?? message.trim();
+}
+
+function truncateForQuery(value: string, maxLength: number): string {
+  const trimmed = value.trim();
+
+  if (trimmed.length <= maxLength) {
+    return trimmed;
+  }
+
+  return trimmed.slice(0, maxLength).trim();
+}
+
+function extractContractAddressCandidatesFromText(value: string): string[] {
+  const evmCandidates = value.match(/\b0x[a-fA-F0-9]{40}\b/g) ?? [];
+  const dedupe = new Set<string>();
+  const normalizedCandidates: string[] = [];
+
+  for (const candidate of evmCandidates) {
+    const normalizedCandidate = candidate.toLowerCase();
+
+    if (!dedupe.has(normalizedCandidate)) {
+      dedupe.add(normalizedCandidate);
+      normalizedCandidates.push(normalizedCandidate);
+    }
+  }
+
+  return normalizedCandidates;
+}
+
+function extractRecentUserLinks(conversationMessages: OpenRouterConversationMessage[]): string[] {
+  const dedupe = new Set<string>();
+  const collectedLinks: string[] = [];
+
+  for (let index = conversationMessages.length - 1; index >= 0; index -= 1) {
+    const message = conversationMessages[index];
+
+    if (!message || message.role !== "user") {
+      continue;
+    }
+
+    for (const url of extractUrlsFromText(message.content)) {
+      if (!dedupe.has(url)) {
+        dedupe.add(url);
+        collectedLinks.push(url);
+
+        if (collectedLinks.length >= 6) {
+          return collectedLinks;
+        }
+      }
+    }
+  }
+
+  return collectedLinks;
 }
 
 const financialIntentKeywords = [
@@ -2717,7 +2833,7 @@ export class CopilotChatService {
 
     if (hasBrokerIntegrationIntent(input.message)) {
       try {
-        const fallbackAnswer = await this.buildBrokerIntegrationFallback(input.message);
+        const fallbackAnswer = await this.buildBrokerIntegrationFallback(input.message, conversationMessages);
 
         return {
           ...completion,
@@ -3017,15 +3133,19 @@ export class CopilotChatService {
     ].join("\n");
   }
 
-  private async buildBrokerIntegrationFallback(message: string): Promise<string> {
-    const broker = resolveBrokerFromMessage(message);
-    const normalizedMessage = normalizeText(message);
-    const assetHint = resolvePrimaryAssetHint(message);
+  private async buildBrokerIntegrationFallback(
+    message: string,
+    conversationMessages: OpenRouterConversationMessage[],
+  ): Promise<string> {
+    const operativeMessage = extractLatestUserTurn(message);
+    const broker = resolveBrokerFromMessage(operativeMessage);
+    const normalizedMessage = normalizeText(operativeMessage);
+    const assetHint = resolvePrimaryAssetHint(operativeMessage);
     const asksWhereToBuy = hasWhereToBuyIntent(normalizedMessage);
 
     if (asksWhereToBuy) {
       try {
-        return await this.buildWebWhereToBuyFallback(message, assetHint);
+        return await this.buildWebWhereToBuyFallback(operativeMessage, assetHint, conversationMessages);
       } catch (error) {
         logger.warn(
           {
@@ -3071,7 +3191,7 @@ export class CopilotChatService {
     }
 
     try {
-      return await this.buildWebWhereToBuyFallback(message, assetHint);
+      return await this.buildWebWhereToBuyFallback(operativeMessage, assetHint, conversationMessages);
     } catch (error) {
       logger.warn(
         {
@@ -3089,23 +3209,17 @@ export class CopilotChatService {
     ].join("\n");
   }
 
-  private async buildDexScreenerWhereToBuyFallback(assetHint: string, message: string): Promise<string | null> {
-    const normalizedAssetHint = assetHint.trim().length > 0 ? assetHint.trim().toLowerCase() : "token";
-    const tokenLookupQuery = normalizedAssetHint === "token"
-      ? message.trim()
-      : `${normalizedAssetHint} ${message}`.trim();
-    const lookupResponse = await dexScreenerSearchAdapter.searchTokenListings({
-      maxResults: 5,
-      query: tokenLookupQuery,
-    });
+  private formatDexWhereToBuyResolution(
+    lookupResponse: DexScreenerTokenLookupResponse,
+    options: {
+      contractAddress?: string;
+      introLine: string;
+      sourceLinks?: string[];
+    },
+  ): string {
     const topVenues = lookupResponse.venues.slice(0, 4);
-
-    if (topVenues.length === 0) {
-      return null;
-    }
-
     const bestVenue = topVenues[0];
-    const primaryTokenSymbol = bestVenue?.baseTokenSymbol ?? normalizedAssetHint.toUpperCase();
+    const primaryTokenSymbol = bestVenue?.baseTokenSymbol ?? lookupResponse.query.toUpperCase();
     const primaryBuyLine = bestVenue
       ? `Voce pode comprar ${primaryTokenSymbol} na ${bestVenue.dexName} (Rede ${bestVenue.chainName}).`
       : `Voce pode comprar ${primaryTokenSymbol} em DEX da rede identificada.`;
@@ -3116,22 +3230,117 @@ export class CopilotChatService {
         return `${index + 1}. ${venue.dexName} (Rede ${venue.chainName}) | par ${venue.baseTokenSymbol}/${venue.quoteTokenSymbol} | liquidez ${liquidityLabel} | volume 24h ${volumeLabel} | ${venue.pairUrl}`;
       })
       .join("\n");
+    const sourceLine =
+      options.sourceLinks && options.sourceLinks.length > 0
+        ? `Fontes da investigacao: ${options.sourceLinks.slice(0, 2).join(" | ")}.`
+        : "";
 
     return [
-      `DexScreener (API em tempo real) confirmou venues para ${primaryTokenSymbol}.`,
+      options.introLine,
+      options.contractAddress ? `Contrato identificado: ${options.contractAddress}.` : "",
       primaryBuyLine,
       "Melhores pares encontrados agora:",
       venueLines,
-      "Fallback inteligente habilitado: se DexScreener falhar ou nao tiver venues suficientes, eu complemento automaticamente com busca web global.",
+      sourceLine,
       "Checklist profissional: valide contrato oficial, rede correta e liquidez antes de executar qualquer compra.",
-    ].join("\n");
+    ]
+      .filter((line): line is string => typeof line === "string" && line.length > 0)
+      .join("\n");
   }
 
-  private async buildWebWhereToBuyFallback(message: string, assetHint: string): Promise<string> {
+  private async tryDexByContractCandidates(
+    contractCandidates: string[],
+    sourceLinks: string[],
+    introLineBuilder: (lookupResponse: DexScreenerTokenLookupResponse, contractAddress: string) => string,
+  ): Promise<string | null> {
+    for (const contractAddress of contractCandidates.slice(0, 4)) {
+      try {
+        const contractLookup = await dexScreenerSearchAdapter.searchTokenListings({
+          maxResults: 5,
+          query: contractAddress,
+        });
+
+        if (contractLookup.venues.length === 0) {
+          continue;
+        }
+
+        return this.formatDexWhereToBuyResolution(contractLookup, {
+          contractAddress,
+          introLine: introLineBuilder(contractLookup, contractAddress),
+          sourceLinks,
+        });
+      } catch (error) {
+        logger.warn(
+          {
+            contractAddress,
+            err: error,
+          },
+          "Contract-address lookup on DexScreener failed during where-to-buy investigation",
+        );
+      }
+    }
+
+    return null;
+  }
+
+  private async buildDexScreenerWhereToBuyFallback(
+    assetHint: string,
+    message: string,
+    conversationMessages: OpenRouterConversationMessage[],
+  ): Promise<string | null> {
     const normalizedAssetHint = assetHint.trim().length > 0 ? assetHint.trim().toLowerCase() : "token";
+    const tokenLookupQuery = truncateForQuery(
+      normalizedAssetHint === "token" ? message.trim() : `${normalizedAssetHint} ${message}`.trim(),
+      120,
+    );
+    const directLookupResponse = await dexScreenerSearchAdapter.searchTokenListings({
+      maxResults: 5,
+      query: tokenLookupQuery,
+    });
+
+    if (directLookupResponse.venues.length > 0) {
+      const tokenSymbol = directLookupResponse.venues[0]?.baseTokenSymbol ?? normalizedAssetHint.toUpperCase();
+      return this.formatDexWhereToBuyResolution(directLookupResponse, {
+        introLine: `DexScreener (API on-chain em tempo real) confirmou venues para ${tokenSymbol}.`,
+      });
+    }
+
+    const historyLinks = extractRecentUserLinks(conversationMessages);
+    const historyContracts = extractContractAddressCandidatesFromText(`${message}\n${historyLinks.join("\n")}`);
+
+    if (historyContracts.length > 0) {
+      const historyResolution = await this.tryDexByContractCandidates(
+        historyContracts,
+        historyLinks,
+        (lookupResponse) => {
+          const tokenSymbol = lookupResponse.venues[0]?.baseTokenSymbol ?? normalizedAssetHint.toUpperCase();
+          const chainName = lookupResponse.venues[0]?.chainName ?? "detectada";
+          return `Encontrei os detalhes da ${tokenSymbol} usando o link enviado anteriormente na rede ${chainName}.`;
+        },
+      );
+
+      if (historyResolution) {
+        return historyResolution;
+      }
+    }
+
+    return null;
+  }
+
+  private async buildWebWhereToBuyFallback(
+    message: string,
+    assetHint: string,
+    conversationMessages: OpenRouterConversationMessage[],
+  ): Promise<string> {
+    const normalizedAssetHint = assetHint.trim().length > 0 ? assetHint.trim().toLowerCase() : "token";
+    const historyLinks = extractRecentUserLinks(conversationMessages);
 
     try {
-      const dexScreenerFallback = await this.buildDexScreenerWhereToBuyFallback(normalizedAssetHint, message);
+      const dexScreenerFallback = await this.buildDexScreenerWhereToBuyFallback(
+        normalizedAssetHint,
+        message,
+        conversationMessages,
+      );
 
       if (dexScreenerFallback) {
         return dexScreenerFallback;
@@ -3146,15 +3355,42 @@ export class CopilotChatService {
       );
     }
 
-    const focusedQuery = buildFocusedWebSearchQuery(
-      `${normalizedAssetHint} ${message}`.trim(),
-      "where_to_buy",
+    const domainHint = extractDomainsFromUrls(historyLinks).slice(0, 2).join(" ");
+    const sourceHint = domainHint.length > 0 ? ` ${domainHint}` : "";
+    const focusedQuery = truncateForQuery(
+      buildFocusedWebSearchQuery(
+        `${normalizedAssetHint} ${message}${sourceHint}`.trim(),
+        "where_to_buy",
+      ),
+      220,
     );
     const searchResponse = await webSearchAdapter.search({
       maxResults: 6,
       query: focusedQuery,
     });
     const topResults = searchResponse.results.slice(0, 5);
+    const contractCandidates = extractContractAddressCandidatesFromText(
+      `${message}\n${historyLinks.join("\n")}\n${topResults
+        .map((result) => `${result.title}\n${result.snippet}\n${result.url}`)
+        .join("\n")}`,
+    );
+
+    if (contractCandidates.length > 0) {
+      const dexResolutionFromWebDiscovery = await this.tryDexByContractCandidates(
+        contractCandidates,
+        topResults.map((result) => result.url),
+        (lookupResponse) => {
+          const tokenSymbol = lookupResponse.venues[0]?.baseTokenSymbol ?? normalizedAssetHint.toUpperCase();
+          const chainName = lookupResponse.venues[0]?.chainName ?? "detectada";
+          return `Encontrei os detalhes da ${tokenSymbol} atraves de uma busca em tempo real na rede ${chainName}.`;
+        },
+      );
+
+      if (dexResolutionFromWebDiscovery) {
+        return dexResolutionFromWebDiscovery;
+      }
+    }
+
     const exchangeMentions = extractExchangeMentionsFromWebResults(topResults);
     const highConfidenceSources = topResults.filter((result) => result.confidenceLabel === "high").length;
     const displayAssetHint = normalizedAssetHint.toUpperCase();
@@ -3176,6 +3412,9 @@ export class CopilotChatService {
     return [
       `Pesquisa global em tempo real para ${displayAssetHint}.`,
       `Provider usado: ${searchResponse.provider}. Fontes de alta confianca: ${highConfidenceSources}/${topResults.length}.`,
+      contractCandidates.length > 0
+        ? `Foram identificados candidatos de contrato (${contractCandidates.length}), mas sem confirmacao on-chain final no DexScreener nesta rodada.`
+        : "Nao foi identificado contrato valido nas fontes desta rodada.",
       exchangeMentions.length > 0
         ? `Possiveis locais de compra/listagem identificados: ${exchangeMentions.join(", ")}.`
         : "Nao houve confirmacao clara de listagem em corretoras grandes nas fontes coletadas agora.",
