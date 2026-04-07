@@ -1,7 +1,9 @@
 import { defineConfig } from "vite";
+import { VitePWA } from "vite-plugin-pwa";
 
 const proxyTarget = process.env.VITE_DEV_API_PROXY_TARGET ?? "http://localhost:3000";
 const configuredBasePath = (process.env.VITE_BASE_PATH ?? "/").trim();
+const normalizedBasePath = normalizeBasePath(configuredBasePath);
 
 function normalizeBasePath(value) {
   if (value.length === 0 || value === "/") {
@@ -13,7 +15,46 @@ function normalizeBasePath(value) {
 }
 
 export default defineConfig({
-  base: normalizeBasePath(configuredBasePath),
+  base: normalizedBasePath,
+  plugins: [
+    VitePWA({
+      devOptions: {
+        enabled: true,
+      },
+      includeAssets: ["pwa-icon.svg", "pwa-maskable.svg"],
+      manifest: {
+        background_color: "#f7f5ee",
+        description: "Copiloto financeiro com IA para leitura de mercado em tempo real.",
+        display: "standalone",
+        icons: [
+          {
+            purpose: "any",
+            sizes: "192x192",
+            src: "pwa-icon.svg",
+            type: "image/svg+xml",
+          },
+          {
+            purpose: "any",
+            sizes: "512x512",
+            src: "pwa-icon.svg",
+            type: "image/svg+xml",
+          },
+          {
+            purpose: "maskable",
+            sizes: "512x512",
+            src: "pwa-maskable.svg",
+            type: "image/svg+xml",
+          },
+        ],
+        name: "BotFinanceiro Copiloto",
+        scope: normalizedBasePath,
+        short_name: "BotFinanceiro",
+        start_url: normalizedBasePath,
+        theme_color: "#0e8f7e",
+      },
+      registerType: "autoUpdate",
+    }),
+  ],
   preview: {
     host: "0.0.0.0",
     port: 4173,

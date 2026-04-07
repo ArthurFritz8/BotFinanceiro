@@ -8,6 +8,7 @@
       name="description"
       content="Copiloto financeiro com respostas de IA e foco em custo zero operacional."
     />
+    <meta name="theme-color" content="#0e8f7e" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -19,8 +20,19 @@
     <div class="bg-orb bg-orb-left" aria-hidden="true"></div>
     <div class="bg-orb bg-orb-right" aria-hidden="true"></div>
 
-    <main class="app-shell">
-      <aside id="app-sidebar" class="app-sidebar" aria-label="Navegacao principal">
+    <button
+      type="button"
+      id="mobile-menu-toggle"
+      class="mobile-menu-toggle lg:hidden"
+      aria-controls="app-sidebar"
+      aria-expanded="false"
+      aria-label="Abrir menu de navegacao"
+    >
+      Menu
+    </button>
+
+    <main class="app-shell w-full">
+      <aside id="app-sidebar" class="app-sidebar hidden lg:flex lg:flex-col" aria-label="Navegacao principal">
         <div class="app-sidebar-head">
           <p class="app-sidebar-brand">BotFinanceiro</p>
           <button type="button" id="sidebar-toggle" class="sidebar-toggle" aria-label="Colapsar menu">
@@ -396,8 +408,8 @@
         </div>
         </section>
 
-        <section class="layout-grid">
-          <section class="chat-panel">
+        <section class="layout-grid w-full flex flex-col lg:flex-row">
+          <section class="chat-panel w-full flex-1 min-w-0">
             <header class="chat-header">
               <h2>Copiloto Premium | Chat Desk</h2>
               <div class="chat-header-actions">
@@ -428,7 +440,7 @@
             </form>
           </section>
 
-          <aside class="chat-context-sidebar" aria-label="Contexto do chat">
+          <aside class="chat-context-sidebar hidden xl:flex xl:flex-col min-w-0" aria-label="Contexto do chat">
             <section class="chat-context-card history-card">
               <div class="history-card-header">
                 <h3>Conversas da Conta</h3>
@@ -443,7 +455,7 @@
                 <p>Prompts rapidos para acelerar diagnostico e decisao.</p>
               </div>
 
-              <div class="quick-prompts" id="quick-prompts">
+              <div class="quick-prompts break-words" id="quick-prompts">
                 <button type="button" data-prompt="Resuma o mercado cripto de hoje em 5 linhas.">
                   Resumo rapido do mercado
                 </button>

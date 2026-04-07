@@ -16,6 +16,7 @@ const messagesContainer = document.querySelector("#messages");
 const appSidebarElement = document.querySelector("#app-sidebar");
 const appRouteNavElement = document.querySelector("#app-route-nav");
 const sidebarToggleButton = document.querySelector("#sidebar-toggle");
+const mobileMenuToggleButton = document.querySelector("#mobile-menu-toggle");
 const statusPill = document.querySelector("#connection-status");
 const quickPromptsContainer = document.querySelector("#quick-prompts");
 const activeModelElement = document.querySelector("#active-model");
@@ -1378,6 +1379,7 @@ let chatSessionId = getOrCreateSessionId();
 let activeConversationId = getStoredConversationId();
 let activeAppRoute = APP_ROUTE_CHAT;
 let isSidebarCollapsed = false;
+let isMobileSidebarOpen = false;
 let authMode = AUTH_MODE_SIGN_IN;
 let activeAuthUser = null;
 let conversationItems = [];
@@ -1718,6 +1720,25 @@ function setSidebarCollapsed(nextValue) {
   persistSidebarCollapsed(nextValue);
 }
 
+function isDesktopViewport() {
+  return window.matchMedia("(min-width: 1024px)").matches;
+}
+
+function setMobileSidebarOpen(nextValue) {
+  const shouldOpen = Boolean(nextValue);
+  isMobileSidebarOpen = shouldOpen;
+  document.body.classList.toggle("mobile-sidebar-open", shouldOpen);
+
+  if (mobileMenuToggleButton instanceof HTMLButtonElement) {
+    mobileMenuToggleButton.setAttribute("aria-expanded", String(shouldOpen));
+    mobileMenuToggleButton.setAttribute(
+      "aria-label",
+      shouldOpen ? "Fechar menu de navegacao" : "Abrir menu de navegacao",
+    );
+    mobileMenuToggleButton.textContent = shouldOpen ? "Fechar" : "Menu";
+  }
+}
+
 function updateActiveRouteButton(route) {
   if (!(appRouteNavElement instanceof HTMLElement)) {
     return;
@@ -1774,9 +1795,16 @@ function setupAppShellRouting() {
   const initialRoute = routeFromLocation === APP_ROUTE_CHAT ? storedRoute : routeFromLocation;
 
   setSidebarCollapsed(getStoredSidebarCollapsed());
+  setMobileSidebarOpen(false);
   navigateToRoute(initialRoute, {
     replaceHistory: true,
   });
+
+  if (mobileMenuToggleButton instanceof HTMLButtonElement) {
+    mobileMenuToggleButton.addEventListener("click", () => {
+      setMobileSidebarOpen(!isMobileSidebarOpen);
+    });
+  }
 
   if (sidebarToggleButton instanceof HTMLButtonElement) {
     sidebarToggleButton.addEventListener("click", () => {
@@ -1796,12 +1824,55 @@ function setupAppShellRouting() {
       const nextRoute = normalizeAppRoute(button.dataset.route ?? APP_ROUTE_CHAT);
 
       if (nextRoute === activeAppRoute) {
+        if (!isDesktopViewport()) {
+          setMobileSidebarOpen(false);
+        }
         return;
       }
 
       navigateToRoute(nextRoute);
+
+      if (!isDesktopViewport()) {
+        setMobileSidebarOpen(false);
+      }
     });
   }
+
+  document.addEventListener("click", (event) => {
+    if (!isMobileSidebarOpen || isDesktopViewport()) {
+      return;
+    }
+
+    const target = event.target;
+
+    if (!(target instanceof Node)) {
+      return;
+    }
+
+    const clickedInsideSidebar = appSidebarElement instanceof HTMLElement && appSidebarElement.contains(target);
+    const clickedOnMobileButton =
+      mobileMenuToggleButton instanceof HTMLButtonElement && mobileMenuToggleButton.contains(target);
+
+    if (clickedInsideSidebar || clickedOnMobileButton) {
+      return;
+    }
+
+    setMobileSidebarOpen(false);
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !isMobileSidebarOpen) {
+      return;
+    }
+
+    setMobileSidebarOpen(false);
+  });
+
+  window.addEventListener("resize", () => {
+    if (isDesktopViewport() && isMobileSidebarOpen) {
+      setMobileSidebarOpen(false);
+    }
+  });
 
   window.addEventListener("popstate", () => {
     navigateToRoute(resolveRouteFromLocation(), {
