@@ -3225,6 +3225,19 @@ function buildMemecoinChatPrompt(notification) {
     ? notification.riskFlags.slice(0, 3).join("; ")
     : "n/d";
   const pairUrl = typeof notification?.pairUrl === "string" ? notification.pairUrl : "";
+  const poolStatus = typeof notification?.poolStatus === "string"
+    ? notification.poolStatus
+    : "ALIVE";
+  const poolStatusReason = typeof notification?.poolStatusReason === "string"
+    ? notification.poolStatusReason
+    : "";
+  const securityStatus = typeof notification?.securityStatus === "string"
+    ? notification.securityStatus
+    : "UNKNOWN";
+  const securityStatusReason = typeof notification?.securityStatusReason === "string"
+    ? notification.securityStatusReason
+    : "";
+  const actionable = notification?.actionable !== false;
 
   return [
     "Analise este alerta de MemeCoin Radar e gere um plano tatico de acompanhamento sem recomendacao financeira.",
@@ -3233,6 +3246,9 @@ function buildMemecoinChatPrompt(notification) {
     `Prioridade: ${priority}`,
     `Hype score: ${score}`,
     `Confianca do sinal: ${confidence}`,
+    `Status da pool: ${poolStatus}${poolStatusReason.length > 0 ? ` (${poolStatusReason})` : ""}`,
+    `Status de seguranca: ${securityStatus}${securityStatusReason.length > 0 ? ` (${securityStatusReason})` : ""}`,
+    `Operacional: ${actionable ? "acionavel" : "bloqueado por risco"}`,
     `Catalisadores: ${catalysts}`,
     `Riscos: ${risks}`,
     pairUrl.length > 0 ? `Link da pool: ${pairUrl}` : "Link da pool: n/d",
@@ -3289,9 +3305,28 @@ function renderMemecoinEmpty(listElement, message) {
 }
 
 function createMemecoinCard(notification) {
+  const poolStatus = typeof notification?.poolStatus === "string"
+    ? notification.poolStatus
+    : "ALIVE";
+  const poolStatusReason = typeof notification?.poolStatusReason === "string"
+    ? notification.poolStatusReason
+    : "";
+  const securityStatus = typeof notification?.securityStatus === "string"
+    ? notification.securityStatus
+    : "UNKNOWN";
+  const securityStatusReason = typeof notification?.securityStatusReason === "string"
+    ? notification.securityStatusReason
+    : "";
+  const actionable = notification?.actionable !== false
+    && poolStatus === "ALIVE"
+    && securityStatus !== "HONEYPOT";
+
   const card = document.createElement("article");
   card.className = "memecoin-card";
   card.dataset.priority = notification.priority;
+  card.dataset.poolStatus = poolStatus.toLowerCase();
+  card.dataset.securityStatus = securityStatus.toLowerCase();
+  card.dataset.actionable = actionable ? "true" : "false";
 
   const top = document.createElement("div");
   top.className = "memecoin-card-top";
@@ -3303,7 +3338,27 @@ function createMemecoinCard(notification) {
   chainPill.className = "memecoin-card-chain";
   chainPill.textContent = formatMemeChainLabel(notification.chain);
 
-  top.append(title, chainPill);
+  const topMeta = document.createElement("div");
+  topMeta.className = "memecoin-card-top-meta";
+  topMeta.append(chainPill);
+
+  if (poolStatus !== "ALIVE") {
+    const poolStatusPill = document.createElement("span");
+    poolStatusPill.className = "memecoin-card-status-pill";
+    poolStatusPill.dataset.tone = poolStatus === "RUGGED" ? "danger" : "warning";
+    poolStatusPill.textContent = poolStatus;
+    topMeta.append(poolStatusPill);
+  }
+
+  if (securityStatus === "HONEYPOT") {
+    const securityStatusPill = document.createElement("span");
+    securityStatusPill.className = "memecoin-card-status-pill";
+    securityStatusPill.dataset.tone = "danger";
+    securityStatusPill.textContent = "HONEYPOT";
+    topMeta.append(securityStatusPill);
+  }
+
+  top.append(title, topMeta);
 
   const metrics = document.createElement("div");
   metrics.className = "memecoin-card-metrics";
@@ -3325,6 +3380,13 @@ function createMemecoinCard(notification) {
   priorityChip.textContent = formatMemePriorityLabel(notification.priority);
 
   metrics.append(scoreChip, confidenceChip, liquidityChip, priorityChip);
+
+  if (!actionable) {
+    const blockedChip = document.createElement("span");
+    blockedChip.className = "memecoin-chip memecoin-chip-blocked";
+    blockedChip.textContent = "Bloqueado";
+    metrics.append(blockedChip);
+  }
 
   const summary = document.createElement("p");
   summary.className = "memecoin-card-summary";
@@ -3353,6 +3415,21 @@ function createMemecoinCard(notification) {
 
   details.append(catalystLine, riskLine);
 
+  const statusDetails = [poolStatusReason, securityStatusReason]
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter((entry) => entry.length > 0)
+    .join(" | ");
+
+  if (statusDetails.length > 0) {
+    const statusLine = document.createElement("div");
+    const statusLabel = document.createElement("strong");
+    statusLabel.textContent = "Status: ";
+    const statusText = document.createElement("span");
+    statusText.textContent = statusDetails;
+    statusLine.append(statusLabel, statusText);
+    details.append(statusLine);
+  }
+
   const footer = document.createElement("div");
   footer.className = "memecoin-card-footer";
 
@@ -3376,11 +3453,15 @@ function createMemecoinCard(notification) {
   chatButton.className = "memecoin-chat-button";
   chatButton.dataset.action = "send-to-chat";
   chatButton.dataset.notificationId = notification.id;
-  chatButton.textContent = "Levar ao chat";
+  chatButton.disabled = !actionable;
+  chatButton.textContent = actionable ? "Levar ao chat" : "Risco bloqueado";
+  chatButton.title = actionable
+    ? "Enviar sinal para o chat"
+    : "Sinal bloqueado por risco de pool/seguranca";
 
   actions.append(pinButton, chatButton);
 
-  if (notification.pairUrl) {
+  if (actionable && notification.pairUrl) {
     const link = document.createElement("a");
     link.className = "memecoin-card-link";
     link.href = notification.pairUrl;
@@ -3388,6 +3469,11 @@ function createMemecoinCard(notification) {
     link.target = "_blank";
     link.textContent = "Pool";
     actions.append(link);
+  } else if (notification.pairUrl) {
+    const blockedLink = document.createElement("span");
+    blockedLink.className = "memecoin-card-link memecoin-card-link-disabled";
+    blockedLink.textContent = "Pool bloqueada";
+    actions.append(blockedLink);
   }
 
   footer.append(source, actions);
@@ -3444,9 +3530,10 @@ function renderMemecoinFromState() {
   const healthySources = sources.filter((source) => source?.status === "ok").length;
   const fetchedAt = formatShortTime(memecoinRadarPayload.fetchedAt);
   const board = memecoinRadarPayload.board ?? {};
+  const blockedCount = notifications.filter((notification) => notification?.actionable === false).length;
 
   setMemecoinSummary(
-    `Fontes ${healthySources}/${sources.length} • total ${board.total ?? notifications.length} • fixados ${board.pinned ?? 0} • atualizado ${fetchedAt}`,
+    `Fontes ${healthySources}/${sources.length} • total ${board.total ?? notifications.length} • bloqueados ${blockedCount} • fixados ${board.pinned ?? 0} • atualizado ${fetchedAt}`,
   );
   renderMemecoinBoard(notifications);
 }
@@ -3599,6 +3686,10 @@ function setupMemecoinRadarPanel() {
       return;
     }
 
+    if (actionButton.disabled) {
+      return;
+    }
+
     const action = actionButton.dataset.action;
     const notificationId = actionButton.dataset.notificationId ?? "";
 
@@ -3638,6 +3729,11 @@ function setupMemecoinRadarPanel() {
     const notification = notifications.find((item) => item?.id === notificationId);
 
     if (!notification) {
+      return;
+    }
+
+    if (notification?.actionable === false) {
+      setStatus("error", "Sinal bloqueado por risco de pool/seguranca.");
       return;
     }
 

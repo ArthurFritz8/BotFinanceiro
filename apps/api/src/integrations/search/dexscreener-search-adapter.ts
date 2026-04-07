@@ -349,7 +349,10 @@ export class DexScreenerSearchAdapter {
       return left.dexId.localeCompare(right.dexId);
     });
 
-    return dedupedVenues.slice(0, maxResults).map(({ relevanceScore: _relevanceScore, ...venue }) => venue);
+    return dedupedVenues.slice(0, maxResults).map(({ relevanceScore, ...venue }) => {
+      void relevanceScore;
+      return venue;
+    });
   }
 
   private async requestDexScreener(query: string): Promise<z.infer<typeof dexScreenerSearchPayloadSchema>> {

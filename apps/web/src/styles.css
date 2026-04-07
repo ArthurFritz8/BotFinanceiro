@@ -2404,6 +2404,20 @@ body.sidebar-collapsed .app-shell {
   padding: 0.44rem;
 }
 
+.memecoin-card[data-pool-status="delisted"] {
+  border-color: rgba(255, 174, 112, 0.72);
+}
+
+.memecoin-card[data-pool-status="rugged"],
+.memecoin-card[data-security-status="honeypot"] {
+  background: rgba(40, 16, 20, 0.78);
+  border-color: rgba(255, 112, 112, 0.76);
+}
+
+.memecoin-card[data-actionable="false"] {
+  opacity: 0.92;
+}
+
 .memecoin-card[data-priority="critical"] {
   border-color: rgba(255, 132, 132, 0.72);
 }
@@ -2421,6 +2435,14 @@ body.sidebar-collapsed .app-shell {
   display: flex;
   gap: 0.3rem;
   justify-content: space-between;
+}
+
+.memecoin-card-top-meta {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.18rem;
+  justify-content: flex-end;
 }
 
 .memecoin-card-top h5 {
@@ -2442,6 +2464,29 @@ body.sidebar-collapsed .app-shell {
   white-space: nowrap;
 }
 
+.memecoin-card-status-pill {
+  border: 1px solid rgba(255, 197, 118, 0.65);
+  border-radius: 999px;
+  color: #ffe7bf;
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.3rem;
+  text-transform: uppercase;
+}
+
+.memecoin-card-status-pill[data-tone="warning"] {
+  background: rgba(255, 170, 84, 0.2);
+  border-color: rgba(255, 195, 122, 0.72);
+  color: #ffe5c5;
+}
+
+.memecoin-card-status-pill[data-tone="danger"] {
+  background: rgba(255, 104, 104, 0.2);
+  border-color: rgba(255, 132, 132, 0.78);
+  color: #ffd7d7;
+}
+
 .memecoin-card-metrics {
   display: flex;
   flex-wrap: wrap;
@@ -2458,6 +2503,12 @@ body.sidebar-collapsed .app-shell {
   letter-spacing: 0.03em;
   padding: 0.1rem 0.32rem;
   text-transform: uppercase;
+}
+
+.memecoin-chip-blocked {
+  background: rgba(255, 106, 106, 0.16);
+  border-color: rgba(255, 132, 132, 0.62);
+  color: #ffd9d9;
 }
 
 .memecoin-card-summary {
@@ -2526,10 +2577,23 @@ body.sidebar-collapsed .app-shell {
   color: #def6ff;
 }
 
+.memecoin-chat-button:disabled {
+  background: rgba(86, 102, 128, 0.3);
+  border-color: rgba(132, 148, 172, 0.42);
+  color: #b8c5d8;
+  cursor: not-allowed;
+}
+
 .memecoin-card-link {
   color: #89f0d5;
   font-size: 0.62rem;
   font-weight: 700;
+  text-decoration: none;
+}
+
+.memecoin-card-link-disabled {
+  color: #c1a8a8;
+  cursor: not-allowed;
   text-decoration: none;
 }
 

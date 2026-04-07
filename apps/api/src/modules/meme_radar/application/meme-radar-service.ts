@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { PoolClient } from "pg";
 
 import { OpenRouterChatAdapter } from "../../../integrations/ai/openrouter-chat-adapter.js";
+import { WebSearchAdapter } from "../../../integrations/search/web-search-adapter.js";
 import { memoryCache } from "../../../shared/cache/memory-cache.js";
 import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
@@ -34,8 +35,16 @@ type MemeRadarChain = z.infer<typeof memeRadarChainSchema>;
 type MemeRadarPriority = z.infer<typeof memeRadarPrioritySchema>;
 type MemeRadarAiClassification = z.infer<typeof memeRadarAiClassificationSchema>;
 type MemeRadarCacheState = "fresh" | "miss" | "refreshed" | "stale";
+type MemeRadarPoolStatus = "alive" | "delisted" | "rugged";
+type MemeRadarSecurityStatus = "honeypot" | "safe" | "unknown";
 
 type MemeRadarQueryInput = z.input<typeof memeRadarQuerySchema>;
+
+interface MemeRadarWebSignalEvidence {
+  confidenceScore: number;
+  title: string;
+  url: string;
+}
 
 interface MemeRadarMetricSnapshot {
   fdvUsd: number | null;
@@ -60,7 +69,14 @@ interface MemeRadarPairCandidate {
   metrics: MemeRadarMetricSnapshot;
   pairAddress: string;
   pairUrl: string | null;
+  poolStatus: MemeRadarPoolStatus;
+  poolStatusReason: string | null;
   quoteSymbol: string | null;
+  securityStatus: MemeRadarSecurityStatus;
+  securityStatusReason: string | null;
+  socialWebEvidence: MemeRadarWebSignalEvidence[];
+  socialWebMentions: number;
+  socialWebScore: number;
   socials: MemeRadarSocialLink[];
   sources: string[];
   token: {
@@ -110,12 +126,19 @@ export interface MemeRadarSourceSnapshot {
   } | null;
   fetchedAt: string;
   latencyMs: number;
-  source: "dexscreener" | "geckoterminal_base" | "geckoterminal_solana" | "openrouter";
+  source:
+    | "dexscreener"
+    | "geckoterminal_base"
+    | "geckoterminal_solana"
+    | "goplus_security"
+    | "openrouter"
+    | "web_social_signal";
   status: "error" | "ok";
   totalItems: number;
 }
 
 export interface MemeRadarNotification {
+  actionable: boolean;
   catalysts: string[];
   chain: MemeRadarChain;
   dexId: string | null;
@@ -128,9 +151,13 @@ export interface MemeRadarNotification {
   pairFingerprint: string;
   pairUrl: string | null;
   pinned: boolean;
+  poolStatus: "ALIVE" | "DELISTED" | "RUGGED";
+  poolStatusReason: string | null;
   priority: MemeRadarPriority;
   quoteSymbol: string | null;
   riskFlags: string[];
+  securityStatus: "HONEYPOT" | "SAFE" | "UNKNOWN";
+  securityStatusReason: string | null;
   sentiment: MemeRadarGeneratedSentiment;
   socials: MemeRadarSocialLink[];
   sources: string[];
@@ -221,6 +248,9 @@ interface PostgresStoredNotificationRow {
 
 const MEME_RADAR_CACHE_KEY = "meme-radar:board:v1";
 const MEME_RADAR_STORED_LIMIT = 220;
+const MEME_RADAR_POOL_STATUS_RUGGED_FLAG = "POOL RUGGED";
+const MEME_RADAR_POOL_STATUS_DELISTED_FLAG = "POOL DELISTED";
+const MEME_RADAR_SECURITY_HONEYPOT_FLAG = "HONEYPOT";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -390,6 +420,213 @@ function resolvePriorityFromSentiment(sentiment: MemeRadarGeneratedSentiment): M
   }
 
   return "watch";
+}
+
+function poolStatusRank(status: MemeRadarPoolStatus): number {
+  if (status === "rugged") {
+    return 2;
+  }
+
+  if (status === "delisted") {
+    return 1;
+  }
+
+  return 0;
+}
+
+function mergePoolStatus(left: MemeRadarPoolStatus, right: MemeRadarPoolStatus): MemeRadarPoolStatus {
+  return poolStatusRank(left) >= poolStatusRank(right) ? left : right;
+}
+
+function mergeSecurityStatus(left: MemeRadarSecurityStatus, right: MemeRadarSecurityStatus): MemeRadarSecurityStatus {
+  if (left === "honeypot" || right === "honeypot") {
+    return "honeypot";
+  }
+
+  if (left === "safe" || right === "safe") {
+    return "safe";
+  }
+
+  return "unknown";
+}
+
+function resolvePoolStatusFromRiskFlags(
+  riskFlags: string[],
+  pairUrl: string | null,
+): MemeRadarPoolStatus {
+  const normalizedFlags = riskFlags.map((flag) => normalizeWhitespace(flag).toLowerCase());
+
+  if (normalizedFlags.some((flag) => flag.includes(MEME_RADAR_POOL_STATUS_RUGGED_FLAG.toLowerCase()))) {
+    return "rugged";
+  }
+
+  if (normalizedFlags.some((flag) => flag.includes(MEME_RADAR_POOL_STATUS_DELISTED_FLAG.toLowerCase()))) {
+    return "delisted";
+  }
+
+  if (!pairUrl) {
+    return "delisted";
+  }
+
+  return "alive";
+}
+
+function extractPoolStatusReasonFromRiskFlags(riskFlags: string[], fallbackStatus: MemeRadarPoolStatus): string | null {
+  const normalized = riskFlags
+    .map((flag) => normalizeWhitespace(flag))
+    .find((flag) => {
+      const lowered = flag.toLowerCase();
+
+      if (fallbackStatus === "rugged") {
+        return lowered.includes(MEME_RADAR_POOL_STATUS_RUGGED_FLAG.toLowerCase());
+      }
+
+      if (fallbackStatus === "delisted") {
+        return lowered.includes(MEME_RADAR_POOL_STATUS_DELISTED_FLAG.toLowerCase());
+      }
+
+      return false;
+    });
+
+  return normalized ?? null;
+}
+
+function resolveSecurityStatusFromRiskFlags(riskFlags: string[]): MemeRadarSecurityStatus {
+  const normalizedFlags = riskFlags.map((flag) => normalizeWhitespace(flag).toLowerCase());
+
+  if (normalizedFlags.some((flag) => flag.includes(MEME_RADAR_SECURITY_HONEYPOT_FLAG.toLowerCase()))) {
+    return "honeypot";
+  }
+
+  return "unknown";
+}
+
+function extractSecurityReasonFromRiskFlags(riskFlags: string[]): string | null {
+  return (
+    riskFlags
+      .map((flag) => normalizeWhitespace(flag))
+      .find((flag) => flag.toLowerCase().includes(MEME_RADAR_SECURITY_HONEYPOT_FLAG.toLowerCase()))
+    ?? null
+  );
+}
+
+function isEvmAddress(value: string | null): boolean {
+  if (!value) {
+    return false;
+  }
+
+  return /^0x[a-fA-F0-9]{40}$/.test(value.trim());
+}
+
+function parseBooleanLikeFlag(value: unknown): boolean | null {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    if (value === 1) {
+      return true;
+    }
+
+    if (value === 0) {
+      return false;
+    }
+
+    return null;
+  }
+
+  if (typeof value === "string") {
+    const normalizedValue = value.trim().toLowerCase();
+
+    if (["1", "true", "yes", "y"].includes(normalizedValue)) {
+      return true;
+    }
+
+    if (["0", "false", "no", "n"].includes(normalizedValue)) {
+      return false;
+    }
+  }
+
+  return null;
+}
+
+function truncateSearchQuery(value: string, maxLength: number): string {
+  const normalized = normalizeWhitespace(value);
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return normalized.slice(0, maxLength).trim();
+}
+
+function applyPoolAndSecurityRiskFlags(
+  baseRiskFlags: string[],
+  pair: Pick<MemeRadarPairCandidate, "poolStatus" | "poolStatusReason" | "securityStatus" | "securityStatusReason">,
+): string[] {
+  const filteredRiskFlags = baseRiskFlags.filter((riskFlag) => {
+    const normalized = normalizeWhitespace(riskFlag).toLowerCase();
+
+    return !(
+      normalized.includes(MEME_RADAR_POOL_STATUS_RUGGED_FLAG.toLowerCase())
+      || normalized.includes(MEME_RADAR_POOL_STATUS_DELISTED_FLAG.toLowerCase())
+      || normalized.includes(MEME_RADAR_SECURITY_HONEYPOT_FLAG.toLowerCase())
+    );
+  });
+
+  if (pair.poolStatus === "rugged") {
+    filteredRiskFlags.unshift(
+      pair.poolStatusReason
+        ? `${MEME_RADAR_POOL_STATUS_RUGGED_FLAG}: ${pair.poolStatusReason}`
+        : `${MEME_RADAR_POOL_STATUS_RUGGED_FLAG}: liquidez drenada/quase zerada.`,
+    );
+  } else if (pair.poolStatus === "delisted") {
+    filteredRiskFlags.unshift(
+      pair.poolStatusReason
+        ? `${MEME_RADAR_POOL_STATUS_DELISTED_FLAG}: ${pair.poolStatusReason}`
+        : `${MEME_RADAR_POOL_STATUS_DELISTED_FLAG}: par nao encontrado no DexScreener.`,
+    );
+  }
+
+  if (pair.securityStatus === "honeypot") {
+    filteredRiskFlags.unshift(
+      pair.securityStatusReason
+        ? `${MEME_RADAR_SECURITY_HONEYPOT_FLAG}: ${pair.securityStatusReason}`
+        : `${MEME_RADAR_SECURITY_HONEYPOT_FLAG}: risco de bloqueio de venda identificado.`,
+    );
+  }
+
+  return sanitizeRiskOrCatalyst(filteredRiskFlags);
+}
+
+function toApiPoolStatus(status: MemeRadarPoolStatus): "ALIVE" | "DELISTED" | "RUGGED" {
+  if (status === "rugged") {
+    return "RUGGED";
+  }
+
+  if (status === "delisted") {
+    return "DELISTED";
+  }
+
+  return "ALIVE";
+}
+
+function toApiSecurityStatus(status: MemeRadarSecurityStatus): "HONEYPOT" | "SAFE" | "UNKNOWN" {
+  if (status === "honeypot") {
+    return "HONEYPOT";
+  }
+
+  if (status === "safe") {
+    return "SAFE";
+  }
+
+  return "UNKNOWN";
+}
+
+function isPairActionableForUi(
+  pair: Pick<MemeRadarPairCandidate, "pairUrl" | "poolStatus" | "securityStatus">,
+): boolean {
+  return Boolean(pair.pairUrl) && pair.poolStatus === "alive" && pair.securityStatus !== "honeypot";
 }
 
 function formatChainLabel(chain: MemeRadarChain): string {
@@ -589,7 +826,14 @@ function parseCandidateFromGeckoPool(
     },
     pairAddress,
     pairUrl: null,
+    poolStatus: "alive",
+    poolStatusReason: null,
     quoteSymbol: quoteToken?.symbol ?? fallbackTokenInfo.quoteSymbol,
+    securityStatus: "unknown",
+    securityStatusReason: null,
+    socialWebEvidence: [],
+    socialWebMentions: 0,
+    socialWebScore: 0,
     socials: [],
     sources: ["geckoterminal"],
     token: {
@@ -674,6 +918,8 @@ function sanitizeRiskOrCatalyst(values: string[]): string[] {
 
 export class MemeRadarService {
   private readonly openRouterChatAdapter = new OpenRouterChatAdapter();
+
+  private readonly webSearchAdapter = new WebSearchAdapter();
 
   private mode: PersistenceMode = resolvePersistenceMode();
 
@@ -906,6 +1152,28 @@ export class MemeRadarService {
       totalItems: dexMetrics.successCount,
     });
 
+    const securityMetrics = await this.enrichCandidatesWithSecuritySignals(geckoCandidates);
+
+    sourceSnapshots.push({
+      error: securityMetrics.firstError,
+      fetchedAt: new Date().toISOString(),
+      latencyMs: securityMetrics.latencyMs,
+      source: "goplus_security",
+      status: securityMetrics.firstError ? "error" : "ok",
+      totalItems: securityMetrics.successCount,
+    });
+
+    const webSignalMetrics = await this.enrichCandidatesWithWebSignals(geckoCandidates);
+
+    sourceSnapshots.push({
+      error: webSignalMetrics.firstError,
+      fetchedAt: new Date().toISOString(),
+      latencyMs: webSignalMetrics.latencyMs,
+      source: "web_social_signal",
+      status: webSignalMetrics.firstError ? "error" : "ok",
+      totalItems: webSignalMetrics.successCount,
+    });
+
     const rankedCandidates = await this.rankCandidates(geckoCandidates, sourceSnapshots);
 
     await this.upsertRankedCandidates(rankedCandidates);
@@ -952,6 +1220,9 @@ export class MemeRadarService {
         continue;
       }
 
+      const mergedPoolStatus = mergePoolStatus(existing.poolStatus, candidate.poolStatus);
+      const mergedSecurityStatus = mergeSecurityStatus(existing.securityStatus, candidate.securityStatus);
+
       deduped.set(candidate.fingerprint, {
         ...existing,
         metrics: {
@@ -962,6 +1233,25 @@ export class MemeRadarService {
           txns24h: candidate.metrics.txns24h ?? existing.metrics.txns24h,
           volume24hUsd: candidate.metrics.volume24hUsd ?? existing.metrics.volume24hUsd,
         },
+        pairUrl: existing.pairUrl ?? candidate.pairUrl,
+        poolStatus: mergedPoolStatus,
+        poolStatusReason:
+          (mergedPoolStatus === candidate.poolStatus ? candidate.poolStatusReason : existing.poolStatusReason)
+          ?? existing.poolStatusReason
+          ?? candidate.poolStatusReason,
+        securityStatus: mergedSecurityStatus,
+        securityStatusReason:
+          (mergedSecurityStatus === candidate.securityStatus
+            ? candidate.securityStatusReason
+            : existing.securityStatusReason)
+          ?? existing.securityStatusReason
+          ?? candidate.securityStatusReason,
+        socialWebEvidence:
+          candidate.socialWebEvidence.length > existing.socialWebEvidence.length
+            ? candidate.socialWebEvidence
+            : existing.socialWebEvidence,
+        socialWebMentions: Math.max(existing.socialWebMentions, candidate.socialWebMentions),
+        socialWebScore: Math.max(existing.socialWebScore, candidate.socialWebScore),
         socials: mergeSocialLinks(existing.socials, candidate.socials),
         sources: mergeUniqueStrings(existing.sources, candidate.sources, 6),
       });
@@ -1091,8 +1381,13 @@ export class MemeRadarService {
     for (const candidate of sortedCandidates) {
       try {
         const enriched = await this.fetchDexPair(candidate.chain, candidate.pairAddress);
+        candidate.sources = mergeUniqueStrings(candidate.sources, ["dexscreener"], 6);
 
         if (!enriched) {
+          candidate.poolStatus = mergePoolStatus(candidate.poolStatus, "delisted");
+          candidate.poolStatusReason =
+            candidate.poolStatusReason
+            ?? "Par nao encontrado no DexScreener durante a verificacao de liquidez.";
           continue;
         }
 
@@ -1103,7 +1398,6 @@ export class MemeRadarService {
         candidate.dexId = enriched.dexId ?? candidate.dexId;
         candidate.pairUrl = enriched.pairUrl ?? candidate.pairUrl;
         candidate.quoteSymbol = enriched.quoteSymbol ?? candidate.quoteSymbol;
-        candidate.sources = mergeUniqueStrings(candidate.sources, ["dexscreener"], 6);
         candidate.socials = mergedSocials;
         candidate.token = {
           address: enriched.token.address ?? candidate.token.address,
@@ -1118,11 +1412,241 @@ export class MemeRadarService {
           txns24h: enriched.metrics.txns24h ?? candidate.metrics.txns24h,
           volume24hUsd: enriched.metrics.volume24hUsd ?? candidate.metrics.volume24hUsd,
         };
+
+        const resolvedLiquidity = candidate.metrics.liquidityUsd ?? 0;
+
+        if (!candidate.pairUrl) {
+          candidate.poolStatus = mergePoolStatus(candidate.poolStatus, "delisted");
+          candidate.poolStatusReason = "Pool sem URL valida no DexScreener.";
+        } else if (resolvedLiquidity > 0 && resolvedLiquidity <= 1_200) {
+          candidate.poolStatus = "rugged";
+          candidate.poolStatusReason = `Liquidez critica detectada (${Math.round(resolvedLiquidity)} USD).`;
+        } else if (candidate.poolStatus !== "rugged") {
+          candidate.poolStatus = "alive";
+          candidate.poolStatusReason = null;
+        }
       } catch (error) {
         if (!firstError) {
           firstError = {
             code: error instanceof AppError ? error.code : "MEME_RADAR_DEX_SOURCE_ERROR",
             message: error instanceof Error ? error.message : "Failed to enrich with DexScreener",
+          };
+        }
+      }
+    }
+
+    return {
+      firstError,
+      latencyMs: Date.now() - startedAt,
+      successCount,
+    };
+  }
+
+  private async enrichCandidatesWithSecuritySignals(
+    candidates: MemeRadarPairCandidate[],
+  ): Promise<DexCollectResult> {
+    const startedAt = Date.now();
+    const securityCandidates = [...candidates]
+      .filter((candidate) => candidate.chain === "base" && isEvmAddress(candidate.token.address))
+      .slice(0, env.MEME_RADAR_DEX_ENRICH_LIMIT);
+
+    let successCount = 0;
+    let firstError: { code: string; message: string } | null = null;
+
+    for (const candidate of securityCandidates) {
+      const tokenAddress = candidate.token.address;
+
+      if (!tokenAddress) {
+        continue;
+      }
+
+      try {
+        const securityPayload = await this.fetchGoPlusTokenSecurity(candidate.chain, tokenAddress);
+
+        if (!securityPayload) {
+          continue;
+        }
+
+        successCount += 1;
+
+        if (securityPayload.isHoneypot === true) {
+          candidate.securityStatus = "honeypot";
+          candidate.securityStatusReason =
+            securityPayload.reason ?? "GoPlus sinalizou risco de bloqueio de venda (honeypot).";
+        } else if (securityPayload.isHoneypot === false && candidate.securityStatus !== "honeypot") {
+          candidate.securityStatus = "safe";
+          candidate.securityStatusReason =
+            securityPayload.reason ?? "GoPlus sem indicio de honeypot no contrato.";
+        }
+
+        candidate.sources = mergeUniqueStrings(candidate.sources, ["goplus_security"], 6);
+      } catch (error) {
+        if (!firstError) {
+          firstError = {
+            code: error instanceof AppError ? error.code : "MEME_RADAR_SECURITY_SOURCE_ERROR",
+            message: error instanceof Error ? error.message : "Failed to enrich security status",
+          };
+        }
+      }
+    }
+
+    return {
+      firstError,
+      latencyMs: Date.now() - startedAt,
+      successCount,
+    };
+  }
+
+  private async fetchGoPlusTokenSecurity(
+    chain: MemeRadarChain,
+    tokenAddress: string,
+  ): Promise<{ isHoneypot: boolean | null; reason: string | null } | null> {
+    if (chain !== "base") {
+      return null;
+    }
+
+    const chainId = "8453";
+    const endpoint =
+      `https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${encodeURIComponent(tokenAddress)}`;
+    const payload = await this.requestJson(endpoint);
+
+    if (!isRecord(payload)) {
+      return null;
+    }
+
+    const resultRecord = readRecord(payload, "result");
+
+    if (!resultRecord) {
+      return null;
+    }
+
+    const loweredAddress = tokenAddress.toLowerCase();
+    let tokenSecurity = readRecord(resultRecord, loweredAddress) ?? readRecord(resultRecord, tokenAddress);
+
+    if (!tokenSecurity) {
+      for (const value of Object.values(resultRecord)) {
+        if (isRecord(value)) {
+          tokenSecurity = value;
+          break;
+        }
+      }
+    }
+
+    if (!tokenSecurity) {
+      return null;
+    }
+
+    const honeypot = parseBooleanLikeFlag(tokenSecurity.is_honeypot);
+    const cannotSellAll = parseBooleanLikeFlag(tokenSecurity.cannot_sell_all);
+    const blacklisted = parseBooleanLikeFlag(tokenSecurity.is_blacklisted);
+    const tradingCooldown = parseBooleanLikeFlag(tokenSecurity.trading_cooldown);
+    const reasonFlags: string[] = [];
+
+    if (honeypot === true) {
+      reasonFlags.push("is_honeypot=true");
+    }
+
+    if (cannotSellAll === true) {
+      reasonFlags.push("cannot_sell_all=true");
+    }
+
+    if (blacklisted === true) {
+      reasonFlags.push("is_blacklisted=true");
+    }
+
+    if (tradingCooldown === true) {
+      reasonFlags.push("trading_cooldown=true");
+    }
+
+    if (reasonFlags.length > 0) {
+      return {
+        isHoneypot: true,
+        reason: `GoPlus: ${reasonFlags.join(", ")}`,
+      };
+    }
+
+    if (honeypot === false || cannotSellAll === false) {
+      return {
+        isHoneypot: false,
+        reason: "GoPlus sem sinal direto de honeypot.",
+      };
+    }
+
+    return {
+      isHoneypot: null,
+      reason: null,
+    };
+  }
+
+  private async enrichCandidatesWithWebSignals(
+    candidates: MemeRadarPairCandidate[],
+  ): Promise<DexCollectResult> {
+    const startedAt = Date.now();
+    const webCandidates = [...candidates]
+      .sort((left, right) => {
+        const leftScore = (left.metrics.volume24hUsd ?? 0) + (left.metrics.txns24h ?? 0) * 250;
+        const rightScore = (right.metrics.volume24hUsd ?? 0) + (right.metrics.txns24h ?? 0) * 250;
+        return rightScore - leftScore;
+      })
+      .slice(0, Math.max(1, Math.min(env.MEME_RADAR_AI_MAX_ITEMS, 8)));
+
+    let successCount = 0;
+    let firstError: { code: string; message: string } | null = null;
+
+    for (const candidate of webCandidates) {
+      try {
+        const tokenSymbol = candidate.token.symbol || "TOKEN";
+        const query = truncateSearchQuery(
+          `${tokenSymbol} ${candidate.token.name} ${candidate.chain} token twitter x telegram community`,
+          180,
+        );
+        const webResponse = await this.webSearchAdapter.search({
+          maxResults: 6,
+          query,
+        });
+
+        const socialHits = webResponse.results.filter((result) => {
+          const domain = result.domain.toLowerCase();
+          const normalizedText = normalizeWhitespace(`${result.title} ${result.snippet}`).toLowerCase();
+
+          return (
+            result.sourceType === "community"
+            || /x\.com|twitter\.com|t\.me|telegram|discord\.gg|reddit\.com|medium\.com/.test(domain)
+            || normalizedText.includes("twitter")
+            || normalizedText.includes("telegram")
+            || normalizedText.includes("discord")
+          );
+        });
+
+        candidate.socialWebEvidence = socialHits.slice(0, 3).map((result) => ({
+          confidenceScore: result.confidenceScore,
+          title: result.title.slice(0, 120),
+          url: result.url,
+        }));
+        candidate.socialWebMentions = socialHits.length;
+
+        const confidenceSum = socialHits.reduce((sum, result) => sum + result.confidenceScore, 0);
+        const meanConfidence = socialHits.length > 0 ? confidenceSum / socialHits.length : 0;
+
+        candidate.socialWebScore = clamp(
+          toRounded(meanConfidence * 0.68 + Math.min(socialHits.length, 6) * 7.2, 1),
+          0,
+          100,
+        );
+
+        if (socialHits.length > 0) {
+          successCount += 1;
+          candidate.sources = mergeUniqueStrings(
+            candidate.sources,
+            ["web_social_signal", `web_${webResponse.provider}`],
+            6,
+          );
+        }
+      } catch (error) {
+        if (!firstError) {
+          firstError = {
+            code: error instanceof AppError ? error.code : "MEME_RADAR_WEB_SIGNAL_SOURCE_ERROR",
+            message: error instanceof Error ? error.message : "Failed to enrich web social signals",
           };
         }
       }
@@ -1219,16 +1743,17 @@ export class MemeRadarService {
     const ranked = candidates
       .map((candidate) => {
         const heuristicSentiment = this.buildHeuristicSentiment(candidate);
-        const priority = resolvePriorityFromSentiment(heuristicSentiment);
+        const guardedSentiment = this.applyGuardrailsToSentiment(candidate, heuristicSentiment);
+        const priority = resolvePriorityFromSentiment(guardedSentiment);
 
         return {
-          catalysts: heuristicSentiment.catalysts,
-          headline: `${candidate.token.symbol} em ${formatChainLabel(candidate.chain)} entrou no radar (${Math.round(heuristicSentiment.hypeScore)})`,
+          catalysts: guardedSentiment.catalysts,
+          headline: `${candidate.token.symbol} em ${formatChainLabel(candidate.chain)} entrou no radar (${Math.round(guardedSentiment.hypeScore)})`,
           pair: candidate,
           priority,
-          riskFlags: heuristicSentiment.riskFlags,
-          sentiment: heuristicSentiment,
-          summary: heuristicSentiment.oneLineSummary,
+          riskFlags: guardedSentiment.riskFlags,
+          sentiment: guardedSentiment,
+          summary: guardedSentiment.oneLineSummary,
         } satisfies RankedMemeRadarCandidate;
       })
       .sort((left, right) => right.sentiment.hypeScore - left.sentiment.hypeScore);
@@ -1253,14 +1778,19 @@ export class MemeRadarService {
     let firstAiError: { code: string; message: string } | null = null;
 
     for (const candidate of ranked.slice(0, env.MEME_RADAR_AI_MAX_ITEMS)) {
+      if (candidate.pair.poolStatus !== "alive" || candidate.pair.securityStatus === "honeypot") {
+        continue;
+      }
+
       try {
         const aiSentiment = await this.generateAiSentiment(candidate.pair);
-        candidate.sentiment = aiSentiment;
-        candidate.priority = resolvePriorityFromSentiment(aiSentiment);
-        candidate.headline = `${candidate.pair.token.symbol} em ${formatChainLabel(candidate.pair.chain)} entrou no radar (${Math.round(aiSentiment.hypeScore)})`;
-        candidate.summary = aiSentiment.oneLineSummary;
-        candidate.riskFlags = aiSentiment.riskFlags;
-        candidate.catalysts = aiSentiment.catalysts;
+        const guardedAiSentiment = this.applyGuardrailsToSentiment(candidate.pair, aiSentiment);
+        candidate.sentiment = guardedAiSentiment;
+        candidate.priority = resolvePriorityFromSentiment(guardedAiSentiment);
+        candidate.headline = `${candidate.pair.token.symbol} em ${formatChainLabel(candidate.pair.chain)} entrou no radar (${Math.round(guardedAiSentiment.hypeScore)})`;
+        candidate.summary = guardedAiSentiment.oneLineSummary;
+        candidate.riskFlags = guardedAiSentiment.riskFlags;
+        candidate.catalysts = guardedAiSentiment.catalysts;
         aiSuccessCount += 1;
       } catch (error) {
         if (!firstAiError) {
@@ -1300,6 +1830,8 @@ export class MemeRadarService {
     const fdv = pair.metrics.fdvUsd ?? pair.metrics.marketCapUsd ?? 0;
     const ageHours = this.computeAgeHours(pair);
     const socialCount = pair.socials.length;
+    const socialWebScore = pair.socialWebScore;
+    const socialWebMentions = pair.socialWebMentions;
 
     const ageScore =
       ageHours <= 6
@@ -1313,19 +1845,40 @@ export class MemeRadarService {
     const activityScore = clamp(Math.log10(Math.max(1, volume24h + txns24h * 120)) * 5.4, 0, 22);
     const volatilityScore = clamp(absolutePriceChange * 0.32, 0, 14);
     const socialScore = clamp(socialCount * 3.6 + (pair.pairUrl ? 2 : 0), 0, 14);
+    const webSignalBoost = clamp(socialWebScore * 0.18 + socialWebMentions * 1.8, 0, 18);
     const valuationPenalty = fdv > 0 && liquidity > 0 && fdv / Math.max(liquidity, 1) > 40 ? 8 : 0;
     const thinLiquidityPenalty = liquidity > 0 && liquidity < 30_000 ? 12 : liquidity < 80_000 ? 6 : 0;
+    const lifecyclePenalty = pair.poolStatus === "rugged" ? 55 : pair.poolStatus === "delisted" ? 26 : 0;
+    const honeypotPenalty = pair.securityStatus === "honeypot" ? 70 : 0;
 
     const hypeScore = clamp(
       toRounded(
-        ageScore + liquidityScore + activityScore + volatilityScore + socialScore - valuationPenalty - thinLiquidityPenalty,
+        ageScore
+          + liquidityScore
+          + activityScore
+          + volatilityScore
+          + socialScore
+          + webSignalBoost
+          - valuationPenalty
+          - thinLiquidityPenalty
+          - lifecyclePenalty
+          - honeypotPenalty,
         1,
       ),
       0,
       100,
     );
     const confidence = clamp(
-      toRounded(36 + liquidityScore * 1.1 + socialScore * 1.3 - thinLiquidityPenalty * 0.9, 1),
+      toRounded(
+        36
+          + liquidityScore * 1.1
+          + socialScore * 1.3
+          + webSignalBoost * 1.1
+          - thinLiquidityPenalty * 0.9
+          - lifecyclePenalty * 0.7
+          - honeypotPenalty * 0.85,
+        1,
+      ),
       0,
       100,
     );
@@ -1348,6 +1901,10 @@ export class MemeRadarService {
       catalysts.push("Projeto com presenca social identificada");
     }
 
+    if (socialWebMentions >= 2) {
+      catalysts.push("Sinais sociais web ativos (X/Telegram/communities)");
+    }
+
     const riskFlags: string[] = [];
 
     if (liquidity > 0 && liquidity < 30_000) {
@@ -1360,6 +1917,10 @@ export class MemeRadarService {
 
     if (socialCount === 0) {
       riskFlags.push("Sem links sociais confirmados");
+    }
+
+    if (socialWebMentions === 0) {
+      riskFlags.push("Baixa tracao social organica no monitoramento web");
     }
 
     if (fdv > 0 && liquidity > 0 && fdv / Math.max(liquidity, 1) > 40) {
@@ -1380,6 +1941,44 @@ export class MemeRadarService {
       model: "heuristic-meme-radar-v1",
       oneLineSummary: summary.slice(0, 180),
       riskFlags: sanitizeRiskOrCatalyst(riskFlags.length > 0 ? riskFlags : ["Ativo especulativo com risco de execucao elevado"]),
+    };
+  }
+
+  private applyGuardrailsToSentiment(
+    pair: Pick<MemeRadarPairCandidate, "poolStatus" | "poolStatusReason" | "securityStatus" | "securityStatusReason">,
+    sentiment: MemeRadarGeneratedSentiment,
+  ): MemeRadarGeneratedSentiment {
+    let adjustedHypeScore = sentiment.hypeScore;
+    let adjustedConfidence = sentiment.confidence;
+
+    if (pair.poolStatus === "rugged") {
+      adjustedHypeScore = Math.min(adjustedHypeScore, 12);
+      adjustedConfidence = Math.min(adjustedConfidence, 18);
+    } else if (pair.poolStatus === "delisted") {
+      adjustedHypeScore = Math.min(adjustedHypeScore, 34);
+      adjustedConfidence = Math.min(adjustedConfidence, 42);
+    }
+
+    if (pair.securityStatus === "honeypot") {
+      adjustedHypeScore = Math.min(adjustedHypeScore, 8);
+      adjustedConfidence = Math.min(adjustedConfidence, 14);
+    }
+
+    const guardedSummary = normalizeWhitespace(
+      pair.securityStatus === "honeypot"
+        ? `${sentiment.oneLineSummary} Potencial bloqueio de venda identificado.`
+        : pair.poolStatus !== "alive"
+          ? `${sentiment.oneLineSummary} Pool com status de risco operacional.`
+          : sentiment.oneLineSummary,
+    ).slice(0, 180);
+
+    return {
+      ...sentiment,
+      classification: resolveClassificationFromScore(adjustedHypeScore),
+      confidence: clamp(toRounded(adjustedConfidence, 1), 0, 100),
+      hypeScore: clamp(toRounded(adjustedHypeScore, 1), 0, 100),
+      oneLineSummary: guardedSummary,
+      riskFlags: applyPoolAndSecurityRiskFlags(sentiment.riskFlags, pair),
     };
   }
 
@@ -1409,7 +2008,14 @@ export class MemeRadarService {
             metrics: pair.metrics,
             pairAddress: pair.pairAddress,
             pairUrl: pair.pairUrl,
+            poolStatus: pair.poolStatus,
+            poolStatusReason: pair.poolStatusReason,
             quoteSymbol: pair.quoteSymbol,
+            securityStatus: pair.securityStatus,
+            securityStatusReason: pair.securityStatusReason,
+            socialWebEvidence: pair.socialWebEvidence,
+            socialWebMentions: pair.socialWebMentions,
+            socialWebScore: pair.socialWebScore,
             socials: pair.socials,
             token: pair.token,
           },
@@ -1844,10 +2450,11 @@ export class MemeRadarService {
       const nowIso = new Date().toISOString();
 
       return result.rows.map((row) => {
+        const rawRiskFlags = Array.isArray(row.risk_flags) ? row.risk_flags : [];
         const fallbackSentiment = deriveSentimentFallback(
           typeof row.last_score === "string" ? Number.parseFloat(row.last_score) : row.last_score,
           row.summary,
-          row.risk_flags,
+          rawRiskFlags,
           row.catalysts,
           "heuristic-meme-radar-v1",
           normalizeIsoString(row.updated_at, nowIso),
@@ -1860,30 +2467,55 @@ export class MemeRadarService {
           fallbackSentiment,
         );
 
+        const poolStatus = resolvePoolStatusFromRiskFlags(rawRiskFlags, row.pair_url);
+        const poolStatusReason =
+          extractPoolStatusReasonFromRiskFlags(rawRiskFlags, poolStatus)
+          ?? (poolStatus === "delisted" && !row.pair_url
+            ? "Par sem URL ativa no DexScreener durante a ultima leitura."
+            : null);
+        const securityStatus = resolveSecurityStatusFromRiskFlags(rawRiskFlags);
+        const securityStatusReason = extractSecurityReasonFromRiskFlags(rawRiskFlags);
+
+        const pair: MemeRadarPairCandidate = {
+          chain: row.chain,
+          dexId: row.dex_id,
+          discoveredAt: normalizeIsoString(row.discovered_at, nowIso),
+          fingerprint: row.pair_fingerprint,
+          launchedAt: normalizeIsoStringOrNull(row.launched_at),
+          metrics: ensureMetricSnapshot(row.metrics),
+          pairAddress: row.pair_address,
+          pairUrl: row.pair_url,
+          poolStatus,
+          poolStatusReason,
+          quoteSymbol: row.quote_token_symbol,
+          securityStatus,
+          securityStatusReason,
+          socialWebEvidence: [],
+          socialWebMentions: 0,
+          socialWebScore: 0,
+          socials: parseSocialLinks(row.socials),
+          sources: Array.isArray(row.sources) ? row.sources.slice(0, 6) : [],
+          token: {
+            address: row.token_address,
+            name: row.token_name,
+            symbol: row.token_symbol,
+          },
+        };
+
+        const riskFlags = applyPoolAndSecurityRiskFlags(rawRiskFlags, {
+          poolStatus: pair.poolStatus,
+          poolStatusReason: pair.poolStatusReason,
+          securityStatus: pair.securityStatus,
+          securityStatusReason: pair.securityStatusReason,
+        });
+
         return {
           catalysts: row.catalysts,
           headline: row.headline,
-          pair: {
-            chain: row.chain,
-            dexId: row.dex_id,
-            discoveredAt: normalizeIsoString(row.discovered_at, nowIso),
-            fingerprint: row.pair_fingerprint,
-            launchedAt: normalizeIsoStringOrNull(row.launched_at),
-            metrics: ensureMetricSnapshot(row.metrics),
-            pairAddress: row.pair_address,
-            pairUrl: row.pair_url,
-            quoteSymbol: row.quote_token_symbol,
-            socials: parseSocialLinks(row.socials),
-            sources: Array.isArray(row.sources) ? row.sources.slice(0, 6) : [],
-            token: {
-              address: row.token_address,
-              name: row.token_name,
-              symbol: row.token_symbol,
-            },
-          },
+          pair,
           pinned: row.pinned,
           priority: row.priority,
-          riskFlags: row.risk_flags,
+          riskFlags,
           sentiment: parsedSentiment,
           summary: row.summary,
           updatedAt: normalizeIsoString(row.updated_at, nowIso),
@@ -1943,7 +2575,30 @@ export class MemeRadarService {
   }
 
   private toApiNotification(record: StoredMemeRadarNotificationRecord): MemeRadarNotification {
+    const resolvedPoolStatus =
+      record.pair.poolStatus === "alive" && !record.pair.pairUrl
+        ? "delisted"
+        : record.pair.poolStatus;
+    const resolvedPoolStatusReason =
+      resolvedPoolStatus === "delisted" && !record.pair.poolStatusReason && !record.pair.pairUrl
+        ? "Pool sem URL valida para negociacao no DexScreener."
+        : record.pair.poolStatusReason;
+    const resolvedSecurityStatus = record.pair.securityStatus;
+    const resolvedSecurityStatusReason = record.pair.securityStatusReason;
+    const actionable = isPairActionableForUi({
+      pairUrl: record.pair.pairUrl,
+      poolStatus: resolvedPoolStatus,
+      securityStatus: resolvedSecurityStatus,
+    });
+    const riskFlags = applyPoolAndSecurityRiskFlags(record.riskFlags, {
+      poolStatus: resolvedPoolStatus,
+      poolStatusReason: resolvedPoolStatusReason,
+      securityStatus: resolvedSecurityStatus,
+      securityStatusReason: resolvedSecurityStatusReason,
+    });
+
     return {
+      actionable,
       catalysts: record.catalysts,
       chain: record.pair.chain,
       dexId: record.pair.dexId,
@@ -1956,9 +2611,13 @@ export class MemeRadarService {
       pairFingerprint: record.pair.fingerprint,
       pairUrl: record.pair.pairUrl,
       pinned: record.pinned,
+      poolStatus: toApiPoolStatus(resolvedPoolStatus),
+      poolStatusReason: resolvedPoolStatusReason,
       priority: record.priority,
       quoteSymbol: record.pair.quoteSymbol,
-      riskFlags: record.riskFlags,
+      riskFlags,
+      securityStatus: toApiSecurityStatus(resolvedSecurityStatus),
+      securityStatusReason: resolvedSecurityStatusReason,
       sentiment: record.sentiment,
       socials: record.pair.socials,
       sources: record.pair.sources,
