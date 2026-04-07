@@ -83,6 +83,12 @@ import {
   MacroRatesMarketService,
 } from "../../macro_rates/application/macro-rates-market-service.js";
 import {
+  formatBundleRiskChecklistMarkdown,
+  memeRadarService,
+  type BundleRiskReport,
+  type MemeRadarNotification,
+} from "../../meme_radar/application/meme-radar-service.js";
+import {
   OptionsMarketService,
 } from "../../options/application/options-market-service.js";
 import {
@@ -135,31 +141,28 @@ const copilotDefaultSystemPrompt = [
   "Quando a pergunta envolver preco ou comparacao entre ativos, use get_crypto_spot_price ou get_crypto_multi_spot_price.",
   "Quando a pergunta envolver grafico, tendencia, suporte/resistencia ou analise tecnica de cripto, use get_crypto_chart_insights.",
   "Quando a pergunta envolver airdrops, retroativos, testnet, quests ou farming, use get_airdrop_opportunities.",
-  "Quando a pergunta envolver corretoras (Binance, Bybit, Coinbase, Kraken, OKX, IQ Option), use get_broker_live_quote para informar disponibilidade e cotacao ao vivo quando possivel.",
-  "Quando a pergunta envolver forex (pares de moedas, cambio), use get_forex_market_snapshot.",
-  "Quando a pergunta envolver futuros (funding, open interest, contratos perp), use get_futures_market_snapshot.",
-  "Quando a pergunta envolver opcoes (volatilidade implicita, move esperado e bias), use get_options_market_snapshot.",
-  "Quando a pergunta envolver commodities (metais, energia, agro), use get_commodities_market_snapshot.",
-  "Quando a pergunta envolver renda fixa (curva de juros, bonds, duration), use get_fixed_income_market_snapshot.",
-  "Quando a pergunta envolver ETFs (broad market, tematicos, internacionais), use get_etfs_market_snapshot.",
-  "Quando a pergunta envolver rotacao setorial global (tecnologia, financeiro, energia), use get_global_sectors_market_snapshot.",
-  "Quando a pergunta envolver macro rates (curva de juros, DXY, VIX, regime de risco), use get_macro_rates_market_snapshot.",
-  "Quando a pergunta envolver carteira, alocacao, diversificacao e risco ponderado, use get_portfolio_risk_snapshot.",
-  "Quando a pergunta envolver B3 (acoes brasileiras e indices locais), use get_b3_market_snapshot.",
-  "Quando a pergunta envolver FIIs (fundos imobiliarios listados), use get_fiis_market_snapshot.",
-  "Quando a pergunta envolver acoes globais por ticker (AAPL, MSFT, NVDA etc), use get_equities_market_snapshot.",
-  "Quando a pergunta envolver Wall Street (indices/setores/rates/risk-on), use get_wall_street_market_snapshot.",
-  "Quando a pergunta envolver DeFi (tokens, DEX, lending), use get_defi_market_snapshot.",
+  "Quando a pergunta envolver corretoras, use get_broker_live_quote para disponibilidade e cotacao ao vivo.",
+  "Para forex/futuros/opcoes/commodities/renda fixa/ETFs/setores/macro, use a tool especializada correspondente.",
+  "Para carteira/B3/FIIs/acoes globais/Wall Street/DeFi, use a tool especializada correspondente.",
+  "Quando a pergunta envolver indices, acoes, cambio, juros ou commodities em escopo geral, use get_financial_market_snapshot.",
   "Fluxo detetive: identificar intencao, investigar com tools e sintetizar resposta humana direta.",
   "Se o usuario nao pediu analise tecnica formal, responda de forma objetiva e sem template rigido.",
   "Quando a pergunta pedir comprar/vender, responda com sinal tatico informativo (buy/sell/wait), confianca e risco, sem recomendacao de investimento.",
-  "Quando a pergunta envolver indices, acoes, cambio, juros ou commodities, use get_financial_market_snapshot.",
   "Quando a pergunta envolver risco de curto prazo, entregue analise por fatores (volatilidade, liquidez, macro e operacao), sem recomendacao de investimento.",
   "Para onde comprar/listagem: use search_token_listings_dexscreener; se falhar por ticker/nome, use search_web_realtime para achar contrato/link oficial e tente Dex novamente.",
   "Use links enviados no historico como fonte primaria; para ativo desconhecido ou anafora, faca busca web antes de concluir.",
   "Nunca delegue com 'pesquise no Google' e nunca diga 'nao encontrei informacoes' sem investigacao web e nova tentativa on-chain.",
   "Ao usar busca web, cite URLs principais; se faltar dado, explicite limitacao e siga com o que foi confirmado.",
   "Nao recuse genericamente se houver dados disponiveis nas tools; mantenha tom analitico e neutro.",
+  "Diretiva Anti-Vamp: \"Sempre que analisar um token, utilize a tool de web_search para cruzar o Ticker. Se encontrar contratos antigos e mortos com o mesmo nome/imagem, classifique imediatamente como VAMP SCAM (Copia Parasita).\"",
+  "Diretiva de Relatorio: \"O seu output para o usuario deve sempre comecar com um [RISK SCORE: 0/100] antes da analise tecnica. Destaque em vermelho (Markdown) qualquer suspeita de Multi-Wallet ou falta de moderacao na comunidade.\"",
+  "Para diretiva Anti-Vamp, execute search_web_realtime (web_search) e inclua as URLs verificadas no relatorio.",
+  "Checklist institucional obrigatorio (PASS/FAIL): HIGH_CONCENTRATION_RISK, SYMMETRIC_BUNDLE_DETECTED, FAKE_HOLDERS_WARNING, COORDINATED_BUNDLE, EARLY_DUMP_TRAP e COMMUNITY_HEALTH_FAILURE.",
+  "Regra Viewers vs Holders: se atividade social/viewers for menor que 30% do total de holders, marque FAKE_HOLDERS_WARNING.",
+  "Regra CEX Funding Ping: se multiplas carteiras do Top 10 compartilharem mesma fonte e mesma janela temporal de funding, marque COORDINATED_BUNDLE.",
+  "Regra Armadilha de Liquidez: se market cap for menor que 10000 e houver 2+ carteiras sniper/dev/fresh, marque EARLY_DUMP_TRAP e informe exatamente: 'Presenca de multiplos snipers em MC baixo. Risco extremo de despejo de liquidez.'",
+  "Regra Community Health: valide se existe tese fixada (pinned post) e se ha spam recente sem moderacao; se a comunidade estiver abandonada, zere a confianca final.",
+  "Formato visual obrigatorio: entregue uma tabela Markdown 'Checklist de Seguranca' com coluna Status PASS/FAIL; para FAIL de Multi-Wallet ou moderacao use **<span style=\"color:red\">FAIL</span>**.",
 ].join(" ");
 
 const copilotGeneralAssistantSystemPrompt = [
@@ -1039,6 +1042,28 @@ function hasBrokerIntegrationIntent(message: string): boolean {
   return (mentionsBroker && asksForLiveQuote) || (asksWhereToBuy && hasTokenContext);
 }
 
+function hasInstitutionalFraudIntent(message: string): boolean {
+  const normalizedMessage = normalizeText(message);
+
+  return (
+    normalizedMessage.includes("anti-bundle") ||
+    normalizedMessage.includes("anti bundle") ||
+    normalizedMessage.includes("bundle") ||
+    normalizedMessage.includes("vamp") ||
+    normalizedMessage.includes("vamp scam") ||
+    normalizedMessage.includes("fraude") ||
+    normalizedMessage.includes("scam") ||
+    normalizedMessage.includes("rug") ||
+    normalizedMessage.includes("honeypot") ||
+    normalizedMessage.includes("multi wallet") ||
+    normalizedMessage.includes("multi-wallet") ||
+    normalizedMessage.includes("holders") ||
+    normalizedMessage.includes("sniper") ||
+    normalizedMessage.includes("auditoria") ||
+    normalizedMessage.includes("checklist de seguranca")
+  );
+}
+
 function hasAirdropIntent(message: string): boolean {
   const normalizedMessage = normalizeText(message);
   const asksForAirdrops =
@@ -1244,6 +1269,26 @@ function shouldForceChartFallback(message: string, completion: OpenRouterChatCom
   return !usedChartTool || !hasTechnicalMarkers || isRiskOnlyAnswer;
 }
 
+function hasInstitutionalRiskChecklistAnswer(answer: string): boolean {
+  const normalizedAnswer = normalizeText(answer);
+
+  return (
+    normalizedAnswer.includes("[risk score:") &&
+    normalizedAnswer.includes("checklist de seguranca")
+  );
+}
+
+function shouldForceInstitutionalFraudFallback(
+  message: string,
+  completion: OpenRouterChatCompletion,
+): boolean {
+  if (!hasInstitutionalFraudIntent(message)) {
+    return false;
+  }
+
+  return !hasInstitutionalRiskChecklistAnswer(completion.answer);
+}
+
 function shouldForceGeneralAssistantFallback(message: string, completion: OpenRouterChatCompletion): boolean {
   const hasSpecializedFinancialIntent =
     hasMarketSummaryIntent(message) ||
@@ -1251,6 +1296,7 @@ function shouldForceGeneralAssistantFallback(message: string, completion: OpenRo
     hasMonitoringPlanIntent(message) ||
     hasChartAnalysisIntent(message) ||
     hasBrokerIntegrationIntent(message) ||
+    hasInstitutionalFraudIntent(message) ||
     hasRiskAnalysisIntent(message);
 
   if (hasFinancialIntent(message) || hasSpecializedFinancialIntent) {
@@ -2735,6 +2781,27 @@ export class CopilotChatService {
       }
     }
 
+    if (shouldForceInstitutionalFraudFallback(input.message, completion)) {
+      try {
+        const fallbackAnswer = await this.buildInstitutionalFraudFallback(
+          input.message,
+          conversationMessages,
+        );
+
+        return {
+          ...completion,
+          answer: fallbackAnswer,
+        };
+      } catch (error) {
+        logger.warn(
+          {
+            err: error,
+          },
+          "Failed to force institutional fraud fallback",
+        );
+      }
+    }
+
     if (shouldForceGeneralAssistantFallback(input.message, completion)) {
       try {
         const fallbackAnswer = await this.buildGeneralAssistantFallback(input, conversationMessages);
@@ -3422,6 +3489,189 @@ export class CopilotChatService {
       sourceLines,
       "Checklist profissional: valide contrato oficial, rede correta, liquidez, volume real e risco de spoofing antes de qualquer execucao.",
     ].join("\n");
+  }
+
+  private resolveMemeRadarNotificationByAssetHint(
+    notifications: MemeRadarNotification[],
+    assetHint: string,
+  ): MemeRadarNotification | null {
+    const normalizedHint = normalizeText(assetHint);
+
+    for (const notification of notifications) {
+      const symbol = normalizeText(notification.token.symbol);
+      const name = normalizeText(notification.token.name);
+
+      if (symbol === normalizedHint || name.includes(normalizedHint)) {
+        return notification;
+      }
+    }
+
+    return null;
+  }
+
+  private buildStandaloneFraudChecklistMarkdown(input: {
+    assetLabel: string;
+    contractCandidates: string[];
+    sourceUrls: string[];
+    vampDetected: boolean;
+  }): string {
+    const riskScore = input.vampDetected ? 38 : 62;
+    const vampStatus = input.vampDetected ? "**<span style=\"color:red\">FAIL</span>**" : "PASS";
+    const unknownStatus = "UNKNOWN";
+
+    return [
+      `[RISK SCORE: ${riskScore}/100]`,
+      "",
+      "| Checklist de Seguranca | Status | Evidencia |",
+      "| --- | --- | --- |",
+      `| High concentration (>4%) | ${unknownStatus} | Sem dados on-chain de top holders nesta rodada. |`,
+      `| Symmetric bundle | ${unknownStatus} | Sem dados on-chain de distribuicao top 10 nesta rodada. |`,
+      `| Viewers vs Holders anomaly | ${unknownStatus} | Sem metrica confiavel de holders nesta rodada. |`,
+      `| Coordinated funding ping | ${unknownStatus} | Sem trilha completa de funding por carteira nesta rodada. |`,
+      `| Early dump trap (<10k MC) | ${unknownStatus} | Sem classificacao de sniper/dev wallet nesta rodada. |`,
+      `| Community health | ${unknownStatus} | Sem confirmacao de pinned thesis/moderacao nesta rodada. |`,
+      `| VAMP SCAM (ticker cruzado) | ${vampStatus} | ${input.vampDetected
+        ? "Contratos antigos/mortos com mesmo ticker/imagem detectados."
+        : "Nenhum marcador forte de copia parasita detectado agora."} |`,
+      "",
+      input.vampDetected
+        ? "**<span style=\"color:red\">ALERTA: suspeita de VAMP SCAM (Copia Parasita).</span>**"
+        : "Diretiva Anti-Vamp: nenhuma evidencia forte de copia parasita nesta leitura.",
+      input.contractCandidates.length > 0
+        ? `Contratos candidatos encontrados: ${input.contractCandidates.slice(0, 3).join(", ")}.`
+        : "Contratos candidatos encontrados: n/d.",
+      input.sourceUrls.length > 0
+        ? `Fontes verificadas: ${input.sourceUrls.slice(0, 3).join(" | ")}.`
+        : "Fontes verificadas: n/d.",
+      `Auditoria institucional concluida para ${input.assetLabel}.`,
+    ].join("\n");
+  }
+
+  private async buildInstitutionalFraudFallback(
+    message: string,
+    conversationMessages: OpenRouterConversationMessage[],
+  ): Promise<string> {
+    const operativeMessage = extractLatestUserTurn(message);
+    const assetHint = resolvePrimaryAssetHint(operativeMessage);
+    const assetLabel = assetHint.toUpperCase();
+
+    const board = await memeRadarService.getNotificationBoard({
+      chain: "all",
+      limit: 80,
+      pinnedOnly: false,
+      priority: "all",
+      refresh: false,
+    });
+    const matchedNotification = this.resolveMemeRadarNotificationByAssetHint(
+      board.notifications,
+      assetHint,
+    );
+
+    const historyLinks = extractRecentUserLinks(conversationMessages);
+    const focusedQuery = truncateForQuery(
+      buildFocusedWebSearchQuery(
+        `${assetHint} ${operativeMessage} old contract dead contract migrated token`.trim(),
+        "token_lookup",
+      ),
+      220,
+    );
+
+    let webProvider = "n/d";
+    let topResults: WebSearchResultItem[] = [];
+
+    try {
+      const webResponse = await webSearchAdapter.search({
+        maxResults: 6,
+        query: focusedQuery,
+      });
+
+      webProvider = webResponse.provider;
+      topResults = webResponse.results.slice(0, 5);
+    } catch (error) {
+      logger.warn(
+        {
+          assetHint,
+          err: error,
+        },
+        "Institutional fraud fallback web search failed",
+      );
+    }
+
+    const sourceUrls = topResults.map((result) => result.url).slice(0, 4);
+    const searchBlob = `${operativeMessage}\n${historyLinks.join("\n")}\n${topResults
+      .map((result) => `${result.title}\n${result.snippet}\n${result.url}`)
+      .join("\n")}`;
+    const contractCandidates = extractContractAddressCandidatesFromText(searchBlob);
+    const hasLegacyContractMentions = topResults.some((result) => {
+      const normalizedBlob = normalizeText(`${result.title} ${result.snippet}`);
+
+      return (
+        normalizedBlob.includes("old contract") ||
+        normalizedBlob.includes("dead contract") ||
+        normalizedBlob.includes("deprecated") ||
+        normalizedBlob.includes("migrat") ||
+        normalizedBlob.includes("abandon") ||
+        normalizedBlob.includes("v1") ||
+        normalizedBlob.includes("rug")
+      );
+    });
+    const vampDetected = contractCandidates.length >= 2 && hasLegacyContractMentions;
+
+    if (matchedNotification?.bundleRiskReport) {
+      const baseReport = matchedNotification.bundleRiskReport;
+      const flags = new Set(baseReport.flags);
+
+      if (vampDetected) {
+        flags.add("VAMP_SCAM");
+      }
+
+      const report: BundleRiskReport = {
+        ...baseReport,
+        flags: [...flags],
+        riskScore: vampDetected ? Math.max(0, baseReport.riskScore - 22) : baseReport.riskScore,
+        summary:
+          vampDetected && !baseReport.summary.some((line) => line.toLowerCase().includes("vamp scam"))
+            ? [...baseReport.summary, "VAMP SCAM: ticker cruzado com contratos antigos/mortos."]
+            : baseReport.summary,
+        warningMessage:
+          baseReport.warningMessage ??
+          (vampDetected ? "VAMP SCAM detectado no cruzamento de ticker/contrato." : null),
+      };
+
+      const multiWalletDetected =
+        report.flags.includes("HIGH_CONCENTRATION_RISK") ||
+        report.flags.includes("SYMMETRIC_BUNDLE_DETECTED") ||
+        report.flags.includes("COORDINATED_BUNDLE") ||
+        report.flags.includes("FAKE_HOLDERS_WARNING");
+      const moderationDetected = report.flags.includes("COMMUNITY_HEALTH_FAILURE");
+
+      return [
+        `Auditoria anti-fraude institucional para ${assetLabel}.`,
+        formatBundleRiskChecklistMarkdown(report),
+        multiWalletDetected
+          ? "**<span style=\"color:red\">ALERTA: suspeita de Multi-Wallet detectada.</span>**"
+          : "Sem alerta forte de Multi-Wallet nesta rodada.",
+        moderationDetected
+          ? "**<span style=\"color:red\">ALERTA: falta de moderacao na comunidade detectada.</span>**"
+          : "Sem alerta forte de abandono de moderacao nesta rodada.",
+        vampDetected
+          ? "**<span style=\"color:red\">VAMP SCAM (Copia Parasita): contratos antigos/mortos com mesmo ticker/imagem.</span>**"
+          : "Diretiva Anti-Vamp: nenhuma evidencia forte de copia parasita nesta leitura.",
+        contractCandidates.length > 0
+          ? `Contratos candidatos encontrados: ${contractCandidates.slice(0, 3).join(", ")}.`
+          : "Contratos candidatos encontrados: n/d.",
+        sourceUrls.length > 0
+          ? `Fontes verificadas (${webProvider}): ${sourceUrls.join(" | ")}.`
+          : `Fontes verificadas (${webProvider}): n/d.`,
+      ].join("\n");
+    }
+
+    return this.buildStandaloneFraudChecklistMarkdown({
+      assetLabel,
+      contractCandidates,
+      sourceUrls,
+      vampDetected,
+    });
   }
 
   private async buildShortTermRiskFallback(message: string): Promise<string> {

@@ -2,7 +2,10 @@ import { z } from "zod";
 import type { PoolClient } from "pg";
 
 import { OpenRouterChatAdapter } from "../../../integrations/ai/openrouter-chat-adapter.js";
-import { WebSearchAdapter } from "../../../integrations/search/web-search-adapter.js";
+import {
+  WebSearchAdapter,
+  type WebSearchResultItem,
+} from "../../../integrations/search/web-search-adapter.js";
 import { memoryCache } from "../../../shared/cache/memory-cache.js";
 import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
@@ -37,8 +40,82 @@ type MemeRadarAiClassification = z.infer<typeof memeRadarAiClassificationSchema>
 type MemeRadarCacheState = "fresh" | "miss" | "refreshed" | "stale";
 type MemeRadarPoolStatus = "alive" | "delisted" | "rugged";
 type MemeRadarSecurityStatus = "honeypot" | "safe" | "unknown";
+type BundleRiskCheckStatus = "fail" | "pass" | "unknown";
+type BundleRiskFlag =
+  | "COORDINATED_BUNDLE"
+  | "COMMUNITY_HEALTH_FAILURE"
+  | "EARLY_DUMP_TRAP"
+  | "FAKE_HOLDERS_WARNING"
+  | "HIGH_CONCENTRATION_RISK"
+  | "SYMMETRIC_BUNDLE_DETECTED"
+  | "VAMP_SCAM";
 
 type MemeRadarQueryInput = z.input<typeof memeRadarQuerySchema>;
+
+interface BundleTopHolderSnapshot {
+  fundingSource: string | null;
+  fundingTimeBucket: string | null;
+  isLiquidityPool: boolean;
+  supplyPercent: number;
+  tags: string[];
+  walletAddress: string;
+}
+
+interface BundleRiskCheck {
+  details: string;
+  evidence: string[];
+  status: BundleRiskCheckStatus;
+}
+
+interface BundleRiskChecklist {
+  communityHealth: BundleRiskCheck;
+  coordinatedFunding: BundleRiskCheck;
+  earlyDumpTrap: BundleRiskCheck;
+  fakeHolders: BundleRiskCheck;
+  highConcentration: BundleRiskCheck;
+  symmetricBundle: BundleRiskCheck;
+}
+
+interface BundleRiskMetrics {
+  activeViewerToHolderRatio: number | null;
+  coordinatedFundingWallets: number;
+  duplicateTopHolderPercentages: number;
+  flaggedSniperOrDevWallets: number;
+  largestNonLpHolderPercent: number | null;
+}
+
+interface BundleSignalPayload {
+  activity: {
+    activeViewers: number | null;
+    totalHolders: number | null;
+  };
+  community: {
+    hasPinnedThesis: boolean | null;
+    hasUnmoderatedBotSpam: boolean | null;
+    moderationActive: boolean | null;
+  };
+  topHolders: BundleTopHolderSnapshot[];
+  vamp: {
+    contractCandidates: string[];
+    hasLegacyContractMentions: boolean;
+    sourceUrls: string[];
+  };
+  wallets: {
+    freshWalletCount: number | null;
+    sniperWalletCount: number | null;
+    suspectedDevWalletCount: number | null;
+  };
+}
+
+export interface BundleRiskReport {
+  checklist: BundleRiskChecklist;
+  flags: BundleRiskFlag[];
+  generatedAt: string;
+  metrics: BundleRiskMetrics;
+  riskScore: number;
+  summary: string[];
+  warningMessage: string | null;
+}
 
 interface MemeRadarWebSignalEvidence {
   confidenceScore: number;
@@ -61,6 +138,7 @@ interface MemeRadarSocialLink {
 }
 
 interface MemeRadarPairCandidate {
+  bundleSignals?: BundleSignalPayload;
   chain: MemeRadarChain;
   dexId: string | null;
   discoveredAt: string;
@@ -98,6 +176,7 @@ interface MemeRadarGeneratedSentiment {
 }
 
 interface StoredMemeRadarNotificationRecord {
+  bundleRiskReport: BundleRiskReport | null;
   catalysts: string[];
   headline: string;
   pair: MemeRadarPairCandidate;
@@ -110,6 +189,7 @@ interface StoredMemeRadarNotificationRecord {
 }
 
 interface RankedMemeRadarCandidate {
+  bundleRiskReport: BundleRiskReport;
   catalysts: string[];
   headline: string;
   pair: MemeRadarPairCandidate;
@@ -139,6 +219,7 @@ export interface MemeRadarSourceSnapshot {
 
 export interface MemeRadarNotification {
   actionable: boolean;
+  bundleRiskReport: BundleRiskReport | null;
   catalysts: string[];
   chain: MemeRadarChain;
   dexId: string | null;
@@ -251,6 +332,25 @@ const MEME_RADAR_STORED_LIMIT = 220;
 const MEME_RADAR_POOL_STATUS_RUGGED_FLAG = "POOL RUGGED";
 const MEME_RADAR_POOL_STATUS_DELISTED_FLAG = "POOL DELISTED";
 const MEME_RADAR_SECURITY_HONEYPOT_FLAG = "HONEYPOT";
+const MEME_RADAR_STRICT_MIN_MARKET_CAP_USD = 6_000;
+const MEME_RADAR_STRICT_MIN_AGE_MINUTES = 5;
+const MEME_RADAR_STRICT_MAX_AGE_MINUTES = 30;
+const MEME_RADAR_HIGH_CONCENTRATION_SUPPLY_PERCENT = 4;
+const MEME_RADAR_FAKE_HOLDER_RATIO_THRESHOLD = 0.3;
+const MEME_RADAR_EARLY_DUMP_TRAP_MAX_MARKET_CAP_USD = 10_000;
+const MEME_RADAR_COORDINATED_BUNDLE_MIN_WALLETS = 2;
+const MEME_RADAR_SYMMETRIC_DUPLICATE_MIN_WALLETS = 3;
+const MEME_RADAR_SNIPER_TRAP_MIN_WALLETS = 2;
+
+type StrictIngestionDropReason =
+  | "AGE_OUTSIDE_SNIPE_WINDOW"
+  | "MARKET_CAP_BELOW_MINIMUM"
+  | "MISSING_OFFICIAL_SOCIAL_LINK";
+
+type StrictIngestionFilter = (
+  candidate: MemeRadarPairCandidate,
+  nowMs: number,
+) => StrictIngestionDropReason | null;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -265,6 +365,13 @@ function normalizeToken(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "")
     .trim();
+}
+
+function normalizeSignalText(value: string): string {
+  return normalizeWhitespace(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
 function readRecord(record: Record<string, unknown>, key: string): Record<string, unknown> | null {
@@ -695,6 +802,106 @@ function parseSocialLinks(input: unknown): MemeRadarSocialLink[] {
   return mergeSocialLinks([], links);
 }
 
+function extractEvmContractCandidatesFromText(value: string): string[] {
+  const matches = value.match(/\b0x[a-fA-F0-9]{40}\b/g) ?? [];
+  const dedupe = new Set<string>();
+  const contracts: string[] = [];
+
+  for (const match of matches) {
+    const normalized = match.toLowerCase();
+
+    if (!dedupe.has(normalized)) {
+      dedupe.add(normalized);
+      contracts.push(normalized);
+    }
+  }
+
+  return contracts;
+}
+
+function hasLegacyContractMentionsInWebResults(results: WebSearchResultItem[]): boolean {
+  return results.some((result) => {
+    const normalizedBlob = normalizeSignalText(`${result.title} ${result.snippet}`);
+
+    return (
+      normalizedBlob.includes("old contract") ||
+      normalizedBlob.includes("dead contract") ||
+      normalizedBlob.includes("deprecated") ||
+      normalizedBlob.includes("migrat") ||
+      normalizedBlob.includes("abandon") ||
+      normalizedBlob.includes("v1") ||
+      normalizedBlob.includes("rug")
+    );
+  });
+}
+
+function hasOfficialTwitterOrTelegramLink(links: MemeRadarSocialLink[]): boolean {
+  return links.some((link) => {
+    const normalizedType = normalizeWhitespace(link.type).toLowerCase();
+    const normalizedUrl = normalizeWhitespace(link.url).toLowerCase();
+
+    if (normalizedType.includes("twitter") || normalizedType.includes("x") || normalizedType.includes("telegram")) {
+      return true;
+    }
+
+    return (
+      normalizedUrl.includes("twitter.com/")
+      || normalizedUrl.includes("x.com/")
+      || normalizedUrl.includes("t.me/")
+      || normalizedUrl.includes("telegram.me/")
+      || normalizedUrl.includes("telegram.org/")
+    );
+  });
+}
+
+function computeCandidateAgeMinutes(candidate: Pick<MemeRadarPairCandidate, "discoveredAt" | "launchedAt">, nowMs: number): number | null {
+  const anchor = candidate.launchedAt ?? candidate.discoveredAt;
+  const parsedDate = new Date(anchor);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  return Math.max(0, (nowMs - parsedDate.getTime()) / 60_000);
+}
+
+function resolveCandidateMarketCapUsd(candidate: Pick<MemeRadarPairCandidate, "metrics">): number {
+  const resolved = candidate.metrics.marketCapUsd ?? candidate.metrics.fdvUsd ?? 0;
+  return Number.isFinite(resolved) ? Math.max(0, resolved) : 0;
+}
+
+const strictIngestionFilters: StrictIngestionFilter[] = [
+  (candidate) => {
+    const marketCapUsd = resolveCandidateMarketCapUsd(candidate);
+
+    if (marketCapUsd < MEME_RADAR_STRICT_MIN_MARKET_CAP_USD) {
+      return "MARKET_CAP_BELOW_MINIMUM";
+    }
+
+    return null;
+  },
+  (candidate, nowMs) => {
+    const ageMinutes = computeCandidateAgeMinutes(candidate, nowMs);
+
+    if (ageMinutes === null) {
+      return "AGE_OUTSIDE_SNIPE_WINDOW";
+    }
+
+    if (ageMinutes > MEME_RADAR_STRICT_MAX_AGE_MINUTES || ageMinutes < MEME_RADAR_STRICT_MIN_AGE_MINUTES) {
+      return "AGE_OUTSIDE_SNIPE_WINDOW";
+    }
+
+    return null;
+  },
+  (candidate) => {
+    if (candidate.socials.length === 0 || !hasOfficialTwitterOrTelegramLink(candidate.socials)) {
+      return "MISSING_OFFICIAL_SOCIAL_LINK";
+    }
+
+    return null;
+  },
+];
+
 function ensureMetricSnapshot(value: unknown): MemeRadarMetricSnapshot {
   if (!isRecord(value)) {
     return {
@@ -914,6 +1121,138 @@ function sanitizeRiskOrCatalyst(values: string[]): string[] {
     .map((item) => normalizeWhitespace(item))
     .filter((item) => item.length > 2)
     .slice(0, 3);
+}
+
+function computeStandardDeviation(values: number[]): number | null {
+  if (values.length === 0) {
+    return null;
+  }
+
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
+
+  return Math.sqrt(variance);
+}
+
+function toNonNegativeInteger(value: number | null | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.floor(value));
+}
+
+function resolveDuplicateTopHolderPercentages(topHolders: BundleTopHolderSnapshot[]): number {
+  const grouped = new Map<string, number>();
+
+  for (const holder of topHolders) {
+    if (!Number.isFinite(holder.supplyPercent) || holder.supplyPercent <= 0) {
+      continue;
+    }
+
+    const key = toRounded(holder.supplyPercent, 4).toFixed(4);
+    grouped.set(key, (grouped.get(key) ?? 0) + 1);
+  }
+
+  let maxDuplicated = 0;
+
+  for (const count of grouped.values()) {
+    if (count > maxDuplicated) {
+      maxDuplicated = count;
+    }
+  }
+
+  return maxDuplicated;
+}
+
+function resolveCoordinatedFundingWallets(topHolders: BundleTopHolderSnapshot[]): number {
+  const grouped = new Map<string, number>();
+
+  for (const holder of topHolders) {
+    if (holder.isLiquidityPool) {
+      continue;
+    }
+
+    const source = normalizeWhitespace(holder.fundingSource ?? "").toLowerCase();
+    const bucket = normalizeWhitespace(holder.fundingTimeBucket ?? "").toLowerCase();
+
+    if (source.length === 0 || bucket.length === 0) {
+      continue;
+    }
+
+    const key = `${source}|${bucket}`;
+    grouped.set(key, (grouped.get(key) ?? 0) + 1);
+  }
+
+  let maxFundingCluster = 0;
+
+  for (const count of grouped.values()) {
+    if (count > maxFundingCluster) {
+      maxFundingCluster = count;
+    }
+  }
+
+  return maxFundingCluster;
+}
+
+function buildRiskCheck(status: BundleRiskCheckStatus, details: string, evidence: string[] = []): BundleRiskCheck {
+  return {
+    details,
+    evidence: evidence.map((item) => normalizeWhitespace(item)).filter((item) => item.length > 0),
+    status,
+  };
+}
+
+function toChecklistStatusLabel(status: BundleRiskCheckStatus): string {
+  if (status === "fail") {
+    return "**<span style=\"color:red\">FAIL</span>**";
+  }
+
+  if (status === "pass") {
+    return "**PASS**";
+  }
+
+  return "UNKNOWN";
+}
+
+export function formatBundleRiskChecklistMarkdown(report: BundleRiskReport): string {
+  const hasMultiWalletFlag =
+    report.flags.includes("HIGH_CONCENTRATION_RISK") ||
+    report.flags.includes("SYMMETRIC_BUNDLE_DETECTED") ||
+    report.flags.includes("COORDINATED_BUNDLE") ||
+    report.flags.includes("FAKE_HOLDERS_WARNING");
+  const hasModerationFailure = report.flags.includes("COMMUNITY_HEALTH_FAILURE");
+  const hasVampScam = report.flags.includes("VAMP_SCAM");
+  const lines = [
+    `[RISK SCORE: ${report.riskScore}/100]`,
+    "",
+    "| Checklist de Seguranca | Status | Evidencia |",
+    "| --- | --- | --- |",
+    `| High concentration (>4%) | ${toChecklistStatusLabel(report.checklist.highConcentration.status)} | ${report.checklist.highConcentration.details} |`,
+    `| Symmetric bundle | ${toChecklistStatusLabel(report.checklist.symmetricBundle.status)} | ${report.checklist.symmetricBundle.details} |`,
+    `| Viewers vs Holders anomaly | ${toChecklistStatusLabel(report.checklist.fakeHolders.status)} | ${report.checklist.fakeHolders.details} |`,
+    `| Coordinated funding ping | ${toChecklistStatusLabel(report.checklist.coordinatedFunding.status)} | ${report.checklist.coordinatedFunding.details} |`,
+    `| Early dump trap (<10k MC) | ${toChecklistStatusLabel(report.checklist.earlyDumpTrap.status)} | ${report.checklist.earlyDumpTrap.details} |`,
+    `| Community health | ${toChecklistStatusLabel(report.checklist.communityHealth.status)} | ${report.checklist.communityHealth.details} |`,
+  ];
+
+  if (hasMultiWalletFlag) {
+    lines.push("", "**<span style=\"color:red\">ALERTA: suspeita de Multi-Wallet detectada.</span>**");
+  }
+
+  if (hasModerationFailure) {
+    lines.push("", "**<span style=\"color:red\">ALERTA: comunidade sem moderacao confiavel.</span>**");
+  }
+
+  if (hasVampScam) {
+    lines.push("", "**<span style=\"color:red\">VAMP SCAM (Copia Parasita) detectado no cruzamento de ticker/contrato.</span>**");
+  }
+
+  if (report.warningMessage) {
+    lines.push("", `**Alerta:** ${report.warningMessage}`);
+  }
+
+  return lines.join("\n");
 }
 
 export class MemeRadarService {
@@ -1152,7 +1491,32 @@ export class MemeRadarService {
       totalItems: dexMetrics.successCount,
     });
 
-    const securityMetrics = await this.enrichCandidatesWithSecuritySignals(geckoCandidates);
+    const strictEligibleCandidates = this.applyStrictIngestionPipeline(geckoCandidates);
+
+    if (strictEligibleCandidates.length === 0) {
+      const fallbackSnapshot = await this.snapshotFromStore();
+
+      if (fallbackSnapshot.notifications.length > 0) {
+        const mergedSnapshot: CachedMemeRadarSnapshot = {
+          ...fallbackSnapshot,
+          sources: sourceSnapshots,
+        };
+
+        this.updateCache(mergedSnapshot);
+        return mergedSnapshot;
+      }
+
+      const emptySnapshot: CachedMemeRadarSnapshot = {
+        fetchedAt: new Date().toISOString(),
+        notifications: [],
+        sources: sourceSnapshots,
+      };
+
+      this.updateCache(emptySnapshot);
+      return emptySnapshot;
+    }
+
+    const securityMetrics = await this.enrichCandidatesWithSecuritySignals(strictEligibleCandidates);
 
     sourceSnapshots.push({
       error: securityMetrics.firstError,
@@ -1163,7 +1527,7 @@ export class MemeRadarService {
       totalItems: securityMetrics.successCount,
     });
 
-    const webSignalMetrics = await this.enrichCandidatesWithWebSignals(geckoCandidates);
+    const webSignalMetrics = await this.enrichCandidatesWithWebSignals(strictEligibleCandidates);
 
     sourceSnapshots.push({
       error: webSignalMetrics.firstError,
@@ -1174,7 +1538,7 @@ export class MemeRadarService {
       totalItems: webSignalMetrics.successCount,
     });
 
-    const rankedCandidates = await this.rankCandidates(geckoCandidates, sourceSnapshots);
+    const rankedCandidates = await this.rankCandidates(strictEligibleCandidates, sourceSnapshots);
 
     await this.upsertRankedCandidates(rankedCandidates);
 
@@ -1258,6 +1622,52 @@ export class MemeRadarService {
     }
 
     return [...deduped.values()].slice(0, env.MEME_RADAR_NEW_POOLS_PER_CHAIN * 2);
+  }
+
+  private applyStrictIngestionPipeline(candidates: MemeRadarPairCandidate[]): MemeRadarPairCandidate[] {
+    const nowMs = Date.now();
+    const droppedByReason: Record<StrictIngestionDropReason, number> = {
+      AGE_OUTSIDE_SNIPE_WINDOW: 0,
+      MARKET_CAP_BELOW_MINIMUM: 0,
+      MISSING_OFFICIAL_SOCIAL_LINK: 0,
+    };
+    const approved: MemeRadarPairCandidate[] = [];
+
+    for (const candidate of candidates) {
+      let dropReason: StrictIngestionDropReason | null = null;
+
+      for (const filter of strictIngestionFilters) {
+        const result = filter(candidate, nowMs);
+
+        if (result) {
+          dropReason = result;
+          break;
+        }
+      }
+
+      if (dropReason) {
+        droppedByReason[dropReason] += 1;
+        continue;
+      }
+
+      approved.push(candidate);
+    }
+
+    const droppedCount = candidates.length - approved.length;
+
+    if (droppedCount > 0) {
+      logger.info(
+        {
+          approved: approved.length,
+          dropped: droppedCount,
+          droppedByReason,
+          totalCandidates: candidates.length,
+        },
+        "Meme radar strict ingestion pipeline applied",
+      );
+    }
+
+    return approved;
   }
 
   private async collectGeckoByChain(chain: MemeRadarChain): Promise<GeckoCollectResult> {
@@ -1604,10 +2014,11 @@ export class MemeRadarService {
           maxResults: 6,
           query,
         });
+        const webResults = webResponse.results.slice(0, 6);
 
-        const socialHits = webResponse.results.filter((result) => {
+        const socialHits = webResults.filter((result) => {
           const domain = result.domain.toLowerCase();
-          const normalizedText = normalizeWhitespace(`${result.title} ${result.snippet}`).toLowerCase();
+          const normalizedText = normalizeSignalText(`${result.title} ${result.snippet}`);
 
           return (
             result.sourceType === "community"
@@ -1617,6 +2028,39 @@ export class MemeRadarService {
             || normalizedText.includes("discord")
           );
         });
+
+        const normalizedResultBlobs = webResults.map((result) =>
+          normalizeSignalText(`${result.title} ${result.snippet} ${result.url}`),
+        );
+        const webSignalBlob = webResults
+          .map((result) => `${result.title}\n${result.snippet}\n${result.url}`)
+          .join("\n");
+        const vampContractCandidates = extractEvmContractCandidatesFromText(webSignalBlob);
+        const hasLegacyContractMentions = hasLegacyContractMentionsInWebResults(webResults);
+        const hasPinnedThesisEvidence = normalizedResultBlobs.some((blob) =>
+          blob.includes("pinned") && (blob.includes("thesis") || blob.includes("roadmap") || blob.includes("tokenomics")),
+        );
+        const hasPinnedThesisNegative = normalizedResultBlobs.some((blob) =>
+          blob.includes("no pinned") || blob.includes("sem pinned") || blob.includes("without pinned"),
+        );
+        const hasUnmoderatedBotSpam = normalizedResultBlobs.some((blob) =>
+          blob.includes("bot spam")
+          || blob.includes("spam links")
+          || blob.includes("telegram spam")
+          || blob.includes("scam links")
+          || blob.includes("raid bot"),
+        );
+        const hasModerationEvidence = normalizedResultBlobs.some((blob) =>
+          blob.includes("moderat") || blob.includes("admin active") || blob.includes("community manager"),
+        );
+        const sniperWalletSignals = normalizedResultBlobs.filter((blob) => blob.includes("sniper")).length;
+        const freshWalletSignals = normalizedResultBlobs.filter((blob) =>
+          blob.includes("fresh wallet") || blob.includes("new wallet cluster"),
+        ).length;
+        const devWalletSignals = normalizedResultBlobs.filter((blob) =>
+          blob.includes("dev wallet") || blob.includes("team wallet"),
+        ).length;
+        const previousSignals = candidate.bundleSignals;
 
         candidate.socialWebEvidence = socialHits.slice(0, 3).map((result) => ({
           confidenceScore: result.confidenceScore,
@@ -1633,6 +2077,49 @@ export class MemeRadarService {
           0,
           100,
         );
+        candidate.bundleSignals = {
+          activity: {
+            activeViewers: socialHits.length > 0
+              ? socialHits.length
+              : previousSignals?.activity.activeViewers ?? null,
+            totalHolders: previousSignals?.activity.totalHolders ?? null,
+          },
+          community: {
+            hasPinnedThesis:
+              hasPinnedThesisEvidence
+                ? true
+                : hasPinnedThesisNegative
+                  ? false
+                  : previousSignals?.community.hasPinnedThesis ?? null,
+            hasUnmoderatedBotSpam:
+              hasUnmoderatedBotSpam
+                ? true
+                : previousSignals?.community.hasUnmoderatedBotSpam ?? null,
+            moderationActive:
+              hasUnmoderatedBotSpam
+                ? false
+                : hasModerationEvidence
+                  ? true
+                  : previousSignals?.community.moderationActive ?? null,
+          },
+          topHolders: previousSignals?.topHolders ?? [],
+          vamp: {
+            contractCandidates: vampContractCandidates,
+            hasLegacyContractMentions,
+            sourceUrls: webResults.map((result) => result.url).slice(0, 3),
+          },
+          wallets: {
+            freshWalletCount: freshWalletSignals > 0
+              ? freshWalletSignals
+              : previousSignals?.wallets.freshWalletCount ?? null,
+            sniperWalletCount: sniperWalletSignals > 0
+              ? sniperWalletSignals
+              : previousSignals?.wallets.sniperWalletCount ?? null,
+            suspectedDevWalletCount: devWalletSignals > 0
+              ? devWalletSignals
+              : previousSignals?.wallets.suspectedDevWalletCount ?? null,
+          },
+        };
 
         if (socialHits.length > 0) {
           successCount += 1;
@@ -1742,11 +2229,16 @@ export class MemeRadarService {
   ): Promise<RankedMemeRadarCandidate[]> {
     const ranked = candidates
       .map((candidate) => {
-        const heuristicSentiment = this.buildHeuristicSentiment(candidate);
+        const bundleRiskReport = this.buildBundleRiskReport(candidate);
+        const heuristicSentiment = this.applyBundleRiskToSentiment(
+          this.buildHeuristicSentiment(candidate),
+          bundleRiskReport,
+        );
         const guardedSentiment = this.applyGuardrailsToSentiment(candidate, heuristicSentiment);
         const priority = resolvePriorityFromSentiment(guardedSentiment);
 
         return {
+          bundleRiskReport,
           catalysts: guardedSentiment.catalysts,
           headline: `${candidate.token.symbol} em ${formatChainLabel(candidate.chain)} entrou no radar (${Math.round(guardedSentiment.hypeScore)})`,
           pair: candidate,
@@ -1784,7 +2276,8 @@ export class MemeRadarService {
 
       try {
         const aiSentiment = await this.generateAiSentiment(candidate.pair);
-        const guardedAiSentiment = this.applyGuardrailsToSentiment(candidate.pair, aiSentiment);
+        const aiWithBundleRisk = this.applyBundleRiskToSentiment(aiSentiment, candidate.bundleRiskReport);
+        const guardedAiSentiment = this.applyGuardrailsToSentiment(candidate.pair, aiWithBundleRisk);
         candidate.sentiment = guardedAiSentiment;
         candidate.priority = resolvePriorityFromSentiment(guardedAiSentiment);
         candidate.headline = `${candidate.pair.token.symbol} em ${formatChainLabel(candidate.pair.chain)} entrou no radar (${Math.round(guardedAiSentiment.hypeScore)})`;
@@ -1820,6 +2313,272 @@ export class MemeRadarService {
 
       return right.sentiment.hypeScore - left.sentiment.hypeScore;
     });
+  }
+
+  private buildBundleRiskReport(pair: MemeRadarPairCandidate): BundleRiskReport {
+    const generatedAt = new Date().toISOString();
+    const topHolders = (pair.bundleSignals?.topHolders ?? []).slice(0, 10);
+    const nonLpTopHolders = topHolders.filter((holder) => !holder.isLiquidityPool);
+    const nonLpHolderPercents = nonLpTopHolders
+      .map((holder) => holder.supplyPercent)
+      .filter((value) => Number.isFinite(value) && value > 0);
+    const largestNonLpHolderPercent =
+      nonLpHolderPercents.length > 0
+        ? toRounded(Math.max(...nonLpHolderPercents), 4)
+        : null;
+    const duplicateTopHolderPercentages = resolveDuplicateTopHolderPercentages(topHolders);
+    const nonLpStdDeviation = computeStandardDeviation(nonLpHolderPercents);
+    const highConcentrationRisk =
+      largestNonLpHolderPercent !== null
+      && largestNonLpHolderPercent > MEME_RADAR_HIGH_CONCENTRATION_SUPPLY_PERCENT;
+    const symmetricBundleRisk =
+      duplicateTopHolderPercentages >= MEME_RADAR_SYMMETRIC_DUPLICATE_MIN_WALLETS
+      || (nonLpStdDeviation !== null
+        && nonLpHolderPercents.length >= 4
+        && nonLpStdDeviation <= 0.12);
+
+    const activeViewers =
+      pair.bundleSignals?.activity.activeViewers
+      ?? (pair.socialWebMentions > 0 ? pair.socialWebMentions : null);
+    const totalHolders = pair.bundleSignals?.activity.totalHolders ?? null;
+    const activeViewerToHolderRatio =
+      typeof activeViewers === "number" && Number.isFinite(activeViewers)
+      && typeof totalHolders === "number" && Number.isFinite(totalHolders)
+      && totalHolders > 0
+        ? activeViewers / totalHolders
+        : null;
+    const fakeHoldersWarning =
+      activeViewerToHolderRatio !== null
+      && activeViewerToHolderRatio < MEME_RADAR_FAKE_HOLDER_RATIO_THRESHOLD;
+
+    const coordinatedFundingWallets = resolveCoordinatedFundingWallets(topHolders);
+    const coordinatedBundle = coordinatedFundingWallets >= MEME_RADAR_COORDINATED_BUNDLE_MIN_WALLETS;
+
+    const sniperWalletCount = toNonNegativeInteger(pair.bundleSignals?.wallets.sniperWalletCount);
+    const suspectedDevWalletCount = toNonNegativeInteger(pair.bundleSignals?.wallets.suspectedDevWalletCount);
+    const freshWalletCount = toNonNegativeInteger(pair.bundleSignals?.wallets.freshWalletCount);
+    const flaggedSniperOrDevWallets = sniperWalletCount + suspectedDevWalletCount + freshWalletCount;
+    const marketCapUsd = resolveCandidateMarketCapUsd(pair);
+    const earlyDumpTrap =
+      marketCapUsd < MEME_RADAR_EARLY_DUMP_TRAP_MAX_MARKET_CAP_USD
+      && flaggedSniperOrDevWallets >= MEME_RADAR_SNIPER_TRAP_MIN_WALLETS;
+
+    const hasPinnedThesis = pair.bundleSignals?.community.hasPinnedThesis ?? null;
+    const hasUnmoderatedBotSpam = pair.bundleSignals?.community.hasUnmoderatedBotSpam ?? null;
+    const moderationActive = pair.bundleSignals?.community.moderationActive ?? null;
+    const communityHealthFailure =
+      hasPinnedThesis === false
+      || hasUnmoderatedBotSpam === true
+      || moderationActive === false;
+    const vampSignals = pair.bundleSignals?.vamp;
+    const vampScamDetected =
+      (vampSignals?.contractCandidates.length ?? 0) >= 2
+      && vampSignals?.hasLegacyContractMentions === true;
+
+    const checklist: BundleRiskChecklist = {
+      communityHealth:
+        hasPinnedThesis === null && hasUnmoderatedBotSpam === null && moderationActive === null
+          ? buildRiskCheck("unknown", "Sem dados suficientes para auditar moderacao e tese da comunidade.")
+          : communityHealthFailure
+            ? buildRiskCheck(
+                "fail",
+                "Comunidade sem tese fixada e/ou com spam sem moderacao; confianca deve ser anulada.",
+                [
+                  `pinned_thesis=${String(hasPinnedThesis)}`,
+                  `bot_spam=${String(hasUnmoderatedBotSpam)}`,
+                  `moderation_active=${String(moderationActive)}`,
+                ],
+              )
+            : buildRiskCheck("pass", "Comunicacao e moderacao comunitaria em estado operacional."),
+      coordinatedFunding:
+        topHolders.length === 0
+          ? buildRiskCheck("unknown", "Top holders nao informados para verificar funding sincronizado de CEX.")
+          : coordinatedBundle
+            ? buildRiskCheck(
+                "fail",
+                "Padrao de financiamento sincronizado entre carteiras do top 10.",
+                [`cluster_wallets=${coordinatedFundingWallets}`],
+              )
+            : buildRiskCheck("pass", "Sem padrao evidente de funding coordenado no top 10."),
+      earlyDumpTrap:
+        marketCapUsd <= 0
+          ? buildRiskCheck("unknown", "Market cap indisponivel para validar armadilha de despejo inicial.")
+          : earlyDumpTrap
+            ? buildRiskCheck(
+                "fail",
+                "Presenca de multiplos snipers em MC baixo. Risco extremo de despejo de liquidez.",
+                [
+                  `market_cap_usd=${Math.round(marketCapUsd)}`,
+                  `flagged_wallets=${flaggedSniperOrDevWallets}`,
+                ],
+              )
+            : buildRiskCheck("pass", "Sem combinacao critica de MC baixo com concentracao de wallets agressivas."),
+      fakeHolders:
+        activeViewerToHolderRatio === null
+          ? buildRiskCheck("unknown", "Sem dados de viewers/holders para detectar holders inflados.")
+          : fakeHoldersWarning
+            ? buildRiskCheck(
+                "fail",
+                "Atividade social inferior a 30% da base de holders: suspeita de holders inativos/multi-wallet.",
+                [
+                  `ratio=${toRounded(activeViewerToHolderRatio, 4)}`,
+                  `threshold=${MEME_RADAR_FAKE_HOLDER_RATIO_THRESHOLD}`,
+                ],
+              )
+            : buildRiskCheck("pass", "Racio de atividade acima do threshold minimo de holders."),
+      highConcentration:
+        largestNonLpHolderPercent === null
+          ? buildRiskCheck("unknown", "Sem leitura de top holders para concentracao acima de 4%.")
+          : highConcentrationRisk
+            ? buildRiskCheck(
+                "fail",
+                "Top holder nao-LP acima de 4% do supply.",
+                [
+                  `largest_non_lp=${largestNonLpHolderPercent}%`,
+                  `threshold=${MEME_RADAR_HIGH_CONCENTRATION_SUPPLY_PERCENT}%`,
+                ],
+              )
+            : buildRiskCheck("pass", "Nao houve concentracao nao-LP acima de 4% do supply."),
+      symmetricBundle:
+        topHolders.length === 0
+          ? buildRiskCheck("unknown", "Sem distribuicao top 10 para detectar padrao simetrico de bundle.")
+          : symmetricBundleRisk
+            ? buildRiskCheck(
+                "fail",
+                "Distribuicao simetrica suspeita no top 10 (duplicatas exatas ou baixa dispersao).",
+                [
+                  `duplicated=${duplicateTopHolderPercentages}`,
+                  `std_dev=${nonLpStdDeviation === null ? "n/d" : toRounded(nonLpStdDeviation, 4)}`,
+                ],
+              )
+            : buildRiskCheck("pass", "Nao foi detectado padrao de clone simetrico no top 10."),
+    };
+
+    const flags: BundleRiskFlag[] = [];
+
+    if (highConcentrationRisk) {
+      flags.push("HIGH_CONCENTRATION_RISK");
+    }
+
+    if (symmetricBundleRisk) {
+      flags.push("SYMMETRIC_BUNDLE_DETECTED");
+    }
+
+    if (fakeHoldersWarning) {
+      flags.push("FAKE_HOLDERS_WARNING");
+    }
+
+    if (coordinatedBundle) {
+      flags.push("COORDINATED_BUNDLE");
+    }
+
+    if (earlyDumpTrap) {
+      flags.push("EARLY_DUMP_TRAP");
+    }
+
+    if (communityHealthFailure) {
+      flags.push("COMMUNITY_HEALTH_FAILURE");
+    }
+
+    if (vampScamDetected) {
+      flags.push("VAMP_SCAM");
+    }
+
+    const weightedPenalty =
+      (highConcentrationRisk ? 22 : 0)
+      + (symmetricBundleRisk ? 18 : 0)
+      + (fakeHoldersWarning ? 14 : 0)
+      + (coordinatedBundle ? 18 : 0)
+      + (earlyDumpTrap ? 24 : 0)
+      + (communityHealthFailure ? 20 : 0)
+      + (vampScamDetected ? 22 : 0);
+    const riskScore = clamp(100 - weightedPenalty, 0, 100);
+    const summary = [
+      `Checklist: ${flags.length > 0 ? flags.join(", ") : "nenhuma flag critica detectada"}.`,
+      `Mercado: MC ${Math.round(marketCapUsd)} USD | top-holder-dup ${duplicateTopHolderPercentages}.`,
+      activeViewerToHolderRatio === null
+        ? "Atividade: viewers/holders indisponivel para auditoria de holders inativos."
+        : `Atividade: viewers/holders ${toRounded(activeViewerToHolderRatio, 3)}.`,
+      vampScamDetected
+        ? "VAMP SCAM: ticker cruzado com contratos antigos/mortos na varredura web."
+        : "Anti-Vamp: sem evidencia forte de copia parasita nesta rodada.",
+    ];
+    const warningSegments: string[] = [];
+
+    if (earlyDumpTrap) {
+      warningSegments.push("Presenca de multiplos snipers em MC baixo. Risco extremo de despejo de liquidez.");
+    }
+
+    if (vampScamDetected) {
+      warningSegments.push("VAMP SCAM detectado no cruzamento de ticker/contrato.");
+    }
+
+    const warningMessage = warningSegments.length > 0 ? warningSegments.join(" ") : null;
+
+    return {
+      checklist,
+      flags,
+      generatedAt,
+      metrics: {
+        activeViewerToHolderRatio:
+          activeViewerToHolderRatio === null
+            ? null
+            : toRounded(activeViewerToHolderRatio, 4),
+        coordinatedFundingWallets,
+        duplicateTopHolderPercentages,
+        flaggedSniperOrDevWallets,
+        largestNonLpHolderPercent,
+      },
+      riskScore,
+      summary,
+      warningMessage,
+    };
+  }
+
+  private applyBundleRiskToSentiment(
+    sentiment: MemeRadarGeneratedSentiment,
+    report: BundleRiskReport,
+  ): MemeRadarGeneratedSentiment {
+    const normalizedRiskFlags = [...sentiment.riskFlags];
+    const severeFlagLabels: Record<BundleRiskFlag, string> = {
+      COORDINATED_BUNDLE: "COORDINATED_BUNDLE detectado no padrao de funding",
+      COMMUNITY_HEALTH_FAILURE: "Comunidade sem moderacao confiavel",
+      EARLY_DUMP_TRAP: "EARLY_DUMP_TRAP: MC baixo com wallets agressivas",
+      FAKE_HOLDERS_WARNING: "FAKE_HOLDERS_WARNING por baixa atividade relativa",
+      HIGH_CONCENTRATION_RISK: "HIGH_CONCENTRATION_RISK por concentracao >4%",
+      SYMMETRIC_BUNDLE_DETECTED: "SYMMETRIC_BUNDLE_DETECTED no top 10",
+      VAMP_SCAM: "VAMP_SCAM sinalizado por ticker parasita",
+    };
+
+    for (const flag of report.flags) {
+      const label = severeFlagLabels[flag];
+
+      if (!normalizedRiskFlags.some((risk) => risk.includes(label))) {
+        normalizedRiskFlags.push(label);
+      }
+    }
+
+    const riskPenalty = (100 - report.riskScore) * 0.38;
+    const confidencePenalty = (100 - report.riskScore) * 0.46;
+    const confidence =
+      report.flags.includes("COMMUNITY_HEALTH_FAILURE")
+        ? 0
+        : clamp(toRounded(sentiment.confidence - confidencePenalty, 1), 0, 100);
+    const hypeScore = clamp(toRounded(sentiment.hypeScore - riskPenalty, 1), 0, 100);
+    const oneLineSummary = normalizeWhitespace(
+      report.warningMessage
+        ? `${sentiment.oneLineSummary} ${report.warningMessage}`
+        : sentiment.oneLineSummary,
+    ).slice(0, 180);
+
+    return {
+      ...sentiment,
+      classification: resolveClassificationFromScore(hypeScore),
+      confidence,
+      hypeScore,
+      oneLineSummary,
+      riskFlags: sanitizeRiskOrCatalyst(normalizedRiskFlags),
+    };
   }
 
   private buildHeuristicSentiment(pair: MemeRadarPairCandidate): MemeRadarGeneratedSentiment {
@@ -2104,6 +2863,7 @@ export class MemeRadarService {
       const nowIso = new Date().toISOString();
 
       this.inMemoryStore.set(candidate.pair.fingerprint, {
+        bundleRiskReport: candidate.bundleRiskReport,
         catalysts: candidate.catalysts,
         headline: candidate.headline,
         pair: candidate.pair,
@@ -2510,6 +3270,7 @@ export class MemeRadarService {
         });
 
         return {
+          bundleRiskReport: null,
           catalysts: row.catalysts,
           headline: row.headline,
           pair,
@@ -2599,6 +3360,7 @@ export class MemeRadarService {
 
     return {
       actionable,
+      bundleRiskReport: record.bundleRiskReport,
       catalysts: record.catalysts,
       chain: record.pair.chain,
       dexId: record.pair.dexId,
