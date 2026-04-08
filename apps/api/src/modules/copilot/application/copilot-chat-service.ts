@@ -137,32 +137,23 @@ const wallStreetMarketService = new WallStreetMarketService();
 const copilotDefaultSystemPrompt = [
   "Voce e um assistente geral util, com especialidade em dados objetivos de mercado e operacao.",
   "Se a pergunta for geral e nao envolver mercado financeiro, responda normalmente de forma clara e direta, sem forcar contexto de mercado ou uso de tools.",
-  "Quando a pergunta envolver resumo, panorama ou contexto do mercado cripto, priorize a tool get_crypto_market_overview.",
-  "Quando a pergunta envolver preco ou comparacao entre ativos, use get_crypto_spot_price ou get_crypto_multi_spot_price.",
-  "Quando a pergunta envolver grafico, tendencia, suporte/resistencia ou analise tecnica de cripto, use get_crypto_chart_insights.",
-  "Quando a pergunta envolver airdrops, retroativos, testnet, quests ou farming, use get_airdrop_opportunities.",
-  "Quando a pergunta envolver corretoras, use get_broker_live_quote para disponibilidade e cotacao ao vivo.",
-  "Para forex/futuros/opcoes/commodities/renda fixa/ETFs/setores/macro, use a tool especializada correspondente.",
-  "Para carteira/B3/FIIs/acoes globais/Wall Street/DeFi, use a tool especializada correspondente.",
-  "Quando a pergunta envolver indices, acoes, cambio, juros ou commodities em escopo geral, use get_financial_market_snapshot.",
-  "Fluxo detetive: identificar intencao, investigar com tools e sintetizar resposta humana direta.",
-  "Se o usuario nao pediu analise tecnica formal, responda de forma objetiva e sem template rigido.",
-  "Quando a pergunta pedir comprar/vender, responda com sinal tatico informativo (buy/sell/wait), confianca e risco, sem recomendacao de investimento.",
-  "Quando a pergunta envolver risco de curto prazo, entregue analise por fatores (volatilidade, liquidez, macro e operacao), sem recomendacao de investimento.",
-  "Para onde comprar/listagem: use search_token_listings_dexscreener; se falhar por ticker/nome, use search_web_realtime para achar contrato/link oficial e tente Dex novamente.",
-  "Use links enviados no historico como fonte primaria; para ativo desconhecido ou anafora, faca busca web antes de concluir.",
+  "Regra de roteamento: use tools de cotacao/grafico somente com pedido explicito de preco, cotacao, grafico, analise tecnica ou vies.",
+  "Para resumo de mercado cripto, use get_crypto_market_overview; para preco/comparacao use get_crypto_spot_price ou get_crypto_multi_spot_price; para grafico/TA use get_crypto_chart_insights.",
+  "Para airdrop, retroativo, testnet, quests/farming ou alerta de memecoin (Token/Chain/Hype Score), nao responda com cotacao generica de BTC/ETH/SOL; use contexto e get_airdrop_opportunities.",
+  "Para corretoras use get_broker_live_quote; para forex/futuros/opcoes/commodities/renda fixa/ETFs/setores/macro use as tools especializadas; para snapshot amplo use get_financial_market_snapshot.",
+  "Fluxo detetive: identificar intencao, investigar com tools e sintetizar resposta humana objetiva.",
+  "Se o usuario nao pediu analise tecnica formal, evite template rigido de cotacao.",
+  "Quando a pergunta pedir comprar/vender, responda com sinal informativo (buy/sell/wait), confianca e risco, sem recomendacao de investimento.",
+  "Quando a pergunta envolver risco de curto prazo, entregue fatores de volatilidade, liquidez, macro e operacao, sem recomendacao de investimento.",
+  "Diretiva severa para 'onde comprar': se a exchange nao estiver clara, use search_token_listings_dexscreener e, se necessario, search_web_realtime para descobrir contrato/listagem; se ainda ambiguo, peca nome/ticker/contrato exato. NUNCA devolva cotacao de ativo nao relacionado.",
+  "Use links do historico como fonte primaria; para ativo desconhecido ou anafora, faca busca web antes de concluir.",
   "Nunca delegue com 'pesquise no Google' e nunca diga 'nao encontrei informacoes' sem investigacao web e nova tentativa on-chain.",
-  "Ao usar busca web, cite URLs principais; se faltar dado, explicite limitacao e siga com o que foi confirmado.",
-  "Nao recuse genericamente se houver dados disponiveis nas tools; mantenha tom analitico e neutro.",
-  "Diretiva Anti-Vamp: \"Sempre que analisar um token, utilize a tool de web_search para cruzar o Ticker. Se encontrar contratos antigos e mortos com o mesmo nome/imagem, classifique imediatamente como VAMP SCAM (Copia Parasita).\"",
-  "Diretiva de Relatorio: \"O seu output para o usuario deve sempre comecar com um [RISK SCORE: 0/100] antes da analise tecnica. Destaque em vermelho (Markdown) qualquer suspeita de Multi-Wallet ou falta de moderacao na comunidade.\"",
-  "Para diretiva Anti-Vamp, execute search_web_realtime (web_search) e inclua as URLs verificadas no relatorio.",
-  "Checklist institucional obrigatorio (PASS/FAIL): HIGH_CONCENTRATION_RISK, SYMMETRIC_BUNDLE_DETECTED, FAKE_HOLDERS_WARNING, COORDINATED_BUNDLE, EARLY_DUMP_TRAP e COMMUNITY_HEALTH_FAILURE.",
-  "Regra Viewers vs Holders: se atividade social/viewers for menor que 30% do total de holders, marque FAKE_HOLDERS_WARNING.",
-  "Regra CEX Funding Ping: se multiplas carteiras do Top 10 compartilharem mesma fonte e mesma janela temporal de funding, marque COORDINATED_BUNDLE.",
-  "Regra Armadilha de Liquidez: se market cap for menor que 10000 e houver 2+ carteiras sniper/dev/fresh, marque EARLY_DUMP_TRAP e informe exatamente: 'Presenca de multiplos snipers em MC baixo. Risco extremo de despejo de liquidez.'",
-  "Regra Community Health: valide se existe tese fixada (pinned post) e se ha spam recente sem moderacao; se a comunidade estiver abandonada, zere a confianca final.",
-  "Formato visual obrigatorio: entregue uma tabela Markdown 'Checklist de Seguranca' com coluna Status PASS/FAIL; para FAIL de Multi-Wallet ou moderacao use **<span style=\"color:red\">FAIL</span>**.",
+  "Ao usar busca web, cite URLs principais e explicite limitacoes dos dados.",
+  "Diretiva Anti-Vamp: sempre cruze ticker na web; se encontrar contratos mortos/antigos com mesmo nome ou imagem, classifique como VAMP SCAM (Copia Parasita).",
+  "Diretiva de relatorio: comece com [RISK SCORE: 0/100] e destaque suspeita de Multi-Wallet ou moderacao fraca.",
+  "Checklist institucional PASS/FAIL: HIGH_CONCENTRATION_RISK, SYMMETRIC_BUNDLE_DETECTED, FAKE_HOLDERS_WARNING, COORDINATED_BUNDLE, EARLY_DUMP_TRAP, COMMUNITY_HEALTH_FAILURE.",
+  "Regras: viewers menor que 30% de holders => FAKE_HOLDERS_WARNING; funding comum no Top 10 => COORDINATED_BUNDLE; market cap menor que 10000 com 2+ snipers/dev/fresh => EARLY_DUMP_TRAP com alerta de risco extremo.",
+  "Formato: inclua tabela Markdown 'Checklist de Seguranca' com Status PASS/FAIL; para falhas criticas use destaque visual.",
 ].join(" ");
 
 const copilotGeneralAssistantSystemPrompt = [
@@ -373,6 +364,19 @@ type FinancialMarketPreset = z.infer<typeof copilotFinancialMarketSnapshotToolIn
 const copilotConversationHistoryLimit = 24;
 const copilotConversationMaxChars = 12_000;
 const copilotIntentContextUserTurns = 3;
+const copilotWhereToBuyToolNames = new Set([
+  "get_broker_live_quote",
+  "search_token_listings_dexscreener",
+  "search_web_realtime",
+]);
+const copilotAirdropToolNames = new Set([
+  "get_airdrop_opportunities",
+  "search_web_realtime",
+]);
+const copilotInstitutionalRiskToolNames = new Set([
+  "search_token_listings_dexscreener",
+  "search_web_realtime",
+]);
 
 interface MultiSpotPriceSuccessResult {
   assetId: string;
@@ -590,6 +594,40 @@ function hasWhereToBuyIntent(normalizedMessage: string): boolean {
   );
 }
 
+function hasExplicitPriceOrChartIntent(message: string): boolean {
+  const normalizedMessage = normalizeText(message);
+  const asksPrice =
+    normalizedMessage.includes("preco") ||
+    normalizedMessage.includes("cotacao") ||
+    normalizedMessage.includes("quanto vale") ||
+    normalizedMessage.includes("valor atual") ||
+    normalizedMessage.includes("price") ||
+    normalizedMessage.includes("vies de mercado") ||
+    normalizedMessage.includes("viés de mercado");
+  const asksChart =
+    normalizedMessage.includes("grafico") ||
+    normalizedMessage.includes("grafic") ||
+    normalizedMessage.includes("chart") ||
+    normalizedMessage.includes("analise tecnica") ||
+    normalizedMessage.includes("analise tecnic") ||
+    normalizedMessage.includes("analise grafica") ||
+    normalizedMessage.includes("suporte") ||
+    normalizedMessage.includes("resistencia") ||
+    normalizedMessage.includes("tendencia");
+
+  return asksPrice || asksChart;
+}
+
+function hasMemeAlertPayloadIntent(message: string): boolean {
+  const normalizedMessage = normalizeText(message);
+  const hasTokenField = /(^|\n)\s*(token|ticker|ativo|asset)\s*[:=-]/m.test(normalizedMessage);
+  const hasChainField = /(^|\n)\s*chain\s*[:=-]/m.test(normalizedMessage);
+  const hasHypeField = /(^|\n)\s*hype\s*score\s*[:=-]/m.test(normalizedMessage) ||
+    normalizedMessage.includes("hype score");
+
+  return (hasTokenField && hasChainField) || (hasTokenField && hasHypeField) || (hasChainField && hasHypeField);
+}
+
 function extractAssetHintCandidates(message: string): string[] {
   const explicitCandidates: string[] = [];
   const explicitRegex = /(?:token|ticker|ativo|asset|moeda)\s*[:=-]\s*([a-zA-Z0-9-]{2,24})/gi;
@@ -766,6 +804,22 @@ function extractContractAddressCandidatesFromText(value: string): string[] {
   }
 
   return normalizedCandidates;
+}
+
+function hasResolvableAssetHint(message: string): boolean {
+  const normalizedMessage = normalizeText(message);
+
+  if (extractContractAddressCandidatesFromText(message).length > 0) {
+    return true;
+  }
+
+  if (extractAssetHintCandidates(message).length > 0) {
+    return true;
+  }
+
+  return riskAssetAliases.some((assetAlias) =>
+    assetAlias.aliases.some((alias) => hasExactAlias(normalizedMessage, alias)),
+  );
 }
 
 function extractRecentUserLinks(conversationMessages: OpenRouterConversationMessage[]): string[] {
@@ -973,6 +1027,15 @@ function hasRiskAnalysisIntent(message: string): boolean {
 
 function hasChartAnalysisIntent(message: string): boolean {
   const normalizedMessage = normalizeText(message);
+
+  if (!hasExplicitPriceOrChartIntent(message)) {
+    return false;
+  }
+
+  if (hasWhereToBuyIntent(normalizedMessage) || hasAirdropIntent(message) || hasMemeAlertPayloadIntent(message)) {
+    return false;
+  }
+
   const asksForChart =
     normalizedMessage.includes("grafico") ||
     normalizedMessage.includes("grafic") ||
@@ -987,23 +1050,11 @@ function hasChartAnalysisIntent(message: string): boolean {
     normalizedMessage.includes("analise tecnica") ||
     normalizedMessage.includes("analise tecnic") ||
     normalizedMessage.includes("tecnicamente");
-  const asksDirection =
-    normalizedMessage.includes("vai subir") ||
-    normalizedMessage.includes("vai cair") ||
-    normalizedMessage.includes("subir ou cair") ||
-    normalizedMessage.includes("alta ou baixa") ||
-    normalizedMessage.includes("comprar") ||
-    normalizedMessage.includes("vender") ||
-    normalizedMessage.includes("buy") ||
-    normalizedMessage.includes("sell") ||
-    normalizedMessage.includes("entrada") ||
-    normalizedMessage.includes("stop") ||
-    normalizedMessage.includes("take profit");
   const mentionsAsset = riskAssetAliases.some((assetAlias) =>
     assetAlias.aliases.some((alias) => hasExactAlias(normalizedMessage, alias)),
   );
 
-  return (asksForChart || asksDirection) && mentionsAsset;
+  return asksForChart && mentionsAsset;
 }
 
 function hasBrokerIntegrationIntent(message: string): boolean {
@@ -1044,6 +1095,10 @@ function hasBrokerIntegrationIntent(message: string): boolean {
 
 function hasInstitutionalFraudIntent(message: string): boolean {
   const normalizedMessage = normalizeText(message);
+
+  if (hasMemeAlertPayloadIntent(message)) {
+    return true;
+  }
 
   return (
     normalizedMessage.includes("anti-bundle") ||
@@ -1240,6 +1295,91 @@ function hasGenericLimitationAnswer(answer: string): boolean {
     normalizedAnswer.includes("voce pode tentar pesquisar") ||
     normalizedAnswer.includes("tente novamente mais tarde")
   );
+}
+
+function hasMisroutedQuoteTemplateAnswer(answer: string): boolean {
+  const normalizedAnswer = normalizeText(answer);
+
+  return (
+    normalizedAnswer.includes("analise tecnica objetiva") ||
+    normalizedAnswer.includes("preco atual") ||
+    normalizedAnswer.includes("ema rapida") ||
+    normalizedAnswer.includes("ema lenta")
+  );
+}
+
+function hasWhereToBuyAnswer(answer: string): boolean {
+  const normalizedAnswer = normalizeText(answer);
+
+  return (
+    normalizedAnswer.includes("voce pode comprar") ||
+    normalizedAnswer.includes("onde comprar") ||
+    normalizedAnswer.includes("corretora") ||
+    normalizedAnswer.includes("exchange") ||
+    normalizedAnswer.includes("dex") ||
+    normalizedAnswer.includes("fontes verificadas") ||
+    normalizedAnswer.includes("contrato identificado") ||
+    normalizedAnswer.includes("pares encontrados") ||
+    normalizedAnswer.includes("pesquisa global em tempo real")
+  );
+}
+
+function hasAirdropStructuredAnswer(answer: string): boolean {
+  const normalizedAnswer = normalizeText(answer);
+
+  return (
+    normalizedAnswer.includes("airdrop") ||
+    normalizedAnswer.includes("retroativo") ||
+    normalizedAnswer.includes("elegibilidade") ||
+    normalizedAnswer.includes("quest") ||
+    normalizedAnswer.includes("radar de airdrops")
+  );
+}
+
+function shouldForceWhereToBuyFallback(message: string, completion: OpenRouterChatCompletion): boolean {
+  const normalizedMessage = normalizeText(message);
+
+  if (!hasWhereToBuyIntent(normalizedMessage)) {
+    return false;
+  }
+
+  const usedDiscoveryTool =
+    completion.toolCallsUsed.includes("search_token_listings_dexscreener") ||
+    completion.toolCallsUsed.includes("search_web_realtime");
+
+  if (usedDiscoveryTool && hasWhereToBuyAnswer(completion.answer)) {
+    return false;
+  }
+
+  if (hasMisroutedQuoteTemplateAnswer(completion.answer) || hasGenericLimitationAnswer(completion.answer)) {
+    return true;
+  }
+
+  return !hasWhereToBuyAnswer(completion.answer);
+}
+
+function shouldForceAirdropFallback(message: string, completion: OpenRouterChatCompletion): boolean {
+  if (!hasAirdropIntent(message)) {
+    return false;
+  }
+
+  if (hasExplicitPriceOrChartIntent(message)) {
+    return false;
+  }
+
+  if (
+    completion.toolCallsUsed.includes("get_airdrop_opportunities") &&
+    hasAirdropStructuredAnswer(completion.answer) &&
+    !hasMisroutedQuoteTemplateAnswer(completion.answer)
+  ) {
+    return false;
+  }
+
+  if (hasMisroutedQuoteTemplateAnswer(completion.answer) || hasGenericLimitationAnswer(completion.answer)) {
+    return true;
+  }
+
+  return !hasAirdropStructuredAnswer(completion.answer);
 }
 
 function shouldForceChartFallback(message: string, completion: OpenRouterChatCompletion): boolean {
@@ -2591,6 +2731,9 @@ export class CopilotChatService {
   public async chat(input: CopilotChatInput): Promise<OpenRouterChatCompletion> {
     const preparedInput = this.withDefaultSystemPrompt(input);
     const conversationMessages = await this.buildConversationMessages(preparedInput, input.sessionId);
+    const intentContextMessage = this.buildIntentContextMessage(preparedInput.message, conversationMessages);
+    const latestUserMessage = this.resolveLatestUserMessage(intentContextMessage, conversationMessages);
+    const scopedTools = this.resolveToolsForMessage(latestUserMessage);
     const completion = await openRouterChatAdapter.createCompletionWithTools(
       {
         maxTokens: preparedInput.maxTokens,
@@ -2598,13 +2741,12 @@ export class CopilotChatService {
         systemPrompt: preparedInput.systemPrompt,
         temperature: preparedInput.temperature,
       },
-      copilotTools,
+      scopedTools,
     );
-    const intentContextMessage = this.buildIntentContextMessage(preparedInput.message, conversationMessages);
     const completionWithFallback = await this.applyIntentFallback(
       {
         ...preparedInput,
-        message: intentContextMessage,
+        message: latestUserMessage,
       },
       completion,
       conversationMessages,
@@ -2649,6 +2791,40 @@ export class CopilotChatService {
       ...input,
       systemPrompt: `${copilotDefaultSystemPrompt}\n\nContexto adicional do usuario:\n${trimmedCustomPrompt}`,
     };
+  }
+
+  private resolveLatestUserMessage(
+    fallbackMessage: string,
+    conversationMessages: OpenRouterConversationMessage[],
+  ): string {
+    for (let index = conversationMessages.length - 1; index >= 0; index -= 1) {
+      const message = conversationMessages[index];
+
+      if (message?.role === "user" && message.content.trim().length > 0) {
+        return message.content.trim();
+      }
+    }
+
+    return fallbackMessage.trim();
+  }
+
+  private resolveToolsForMessage(message: string): OpenRouterToolDefinition[] {
+    const normalizedMessage = normalizeText(message);
+    const hasExplicitPriceIntent = hasExplicitPriceOrChartIntent(message);
+
+    if (hasWhereToBuyIntent(normalizedMessage)) {
+      return copilotTools.filter((tool) => copilotWhereToBuyToolNames.has(tool.name));
+    }
+
+    if (hasAirdropIntent(message) && !hasExplicitPriceIntent) {
+      return copilotTools.filter((tool) => copilotAirdropToolNames.has(tool.name));
+    }
+
+    if ((hasMemeAlertPayloadIntent(message) || hasInstitutionalFraudIntent(message)) && !hasExplicitPriceIntent) {
+      return copilotTools.filter((tool) => copilotInstitutionalRiskToolNames.has(tool.name));
+    }
+
+    return copilotTools;
   }
 
   private async buildConversationMessages(
@@ -2763,9 +2939,11 @@ export class CopilotChatService {
     completion: OpenRouterChatCompletion,
     conversationMessages: OpenRouterConversationMessage[],
   ): Promise<OpenRouterChatCompletion> {
-    if (shouldForceChartFallback(input.message, completion)) {
+    const operativeMessage = this.resolveLatestUserMessage(input.message, conversationMessages);
+
+    if (shouldForceWhereToBuyFallback(operativeMessage, completion)) {
       try {
-        const fallbackAnswer = await this.buildChartAnalysisFallback(input.message);
+        const fallbackAnswer = await this.buildBrokerIntegrationFallback(operativeMessage, conversationMessages);
 
         return {
           ...completion,
@@ -2776,15 +2954,33 @@ export class CopilotChatService {
           {
             err: error,
           },
-          "Failed to force chart analysis fallback",
+          "Failed to force where-to-buy fallback",
         );
       }
     }
 
-    if (shouldForceInstitutionalFraudFallback(input.message, completion)) {
+    if (shouldForceAirdropFallback(operativeMessage, completion)) {
+      try {
+        const fallbackAnswer = await this.buildAirdropIntelligenceFallback(operativeMessage);
+
+        return {
+          ...completion,
+          answer: fallbackAnswer,
+        };
+      } catch (error) {
+        logger.warn(
+          {
+            err: error,
+          },
+          "Failed to force airdrop fallback",
+        );
+      }
+    }
+
+    if (shouldForceInstitutionalFraudFallback(operativeMessage, completion)) {
       try {
         const fallbackAnswer = await this.buildInstitutionalFraudFallback(
-          input.message,
+          operativeMessage,
           conversationMessages,
         );
 
@@ -2802,7 +2998,25 @@ export class CopilotChatService {
       }
     }
 
-    if (shouldForceGeneralAssistantFallback(input.message, completion)) {
+    if (shouldForceChartFallback(operativeMessage, completion)) {
+      try {
+        const fallbackAnswer = await this.buildChartAnalysisFallback(operativeMessage);
+
+        return {
+          ...completion,
+          answer: fallbackAnswer,
+        };
+      } catch (error) {
+        logger.warn(
+          {
+            err: error,
+          },
+          "Failed to force chart analysis fallback",
+        );
+      }
+    }
+
+    if (shouldForceGeneralAssistantFallback(operativeMessage, completion)) {
       try {
         const fallbackAnswer = await this.buildGeneralAssistantFallback(input, conversationMessages);
 
@@ -2824,7 +3038,7 @@ export class CopilotChatService {
       return completion;
     }
 
-    if (hasMarketSummaryIntent(input.message)) {
+    if (hasMarketSummaryIntent(operativeMessage)) {
       try {
         const fallbackAnswer = await this.buildMarketSummaryFallback();
 
@@ -2844,9 +3058,9 @@ export class CopilotChatService {
       }
     }
 
-    if (hasAirdropIntent(input.message)) {
+    if (hasAirdropIntent(operativeMessage)) {
       try {
-        const fallbackAnswer = await this.buildAirdropIntelligenceFallback(input.message);
+        const fallbackAnswer = await this.buildAirdropIntelligenceFallback(operativeMessage);
 
         return {
           ...completion,
@@ -2862,7 +3076,7 @@ export class CopilotChatService {
       }
     }
 
-    if (hasMonitoringPlanIntent(input.message)) {
+    if (hasMonitoringPlanIntent(operativeMessage)) {
       try {
         const fallbackAnswer = await this.buildMonitoringPlanFallback();
 
@@ -2880,9 +3094,9 @@ export class CopilotChatService {
       }
     }
 
-    if (hasChartAnalysisIntent(input.message)) {
+    if (hasChartAnalysisIntent(operativeMessage)) {
       try {
-        const fallbackAnswer = await this.buildChartAnalysisFallback(input.message);
+        const fallbackAnswer = await this.buildChartAnalysisFallback(operativeMessage);
 
         return {
           ...completion,
@@ -2898,9 +3112,9 @@ export class CopilotChatService {
       }
     }
 
-    if (hasBrokerIntegrationIntent(input.message)) {
+    if (hasBrokerIntegrationIntent(operativeMessage)) {
       try {
-        const fallbackAnswer = await this.buildBrokerIntegrationFallback(input.message, conversationMessages);
+        const fallbackAnswer = await this.buildBrokerIntegrationFallback(operativeMessage, conversationMessages);
 
         return {
           ...completion,
@@ -2916,9 +3130,9 @@ export class CopilotChatService {
       }
     }
 
-    if (hasRiskAnalysisIntent(input.message)) {
+    if (hasRiskAnalysisIntent(operativeMessage)) {
       try {
-        const fallbackAnswer = await this.buildShortTermRiskFallback(input.message);
+        const fallbackAnswer = await this.buildShortTermRiskFallback(operativeMessage);
 
         return {
           ...completion,
@@ -3127,6 +3341,8 @@ export class CopilotChatService {
   }
 
   private async buildAirdropIntelligenceFallback(message: string): Promise<string> {
+    const normalizedMessage = normalizeText(message);
+    const wantsFourBlocks = /(?:^|\s)(4|quatro)\s+blocos?/.test(normalizedMessage);
     const focusQuery = resolveAirdropFocusQuery(message);
     const airdropRadar = await airdropIntelligenceService.getOpportunities({
       includeSpeculative: true,
@@ -3136,6 +3352,16 @@ export class CopilotChatService {
     });
 
     if (airdropRadar.opportunities.length === 0) {
+      if (wantsFourBlocks) {
+        return [
+          "Leitura em 4 blocos para airdrops (sem oportunidades pontuadas no corte atual).",
+          "Bloco 1 - Leitura de momentum: sem tendencia forte confirmada nas fontes desta rodada.",
+          "Bloco 2 - Risco de liquidez: sem dados suficientes para estimativa confiavel de profundidade.",
+          "Bloco 3 - Elegibilidade: nenhum projeto com criterio claro de snapshot confirmado.",
+          "Bloco 4 - Plano de execucao: reduzir minScore para 20-25, ampliar universo de chains e revalidar em nova varredura.",
+        ].join("\n");
+      }
+
       return [
         "Radar de airdrops (multi-fonte) sem oportunidades pontuadas no corte atual.",
         focusQuery ? `Filtro aplicado: ${focusQuery}.` : "Filtro aplicado: geral.",
@@ -3153,6 +3379,36 @@ export class CopilotChatService {
 
         return `${index + 1}. ${opportunity.project} | score ${opportunity.score} | confianca ${formatAirdropConfidenceLabel(opportunity.confidence)} | chain ${chainLabel} | reward ${formatAirdropRewardTypeLabel(opportunity.rewardType)} | tarefas: ${tasksLabel} | fontes: ${opportunity.sources.join(", ")} | link: ${opportunity.url}`;
       });
+
+    if (wantsFourBlocks) {
+      const momentumHighlights = airdropRadar.opportunities
+        .slice(0, 3)
+        .map((opportunity) => `${opportunity.project} (score ${opportunity.score})`)
+        .join(" | ");
+      const liquidityHighlights = airdropRadar.opportunities
+        .slice(0, 3)
+        .map((opportunity) => {
+          const tasksCount = opportunity.tasks.length;
+          return `${opportunity.project}: ${tasksCount} tarefa(s) com friccao operacional ${tasksCount >= 4 ? "alta" : "moderada"}`;
+        })
+        .join(" | ");
+      const eligibilityHighlights = airdropRadar.opportunities
+        .slice(0, 3)
+        .map((opportunity) => `${opportunity.project}: confianca ${formatAirdropConfidenceLabel(opportunity.confidence)}`)
+        .join(" | ");
+      const executionHighlights = airdropRadar.opportunities
+        .slice(0, 3)
+        .map((opportunity) => `${opportunity.project}: ${opportunity.url}`)
+        .join(" | ");
+
+      return [
+        "Leitura em 4 blocos para airdrops.",
+        `Bloco 1 - Leitura de momentum: ${momentumHighlights}.`,
+        `Bloco 2 - Risco de liquidez: ${liquidityHighlights}.`,
+        `Bloco 3 - Elegibilidade: ${eligibilityHighlights}.`,
+        `Bloco 4 - Plano de execucao: priorize as 2 maiores notas, valide fonte oficial e execute tarefas com menor custo de gas primeiro. Referencias: ${executionHighlights}.`,
+      ].join("\n");
+    }
 
     return [
       "Radar de airdrops (multi-fonte, leitura objetiva e sem promessa de reward).",
@@ -3207,8 +3463,17 @@ export class CopilotChatService {
     const operativeMessage = extractLatestUserTurn(message);
     const broker = resolveBrokerFromMessage(operativeMessage);
     const normalizedMessage = normalizeText(operativeMessage);
-    const assetHint = resolvePrimaryAssetHint(operativeMessage);
+    const hasAssetHint = hasResolvableAssetHint(operativeMessage);
+    const assetHint = hasAssetHint ? resolvePrimaryAssetHint(operativeMessage) : "token";
     const asksWhereToBuy = hasWhereToBuyIntent(normalizedMessage);
+    const historyLinks = extractRecentUserLinks(conversationMessages);
+
+    if (asksWhereToBuy && !hasAssetHint && historyLinks.length === 0) {
+      return [
+        "Para te dizer exatamente onde comprar, preciso do nome do ativo, ticker ou contrato.",
+        "Envie no formato: nome/ticker (ex.: ROBOTMONEY) ou contrato (ex.: 0x...).",
+      ].join("\n");
+    }
 
     if (asksWhereToBuy) {
       try {

@@ -1125,6 +1125,144 @@ void it("POST /v1/copilot/chat aplica fallback local para radar de airdrops", as
   assert.doesNotMatch(body.data.answer, /Nao tenho informacoes suficientes sobre airdrops/);
 });
 
+void it("POST /v1/copilot/chat nao usa template de cotacao quando pedido e analise de airdrop em Solana", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    "Analise tecnica objetiva de Solana. Preco atual, EMA rapida e EMA lenta apontam alta.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-airdrop-misroute-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 20,
+              prompt_tokens: 32,
+              total_tokens: 52,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("airdrops.io")) {
+      return Promise.resolve(
+        new Response(
+          `<a href="/solana-quest-airdrop">Solana Quest Airdrop</a><p>swap + stake + activity</p>`,
+          {
+            headers: {
+              "content-type": "text/html",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("airdropalert.com")) {
+      return Promise.resolve(
+        new Response(
+          `<a href="/solana-retroactive-airdrop">Solana Retroactive Airdrop</a>`,
+          {
+            headers: {
+              "content-type": "text/html",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.llama.fi/protocols")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify([
+            {
+              chain: "Solana",
+              gecko_id: null,
+              name: "Solana Quest",
+              tvl: 42000000,
+            },
+          ]),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("/search/trending")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            coins: [
+              {
+                item: {
+                  id: "solana-quest",
+                  market_cap_rank: 321,
+                  name: "Solana Quest",
+                  symbol: "SQT",
+                },
+              },
+            ],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message:
+        "Analisar um Airdrop na rede Solana em 4 blocos: leitura de momentum, risco de liquidez, elegibilidade e plano de execucao.",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-airdrop-misroute-001");
+  assert.match(body.data.answer, /Leitura em 4 blocos para airdrops/);
+  assert.match(body.data.answer, /Bloco 1 - Leitura de momentum/);
+  assert.match(body.data.answer, /Bloco 2 - Risco de liquidez/);
+  assert.match(body.data.answer, /Bloco 3 - Elegibilidade/);
+  assert.match(body.data.answer, /Bloco 4 - Plano de execucao/);
+  assert.doesNotMatch(body.data.answer, /Analise tecnica objetiva de Solana/);
+  assert.doesNotMatch(body.data.answer, /EMA rapida/);
+});
+
 void it("POST /v1/copilot/chat executa tool de insights de grafico", async () => {
   mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
 
@@ -1568,6 +1706,120 @@ void it("POST /v1/copilot/chat prioriza DexScreener para responder onde comprar 
   assert.match(body.data.answer, /DexScreener \(API on-chain em tempo real\)/);
   assert.match(body.data.answer, /Voce pode comprar BMFOUR na Uniswap \(Rede Base\)\./);
   assert.doesNotMatch(body.data.answer, /pesquise no google/i);
+});
+
+void it("POST /v1/copilot/chat aplica fallback de where-to-buy e bloqueia cotacao alucinada de ativo nao relacionado", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let openRouterCalls = 0;
+  let dexScreenerCalls = 0;
+  let duckDuckGoCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    "Chainlink cotado a US$ 16.31, com viés altista e suporte em US$ 15.80.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-where-buy-misroute-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 18,
+              prompt_tokens: 29,
+              total_tokens: 47,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.dexscreener.com/latest/dex/search/")) {
+      dexScreenerCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            pairs: [],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.startsWith("https://api.duckduckgo.com/?")) {
+      duckDuckGoCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            AbstractText: "",
+            AbstractURL: "",
+            Heading: "",
+            RelatedTopics: [
+              {
+                FirstURL: "https://dexscreener.com/search?q=robotmoney",
+                Text: "ROBOTMONEY token listings and trading references.",
+              },
+            ],
+            Results: [],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Onde compro a ROBOTMONEY?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 1);
+  assert.equal(dexScreenerCalls, 1);
+  assert.equal(duckDuckGoCalls, 1);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-where-buy-misroute-001");
+  assert.match(body.data.answer, /Pesquisa global em tempo real para ROBOTMONEY/);
+  assert.match(body.data.answer, /Provider usado: duckduckgo/);
+  assert.doesNotMatch(body.data.answer, /Chainlink cotado/);
+  assert.doesNotMatch(body.data.answer, /US\$ 16\.31/);
 });
 
 void it("POST /v1/copilot/chat usa busca web global quando DexScreener nao encontra listing", async () => {
@@ -2137,7 +2389,7 @@ void it("POST /v1/copilot/chat executa tool de busca web global", async () => {
               {
                 message: {
                   content:
-                    "BMFOUR aparece com referencias de negociacao em fontes de mercado e monitoramento de pools na Base.",
+                    "Onde comprar BMFOUR: voce pode comprar em pools monitoradas na Base, com fontes verificadas de listagem e liquidez.",
                   role: "assistant",
                 },
               },
@@ -2210,7 +2462,7 @@ void it("POST /v1/copilot/chat executa tool de busca web global", async () => {
   assert.equal(body.status, "success");
   assert.equal(
     body.data.answer,
-    "BMFOUR aparece com referencias de negociacao em fontes de mercado e monitoramento de pools na Base.",
+    "Onde comprar BMFOUR: voce pode comprar em pools monitoradas na Base, com fontes verificadas de listagem e liquidez.",
   );
   assert.deepEqual(body.data.toolCallsUsed, ["search_web_realtime"]);
   assert.equal(body.data.responseId, "gen-tool-web-002");
@@ -2280,7 +2532,7 @@ void it("POST /v1/copilot/chat prioriza Tavily quando configurado e ordena fonte
             choices: [
               {
                 message: {
-                  content: "Busca Tavily concluida com fontes priorizadas por confianca.",
+                  content: "Onde comprar BMFOUR: fontes verificadas no Tavily priorizam listagens confiaveis por qualidade de origem.",
                   role: "assistant",
                 },
               },
