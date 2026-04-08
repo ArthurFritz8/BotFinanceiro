@@ -1270,6 +1270,28 @@ void it("POST /v1/copilot/chat nao usa template de cotacao quando pedido e anali
 
 void it("POST /v1/copilot/chat executa tool de insights de grafico", async () => {
   mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+  const compliantInstitutionalAnswer = [
+    "# Framework institucional SMC para Bitcoin (7 dias, modo delayed)",
+    "",
+    "## Contexto Quantitativo",
+    "- Estrutura com BOS bullish e CHoCH none, com suporte tecnico respeitado.",
+    "",
+    "## Cenarios Institucionais",
+    "### Cenario Bull:",
+    "- Probabilidade 64%.",
+    "- Gatilho acima de 67200 USD.",
+    "- Invalida abaixo de 66700 USD.",
+    "- Alvos: TP1 67950 USD | TP2 68640 USD.",
+    "### Cenario Bear:",
+    "- Probabilidade 36%.",
+    "- Gatilho abaixo de 65980 USD.",
+    "- Invalida acima de 66480 USD.",
+    "- Alvos: TP1 65200 USD | TP2 64480 USD.",
+    "",
+    "## Gestao de risco dinamica",
+    "- Position Size Bull e Position Size Bear definidos pela distancia entre entrada e stop.",
+    "- Regra institucional: operar apenas cenarios com relacao risco/retorno minima de 1.5.",
+  ].join("\n");
 
   let openRouterCalls = 0;
   let chartCalls = 0;
@@ -1328,8 +1350,7 @@ void it("POST /v1/copilot/chat executa tool de insights de grafico", async () =>
             choices: [
               {
                 message: {
-                  content:
-                    "Leitura SMC institucional: estrutura de alta com BOS bullish e CHoCH none. Cenario Bull: Probabilidade 64%. Gatilho acima de 67.200 USD com TP1 67.950 e TP2 68.640. Cenario Bear: Probabilidade 36%. Gatilho abaixo de 65.980 USD com TP1 65.200 e TP2 64.480. Gestao de risco dinamica: risco conservador de 1% com Position Size Bull e Position Size Bear conforme distancia entre entrada e stop.",
+                  content: compliantInstitutionalAnswer,
                   role: "assistant",
                 },
               },
@@ -1397,10 +1418,11 @@ void it("POST /v1/copilot/chat executa tool de insights de grafico", async () =>
 
   const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
   assert.equal(body.status, "success");
-  assert.equal(
-    body.data.answer,
-    "Leitura SMC institucional: estrutura de alta com BOS bullish e CHoCH none. Cenario Bull: Probabilidade 64%. Gatilho acima de 67.200 USD com TP1 67.950 e TP2 68.640. Cenario Bear: Probabilidade 36%. Gatilho abaixo de 65.980 USD com TP1 65.200 e TP2 64.480. Gestao de risco dinamica: risco conservador de 1% com Position Size Bull e Position Size Bear conforme distancia entre entrada e stop.",
-  );
+  assert.match(body.data.answer, /Framework institucional SMC para Bitcoin/);
+  assert.match(body.data.answer, /## Contexto Quantitativo/);
+  assert.match(body.data.answer, /## Cenarios Institucionais/);
+  assert.match(body.data.answer, /## Gestao de risco dinamica/);
+  assert.match(body.data.answer, /Relacao risco\/retorno \(TP1\):/);
   assert.deepEqual(body.data.toolCallsUsed, ["get_crypto_chart_insights"]);
   assert.equal(body.data.responseId, "gen-tool-chart-002");
   assert.equal(body.data.usage.totalTokens, 74);
@@ -1542,6 +1564,158 @@ void it("POST /v1/copilot/chat aplica fallback quando probabilidades bull/bear n
   assert.doesNotMatch(body.data.answer, /Probabilidade 20%/);
 });
 
+void it("POST /v1/copilot/chat aplica fallback quando relacao risco/retorno fica abaixo de 1.5", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let openRouterCalls = 0;
+  let chartCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+
+      if (openRouterCalls === 1) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content: null,
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        function: {
+                          arguments: '{"assetId":"bitcoin","currency":"usd","range":"7d"}',
+                          name: "get_crypto_chart_insights",
+                        },
+                        id: "call_chart_low_rr_1",
+                        type: "function",
+                      },
+                    ],
+                  },
+                },
+              ],
+              id: "gen-tool-chart-low-rr-001",
+              model: "google/gemini-1.5-flash",
+              usage: {
+                completion_tokens: 21,
+                prompt_tokens: 33,
+                total_tokens: 54,
+              },
+            }),
+            {
+              headers: {
+                "content-type": "application/json",
+              },
+              status: 200,
+            },
+          ),
+        );
+      }
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: [
+                    "# Framework institucional SMC para Bitcoin (7 dias, modo delayed)",
+                    "",
+                    "## Contexto Quantitativo",
+                    "- Leitura tatica valida no curto prazo.",
+                    "",
+                    "## Cenarios Institucionais",
+                    "### Cenario Bull:",
+                    "- Probabilidade 55%.",
+                    "- Gatilho acima de 67200 USD.",
+                    "- Invalida abaixo de 67000 USD.",
+                    "- Alvos: TP1 67400 USD | TP2 67650 USD.",
+                    "### Cenario Bear:",
+                    "- Probabilidade 45%.",
+                    "- Gatilho abaixo de 65980 USD.",
+                    "- Invalida acima de 66180 USD.",
+                    "- Alvos: TP1 65850 USD | TP2 65640 USD.",
+                    "",
+                    "## Gestao de risco dinamica",
+                    "- Risco tatico curto para execucao rapida.",
+                  ].join("\\n"),
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-tool-chart-low-rr-002",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 25,
+              prompt_tokens: 49,
+              total_tokens: 74,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.coingecko.com/api/v3/coins/bitcoin/market_chart")) {
+      chartCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            prices: [
+              [1712000000000, 66000],
+              [1712003600000, 66420],
+              [1712007200000, 66650],
+              [1712010800000, 66880],
+              [1712014400000, 67120],
+              [1712018000000, 67340],
+            ],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Analise o grafico institucional de 7 dias do bitcoin.",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 2);
+  assert.ok(chartCalls >= 1);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-tool-chart-low-rr-002");
+  assert.deepEqual(body.data.toolCallsUsed, ["get_crypto_chart_insights"]);
+  assert.match(body.data.answer, /Confluencia SMC:/);
+  assert.match(body.data.answer, /Relacao risco\/retorno \(TP1\):/);
+  assert.match(body.data.answer, /## Checklist de Execucao/);
+  assert.doesNotMatch(body.data.answer, /Risco tatico curto para execucao rapida/);
+});
+
 void it("POST /v1/copilot/chat aplica fallback live para pergunta de comprar/vender", async () => {
   mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
 
@@ -1648,7 +1822,7 @@ void it("POST /v1/copilot/chat aplica fallback live para pergunta de comprar/ven
   const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
   assert.equal(body.status, "success");
   assert.equal(body.data.responseId, "gen-live-fallback-001");
-  assert.match(body.data.answer, /sinal base/);
+  assert.match(body.data.answer, /Sinal base/);
   assert.match(body.data.answer, /modo live/);
   assert.match(body.data.answer, /Confluencia SMC:/);
   assert.match(body.data.answer, /Cenario Bull:/);

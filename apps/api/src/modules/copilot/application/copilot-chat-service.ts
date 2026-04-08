@@ -141,6 +141,7 @@ const copilotDefaultSystemPrompt = [
   "Para resumo de mercado cripto, use get_crypto_market_overview; para preco/comparacao use get_crypto_spot_price ou get_crypto_multi_spot_price; para grafico/TA/SMC use get_crypto_chart_insights.",
   "Framework institucional para grafico (obrigatorio): entregue SEMPRE Cenario Bull e Cenario Bear com probabilidades complementares somando 100%, gatilho de ativacao e alvos TP1/TP2.",
   "Formato obrigatorio para resposta de grafico: inclua explicitamente os blocos 'Cenario Bull:', 'Cenario Bear:' e 'Gestao de risco dinamica'.",
+  "Apresente resposta de grafico em bloco Markdown premium, com secoes: '## Contexto Quantitativo', '## Cenarios Institucionais' e '## Gestao de Risco Dinamica'.",
   "No bloco SMC/Wyckoff, interprete suporte/resistencia e swing highs/lows como zonas de liquidez (Order Blocks) e explicite sinais de BOS/CHoCH quando presentes.",
   "No bloco de gestao de risco, assuma banca teorica de referencia e calcule Position Size maximo com risco conservador de 1% entre entrada e stop.",
   "Para airdrop, retroativo, testnet, quests/farming ou alerta de memecoin (Token/Chain/Hype Score), nao responda com cotacao generica de BTC/ETH/SOL; use contexto e get_airdrop_opportunities.",
@@ -1352,6 +1353,156 @@ function hasInstitutionalChartLayoutAnswer(answer: string): boolean {
   return hasBullScenario && hasBearScenario && hasRiskBlock;
 }
 
+function hasInstitutionalChartMarkdownAnswer(answer: string): boolean {
+  const normalizedAnswer = normalizeText(answer);
+  const hasContextSection =
+    normalizedAnswer.includes("## contexto quantitativo") ||
+    normalizedAnswer.includes("# framework institucional smc");
+  const hasScenarioSection =
+    normalizedAnswer.includes("## cenarios institucionais") ||
+    (normalizedAnswer.includes("### cenario bull") && normalizedAnswer.includes("### cenario bear"));
+  const hasRiskSection = normalizedAnswer.includes("## gestao de risco dinamica");
+
+  return hasContextSection && hasScenarioSection && hasRiskSection;
+}
+
+function parseFlexibleLocalizedNumber(token: string): number | null {
+  const compactToken = token.replace(/\s+/g, "").replace(/[^0-9,.-]/g, "");
+
+  if (compactToken.length === 0) {
+    return null;
+  }
+
+  const dotCount = (compactToken.match(/\./g) ?? []).length;
+  const commaCount = (compactToken.match(/,/g) ?? []).length;
+  let normalizedToken = compactToken;
+
+  if (dotCount > 0 && commaCount > 0) {
+    const lastDotIndex = compactToken.lastIndexOf(".");
+    const lastCommaIndex = compactToken.lastIndexOf(",");
+    const decimalSeparator = lastDotIndex > lastCommaIndex ? "." : ",";
+    const thousandsSeparator = decimalSeparator === "." ? "," : ".";
+    normalizedToken = compactToken.split(thousandsSeparator).join("");
+
+    if (decimalSeparator === ",") {
+      const decimalIndex = normalizedToken.lastIndexOf(",");
+
+      if (decimalIndex >= 0) {
+        normalizedToken = `${normalizedToken.slice(0, decimalIndex).replace(/,/g, "")}.${normalizedToken
+          .slice(decimalIndex + 1)
+          .replace(/,/g, "")}`;
+      }
+    }
+  } else if (commaCount > 0) {
+    if (commaCount > 1) {
+      normalizedToken = compactToken.replace(/,/g, "");
+    } else {
+      const decimalPartLength = compactToken.split(",")[1]?.length ?? 0;
+      normalizedToken = decimalPartLength === 3 ? compactToken.replace(/,/g, "") : compactToken.replace(",", ".");
+    }
+  } else if (dotCount > 0) {
+    if (dotCount > 1) {
+      normalizedToken = compactToken.replace(/\./g, "");
+    } else {
+      const decimalPartLength = compactToken.split(".")[1]?.length ?? 0;
+      normalizedToken = decimalPartLength === 3 ? compactToken.replace(/\./g, "") : compactToken;
+    }
+  }
+
+  const parsedValue = Number(normalizedToken);
+
+  if (!Number.isFinite(parsedValue)) {
+    return null;
+  }
+
+  return parsedValue;
+}
+
+function extractScenarioSlice(normalizedAnswer: string, scenario: "bear" | "bull"): string | null {
+  const pattern =
+    scenario === "bull"
+      ? /(?:^|\n)\s*(?:#+\s*)?cenario\s+bull\s*:?([\s\S]*?)(?=(?:^|\n)\s*(?:#+\s*)?cenario\s+bear\s*:|$)/m
+      : /(?:^|\n)\s*(?:#+\s*)?cenario\s+bear\s*:?([\s\S]*?)(?=(?:^|\n)\s*(?:#+\s*)?(?:gestao de risco dinamica|checklist de execucao|nota)\b|$)/m;
+  const match = normalizedAnswer.match(pattern);
+  const scenarioSlice = match?.[1]?.trim() ?? "";
+
+  return scenarioSlice.length > 0 ? scenarioSlice : null;
+}
+
+function extractScenarioLevels(scenarioSlice: string): {
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit1: number;
+} | null {
+  const entryToken = scenarioSlice.match(/gatilho[^0-9]{0,40}([0-9][0-9\.,\s]{0,24})/)?.[1] ?? null;
+  const stopToken = scenarioSlice.match(/invalida[^0-9]{0,40}([0-9][0-9\.,\s]{0,24})/)?.[1] ?? null;
+  const takeProfitToken = scenarioSlice.match(/tp1[^0-9]{0,40}([0-9][0-9\.,\s]{0,24})/)?.[1] ?? null;
+
+  if (entryToken === null || stopToken === null || takeProfitToken === null) {
+    return null;
+  }
+
+  const entryPrice = parseFlexibleLocalizedNumber(entryToken);
+  const stopLoss = parseFlexibleLocalizedNumber(stopToken);
+  const takeProfit1 = parseFlexibleLocalizedNumber(takeProfitToken);
+
+  if (entryPrice === null || stopLoss === null || takeProfit1 === null) {
+    return null;
+  }
+
+  return {
+    entryPrice,
+    stopLoss,
+    takeProfit1,
+  };
+}
+
+function computeScenarioRiskRewardRatioFromAnswer(levels: {
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit1: number;
+}): number | null {
+  const risk = Math.abs(levels.entryPrice - levels.stopLoss);
+
+  if (!Number.isFinite(risk) || risk <= 0) {
+    return null;
+  }
+
+  const reward = Math.abs(levels.takeProfit1 - levels.entryPrice);
+
+  if (!Number.isFinite(reward)) {
+    return null;
+  }
+
+  return reward / risk;
+}
+
+function hasMinimumInstitutionalRiskRewardAnswer(answer: string, minimumRatio = 1.5): boolean {
+  const normalizedAnswer = normalizeText(answer);
+  const bullScenario = extractScenarioSlice(normalizedAnswer, "bull");
+  const bearScenario = extractScenarioSlice(normalizedAnswer, "bear");
+
+  if (bullScenario === null || bearScenario === null) {
+    return false;
+  }
+
+  const bullLevels = extractScenarioLevels(bullScenario);
+  const bearLevels = extractScenarioLevels(bearScenario);
+
+  if (bullLevels === null || bearLevels === null) {
+    return false;
+  }
+
+  const bullRatio = computeScenarioRiskRewardRatioFromAnswer(bullLevels);
+  const bearRatio = computeScenarioRiskRewardRatioFromAnswer(bearLevels);
+
+  if (bullRatio === null || bearRatio === null) {
+    return false;
+  }
+
+  return bullRatio + 0.001 >= minimumRatio && bearRatio + 0.001 >= minimumRatio;
+}
+
 function parseScenarioProbability(normalizedAnswer: string, scenario: "bear" | "bull"): number | null {
   const pattern =
     scenario === "bull"
@@ -1453,7 +1604,9 @@ function shouldForceChartFallback(message: string, completion: OpenRouterChatCom
   const usedChartTool = completion.toolCallsUsed.includes("get_crypto_chart_insights");
   const normalizedAnswer = normalizeText(completion.answer);
   const hasInstitutionalLayout = hasInstitutionalChartLayoutAnswer(completion.answer);
+  const hasInstitutionalMarkdown = hasInstitutionalChartMarkdownAnswer(completion.answer);
   const hasConsistentProbabilities = hasConsistentDualScenarioProbabilities(completion.answer);
+  const hasMinimumRiskReward = hasMinimumInstitutionalRiskRewardAnswer(completion.answer);
   const hasTechnicalMarkers =
     normalizedAnswer.includes("suporte") ||
     normalizedAnswer.includes("resistencia") ||
@@ -1482,7 +1635,9 @@ function shouldForceChartFallback(message: string, completion: OpenRouterChatCom
     !hasTechnicalMarkers ||
     isRiskOnlyAnswer ||
     !hasInstitutionalLayout ||
-    !hasConsistentProbabilities
+    !hasInstitutionalMarkdown ||
+    !hasConsistentProbabilities ||
+    !hasMinimumRiskReward
   );
 }
 
@@ -1808,6 +1963,30 @@ function computePositionSize(referenceBankUsd: number, entryPrice: number, stopL
     priceRiskPerUnit,
     riskAmountUsd,
   };
+}
+
+function computeRiskRewardRatio(entryPrice: number, stopLoss: number, takeProfit: number): number | null {
+  const risk = Math.abs(entryPrice - stopLoss);
+
+  if (!Number.isFinite(risk) || risk <= 0) {
+    return null;
+  }
+
+  const reward = Math.abs(takeProfit - entryPrice);
+
+  if (!Number.isFinite(reward)) {
+    return null;
+  }
+
+  return reward / risk;
+}
+
+function formatRiskRewardRatio(ratio: number | null): string {
+  if (ratio === null) {
+    return "n/d";
+  }
+
+  return `${ratio.toFixed(2)}R`;
 }
 
 function formatIntervalMinutes(intervalSeconds: number): number {
@@ -3664,13 +3843,18 @@ export class CopilotChatService {
       chart.insights.tradeLevels.stopLoss,
       structuralLow * (1 - atrBand * 0.35),
     );
+    const bullRiskPerUnit = Math.abs(bullTrigger - bullInvalidation);
+    const bullMinimumTp1 = bullTrigger + bullRiskPerUnit * 1.5;
+    const bullMinimumTp2 = bullTrigger + bullRiskPerUnit * 2.3;
     const bullTp1 = Math.max(
       chart.insights.tradeLevels.takeProfit1,
       bullTrigger * (1 + atrBand * 0.85),
+      bullMinimumTp1,
     );
     const bullTp2 = Math.max(
       chart.insights.tradeLevels.takeProfit2,
       bullTrigger * (1 + atrBand * 1.45),
+      bullMinimumTp2,
     );
     const bearTrigger = Math.min(
       chart.insights.tradeLevels.entryZoneLow,
@@ -3680,36 +3864,74 @@ export class CopilotChatService {
       chart.insights.resistanceLevel,
       structuralHigh * (1 + atrBand * 0.35),
     );
+    const bearRiskPerUnit = Math.abs(bearInvalidation - bearTrigger);
+    const bearMinimumTp1 = bearTrigger - bearRiskPerUnit * 1.5;
+    const bearMinimumTp2 = bearTrigger - bearRiskPerUnit * 2.3;
     const bearTp1 = Math.min(
       chart.insights.supportLevel,
       bearTrigger * (1 - atrBand * 0.85),
+      bearMinimumTp1,
     );
     const bearTp2 = Math.min(
       chart.insights.lowPrice,
       bearTrigger * (1 - atrBand * 1.45),
+      bearMinimumTp2,
     );
     const referenceBankUsd = 10_000;
     const bullPositionSizing = computePositionSize(referenceBankUsd, bullTrigger, bullInvalidation);
     const bearPositionSizing = computePositionSize(referenceBankUsd, bearTrigger, bearInvalidation);
+    const bullRiskReward = computeRiskRewardRatio(bullTrigger, bullInvalidation, bullTp1);
+    const bearRiskReward = computeRiskRewardRatio(bearTrigger, bearInvalidation, bearTp1);
     const liveSummary =
       chart.mode === "live"
         ? ` | live 24h: ${formatPercent(chart.live?.changePercent24h ?? null)} | volume 24h: ${formatCompactUsd(chart.live?.volume24h ?? null)}`
         : "";
 
     return [
-      `Framework institucional SMC para ${capitalizeAssetId(chart.assetId)} (${formatRangeLabel(chart.range)}, modo ${chart.mode}).`,
-      `Contexto quantitativo: preco ${formatSpotPrice(chart.insights.currentPrice, chart.currency)} | variacao ${chart.insights.changePercent}% | ${trendLabel} | sinal base ${tradeActionLabel} | confianca ${formatConfidenceScore(chart.insights.confidenceScore)} | provider ${chart.provider}${liveSummary} | cache ${chart.cache.state}${chart.cache.stale ? " (stale)" : ""}.`,
-      `Osciladores de apoio (nao exclusivos): RSI14 ${rsi14Label} | MACD hist ${chart.insights.macdHistogram}% | ATR ${chart.insights.atrPercent}% | momentum ${chart.insights.momentumPercent}% | volatilidade ${chart.insights.volatilityPercent}%.`,
-      `Sessao de liquidez: ${formatMarketSessionLabel(session.session)} (${session.utcWindow}, ${session.utcHour}h UTC, intensidade ${formatLiquidityHeatLabel(session.liquidityHeat)}).`,
-      `Leitura SMC & Wyckoff: ${formatStructureBiasLabel(structure.bias)} | swing high ${formatSpotPrice(structure.lastSwingHigh, chart.currency)} | swing low ${formatSpotPrice(structure.lastSwingLow, chart.currency)} | BOS ${formatStructureSignalLabel(structure.bosSignal)} | CHoCH ${formatStructureSignalLabel(structure.chochSignal)} | Order Blocks de referencia: suporte ${formatSpotPrice(chart.insights.supportLevel, chart.currency)} e resistencia ${formatSpotPrice(chart.insights.resistanceLevel, chart.currency)}.`,
-      `Confluencia SMC: ${chart.insights.smcConfluence.score}/100 (${formatConfluenceTierLabel(chart.insights.smcConfluence.tier)}) | estrutura ${chart.insights.smcConfluence.components.marketStructure}/45 | sessao ${chart.insights.smcConfluence.components.sessionLiquidity}/30 | volatilidade ${chart.insights.smcConfluence.components.volatilityRegime}/25.`,
-      `Cenario Bull: Probabilidade ${dualScenario.bullProbability}%. Gatilho acima de ${formatSpotPrice(bullTrigger, chart.currency)}. Invalida abaixo de ${formatSpotPrice(bullInvalidation, chart.currency)}. Alvos TP1 ${formatSpotPrice(bullTp1, chart.currency)} e TP2 ${formatSpotPrice(bullTp2, chart.currency)}.`,
-      `Cenario Bear: Probabilidade ${dualScenario.bearProbability}%. Gatilho abaixo de ${formatSpotPrice(bearTrigger, chart.currency)}. Invalida acima de ${formatSpotPrice(bearInvalidation, chart.currency)}. Alvos TP1 ${formatSpotPrice(bearTp1, chart.currency)} e TP2 ${formatSpotPrice(bearTp2, chart.currency)}.`,
-      `Gestao de risco dinamica (banca teorica ${formatSpotPrice(referenceBankUsd, "usd")}; risco conservador de 1% = ${formatSpotPrice(bullPositionSizing.riskAmountUsd, "usd")}).`,
-      `Position Size Bull: max ${bullPositionSizing.positionSizeUnits.toFixed(6)} unidades (nocional ~ ${formatSpotPrice(bullPositionSizing.notionalUsd, "usd")}), risco por unidade ${formatSpotPrice(bullPositionSizing.priceRiskPerUnit, chart.currency)}.`,
-      `Position Size Bear: max ${bearPositionSizing.positionSizeUnits.toFixed(6)} unidades (nocional ~ ${formatSpotPrice(bearPositionSizing.notionalUsd, "usd")}), risco por unidade ${formatSpotPrice(bearPositionSizing.priceRiskPerUnit, chart.currency)}.`,
-      "Checklist de execucao institucional: confirmar gatilho em fechamento, validar liquidez da sessao e evitar entrada com relacao risco/retorno inferior a 1.5.",
-      "Nota: leitura institucional informativa, sem recomendacao de investimento.",
+      `# Framework institucional SMC para ${capitalizeAssetId(chart.assetId)} (${formatRangeLabel(chart.range)}, modo ${chart.mode})`,
+      "",
+      "## Contexto Quantitativo",
+      `- Preco atual: ${formatSpotPrice(chart.insights.currentPrice, chart.currency)} | variacao ${chart.insights.changePercent}% | ${trendLabel}.`,
+      `- Sinal base: ${tradeActionLabel} | confianca ${formatConfidenceScore(chart.insights.confidenceScore)} | provider ${chart.provider}${liveSummary}.`,
+      `- Osciladores de apoio: RSI14 ${rsi14Label} | MACD hist ${chart.insights.macdHistogram}% | ATR ${chart.insights.atrPercent}% | momentum ${chart.insights.momentumPercent}% | volatilidade ${chart.insights.volatilityPercent}%.`,
+      `- Cache: ${chart.cache.state}${chart.cache.stale ? " (stale)" : ""}.`,
+      "",
+      "## Sessao de Liquidez",
+      `- Sessao ativa: ${formatMarketSessionLabel(session.session)} (${session.utcWindow}, ${session.utcHour}h UTC).`,
+      `- Intensidade de liquidez: ${formatLiquidityHeatLabel(session.liquidityHeat)}.`,
+      "",
+      "## Leitura SMC & Wyckoff:",
+      `- Estrutura: ${formatStructureBiasLabel(structure.bias)} | BOS ${formatStructureSignalLabel(structure.bosSignal)} | CHoCH ${formatStructureSignalLabel(structure.chochSignal)}.`,
+      `- Swing high: ${formatSpotPrice(structure.lastSwingHigh, chart.currency)} | swing low: ${formatSpotPrice(structure.lastSwingLow, chart.currency)}.`,
+      `- Order Blocks de referencia: suporte ${formatSpotPrice(chart.insights.supportLevel, chart.currency)} e resistencia ${formatSpotPrice(chart.insights.resistanceLevel, chart.currency)}.`,
+      `- Confluencia SMC: ${chart.insights.smcConfluence.score}/100 (${formatConfluenceTierLabel(chart.insights.smcConfluence.tier)}) | estrutura ${chart.insights.smcConfluence.components.marketStructure}/45 | sessao ${chart.insights.smcConfluence.components.sessionLiquidity}/30 | volatilidade ${chart.insights.smcConfluence.components.volatilityRegime}/25.`,
+      "",
+      "## Cenarios Institucionais",
+      "### Cenario Bull:",
+      `- Probabilidade ${dualScenario.bullProbability}%.`,
+      `- Gatilho acima de ${formatSpotPrice(bullTrigger, chart.currency)}.`,
+      `- Invalida abaixo de ${formatSpotPrice(bullInvalidation, chart.currency)}.`,
+      `- Alvos: TP1 ${formatSpotPrice(bullTp1, chart.currency)} | TP2 ${formatSpotPrice(bullTp2, chart.currency)}.`,
+      `- Relacao risco/retorno (TP1): ${formatRiskRewardRatio(bullRiskReward)}.`,
+      "### Cenario Bear:",
+      `- Probabilidade ${dualScenario.bearProbability}%.`,
+      `- Gatilho abaixo de ${formatSpotPrice(bearTrigger, chart.currency)}.`,
+      `- Invalida acima de ${formatSpotPrice(bearInvalidation, chart.currency)}.`,
+      `- Alvos: TP1 ${formatSpotPrice(bearTp1, chart.currency)} | TP2 ${formatSpotPrice(bearTp2, chart.currency)}.`,
+      `- Relacao risco/retorno (TP1): ${formatRiskRewardRatio(bearRiskReward)}.`,
+      "",
+      "## Gestao de risco dinamica",
+      `- Banca teorica: ${formatSpotPrice(referenceBankUsd, "usd")} | risco conservador de 1% = ${formatSpotPrice(bullPositionSizing.riskAmountUsd, "usd")}.`,
+      `- Position Size Bull: max ${bullPositionSizing.positionSizeUnits.toFixed(6)} unidades (nocional ~ ${formatSpotPrice(bullPositionSizing.notionalUsd, "usd")}), risco por unidade ${formatSpotPrice(bullPositionSizing.priceRiskPerUnit, chart.currency)}.`,
+      `- Position Size Bear: max ${bearPositionSizing.positionSizeUnits.toFixed(6)} unidades (nocional ~ ${formatSpotPrice(bearPositionSizing.notionalUsd, "usd")}), risco por unidade ${formatSpotPrice(bearPositionSizing.priceRiskPerUnit, chart.currency)}.`,
+      "- Regra institucional: operar apenas cenarios com relacao risco/retorno minima de 1.5.",
+      "",
+      "## Checklist de Execucao",
+      "- [ ] Confirmar gatilho em fechamento do candle da janela analisada.",
+      "- [ ] Validar liquidez da sessao antes de enviar ordens.",
+      "- [ ] Rejeitar setup com relacao risco/retorno inferior a 1.5.",
+      "",
+      "> Nota: leitura institucional informativa, sem recomendacao de investimento.",
     ].join("\n");
   }
 

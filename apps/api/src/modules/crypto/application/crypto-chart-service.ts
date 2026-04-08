@@ -486,24 +486,120 @@ function computeSmcSessionComponent(marketSession: CryptoMarketSession): number 
   return clampScore(component, 6, 30);
 }
 
-function computeSmcVolatilityComponent(atrPercent: number, volatilityPercent: number): number {
-  let component = 10;
+interface VolatilityRangeProfile {
+  atrOptimalMax: number;
+  atrOptimalMin: number;
+  atrUpperBound: number;
+  baseScore: number;
+  volatilityOptimalMax: number;
+  volatilityOptimalMin: number;
+  volatilityUpperBound: number;
+}
 
-  if (atrPercent >= 0.4 && atrPercent <= 4.5) {
-    component += 8;
-  } else if (atrPercent > 6.5) {
-    component -= 3;
-  } else {
-    component += 4;
+function resolveVolatilityRangeProfile(range: CryptoChartRange): VolatilityRangeProfile {
+  if (range === "24h") {
+    return {
+      atrOptimalMax: 6.2,
+      atrOptimalMin: 0.55,
+      atrUpperBound: 9.6,
+      baseScore: 11,
+      volatilityOptimalMax: 6.6,
+      volatilityOptimalMin: 0.7,
+      volatilityUpperBound: 10.5,
+    };
   }
 
-  if (volatilityPercent >= 0.35 && volatilityPercent <= 4.5) {
-    component += 7;
-  } else if (volatilityPercent > 7) {
-    component -= 2;
-  } else {
-    component += 4;
+  if (range === "7d") {
+    return {
+      atrOptimalMax: 5.4,
+      atrOptimalMin: 0.45,
+      atrUpperBound: 8.4,
+      baseScore: 10,
+      volatilityOptimalMax: 5.6,
+      volatilityOptimalMin: 0.5,
+      volatilityUpperBound: 8.5,
+    };
   }
+
+  if (range === "30d") {
+    return {
+      atrOptimalMax: 4.6,
+      atrOptimalMin: 0.35,
+      atrUpperBound: 7.2,
+      baseScore: 10,
+      volatilityOptimalMax: 4.8,
+      volatilityOptimalMin: 0.38,
+      volatilityUpperBound: 7.1,
+    };
+  }
+
+  if (range === "90d") {
+    return {
+      atrOptimalMax: 4.0,
+      atrOptimalMin: 0.28,
+      atrUpperBound: 6.2,
+      baseScore: 9,
+      volatilityOptimalMax: 4.2,
+      volatilityOptimalMin: 0.3,
+      volatilityUpperBound: 6.0,
+    };
+  }
+
+  return {
+    atrOptimalMax: 3.5,
+    atrOptimalMin: 0.2,
+    atrUpperBound: 5.4,
+    baseScore: 9,
+    volatilityOptimalMax: 3.7,
+    volatilityOptimalMin: 0.22,
+    volatilityUpperBound: 5.0,
+  };
+}
+
+function scoreVolatilityMetric(
+  value: number,
+  optimalMin: number,
+  optimalMax: number,
+  upperBound: number,
+): number {
+  if (value >= optimalMin && value <= optimalMax) {
+    return 6;
+  }
+
+  if (value < optimalMin * 0.55) {
+    return -2;
+  }
+
+  if (value < optimalMin) {
+    return 2;
+  }
+
+  if (value <= upperBound) {
+    return 3;
+  }
+
+  return -3;
+}
+
+function computeSmcVolatilityComponent(
+  atrPercent: number,
+  volatilityPercent: number,
+  range: CryptoChartRange,
+): number {
+  const profile = resolveVolatilityRangeProfile(range);
+  const atrScore = scoreVolatilityMetric(
+    atrPercent,
+    profile.atrOptimalMin,
+    profile.atrOptimalMax,
+    profile.atrUpperBound,
+  );
+  const volatilityScore = scoreVolatilityMetric(
+    volatilityPercent,
+    profile.volatilityOptimalMin,
+    profile.volatilityOptimalMax,
+    profile.volatilityUpperBound,
+  );
+  const component = profile.baseScore + atrScore + volatilityScore;
 
   return clampScore(component, 3, 25);
 }
@@ -512,12 +608,17 @@ function computeSmcConfluence(input: {
   atrPercent: number;
   marketSession: CryptoMarketSession;
   marketStructure: CryptoMarketStructure;
+  range: CryptoChartRange;
   trend: CryptoTrend;
   volatilityPercent: number;
 }): CryptoSmcConfluence {
   const structureComponent = computeSmcStructureComponent(input.marketStructure, input.trend);
   const sessionComponent = computeSmcSessionComponent(input.marketSession);
-  const volatilityComponent = computeSmcVolatilityComponent(input.atrPercent, input.volatilityPercent);
+  const volatilityComponent = computeSmcVolatilityComponent(
+    input.atrPercent,
+    input.volatilityPercent,
+    input.range,
+  );
   const score = clampScore(Math.round(structureComponent + sessionComponent + volatilityComponent), 5, 95);
 
   return {
@@ -748,7 +849,7 @@ function computeTradePlan(
   };
 }
 
-function computeInsights(points: CryptoChartPoint[]): CryptoChartInsights {
+function computeInsights(points: CryptoChartPoint[], range: CryptoChartRange): CryptoChartInsights {
   const prices = points.map((point) => point.close);
   const firstPrice = prices[0] ?? 0;
   const lastPrice = prices[prices.length - 1] ?? 0;
@@ -813,6 +914,7 @@ function computeInsights(points: CryptoChartPoint[]): CryptoChartInsights {
     atrPercent,
     marketSession,
     marketStructure,
+    range,
     trend,
     volatilityPercent,
   });
@@ -914,7 +1016,7 @@ export class CryptoChartService {
       assetId: chartPayload.assetId,
       currency: chartPayload.currency,
       fetchedAt: chartPayload.fetchedAt,
-      insights: computeInsights(chartPayload.points),
+      insights: computeInsights(chartPayload.points, chartPayload.range),
       live: null,
       mode: "delayed",
       points: chartPayload.points,
@@ -1025,7 +1127,7 @@ export class CryptoChartService {
           assetId: chartPayload.assetId,
           currency: "usd",
           fetchedAt: chartPayload.fetchedAt,
-          insights: computeInsights(points),
+          insights: computeInsights(points, chartPayload.range),
           live: {
             changePercent24h: tickerSnapshot.changePercent24h,
             source: "binance",
@@ -1055,7 +1157,7 @@ export class CryptoChartService {
           assetId: chartPayload.assetId,
           currency: "usd",
           fetchedAt: chartPayload.fetchedAt,
-          insights: computeInsights(points),
+          insights: computeInsights(points, chartPayload.range),
           live: {
             changePercent24h: tickerSnapshot.changePercent24h,
             source: tickerSnapshot.broker,
