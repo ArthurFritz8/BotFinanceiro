@@ -138,13 +138,16 @@ const copilotDefaultSystemPrompt = [
   "Voce e um assistente geral util, com especialidade em dados objetivos de mercado e operacao.",
   "Se a pergunta for geral e nao envolver mercado financeiro, responda normalmente de forma clara e direta, sem forcar contexto de mercado ou uso de tools.",
   "Regra de roteamento: use tools de cotacao/grafico somente com pedido explicito de preco, cotacao, grafico, analise tecnica ou vies.",
-  "Para resumo de mercado cripto, use get_crypto_market_overview; para preco/comparacao use get_crypto_spot_price ou get_crypto_multi_spot_price; para grafico/TA use get_crypto_chart_insights.",
+  "Para resumo de mercado cripto, use get_crypto_market_overview; para preco/comparacao use get_crypto_spot_price ou get_crypto_multi_spot_price; para grafico/TA/SMC use get_crypto_chart_insights.",
+  "Framework institucional para grafico (obrigatorio): entregue SEMPRE Cenario Bull e Cenario Bear com probabilidades complementares somando 100%, gatilho de ativacao e alvos TP1/TP2.",
+  "Formato obrigatorio para resposta de grafico: inclua explicitamente os blocos 'Cenario Bull:', 'Cenario Bear:' e 'Gestao de risco dinamica'.",
+  "No bloco SMC/Wyckoff, interprete suporte/resistencia e swing highs/lows como zonas de liquidez (Order Blocks) e explicite sinais de BOS/CHoCH quando presentes.",
+  "No bloco de gestao de risco, assuma banca teorica de referencia e calcule Position Size maximo com risco conservador de 1% entre entrada e stop.",
   "Para airdrop, retroativo, testnet, quests/farming ou alerta de memecoin (Token/Chain/Hype Score), nao responda com cotacao generica de BTC/ETH/SOL; use contexto e get_airdrop_opportunities.",
   "Para corretoras use get_broker_live_quote; para forex/futuros/opcoes/commodities/renda fixa/ETFs/setores/macro use as tools especializadas; para snapshot amplo use get_financial_market_snapshot.",
   "Fluxo detetive: identificar intencao, investigar com tools e sintetizar resposta humana objetiva.",
   "Se o usuario nao pediu analise tecnica formal, evite template rigido de cotacao.",
-  "Quando a pergunta pedir comprar/vender, responda com sinal informativo (buy/sell/wait), confianca e risco, sem recomendacao de investimento.",
-  "Quando a pergunta envolver risco de curto prazo, entregue fatores de volatilidade, liquidez, macro e operacao, sem recomendacao de investimento.",
+  "Quando a pergunta envolver risco de curto prazo, entregue fatores de volatilidade, liquidez, macro e operacao com linguagem institucional, sem recomendacao de investimento.",
   "Diretiva severa para 'onde comprar': se a exchange nao estiver clara, use search_token_listings_dexscreener e, se necessario, search_web_realtime para descobrir contrato/listagem; se ainda ambiguo, peca nome/ticker/contrato exato. NUNCA devolva cotacao de ativo nao relacionado.",
   "Use links do historico como fonte primaria; para ativo desconhecido ou anafora, faca busca web antes de concluir.",
   "Nunca delegue com 'pesquise no Google' e nunca diga 'nao encontrei informacoes' sem investigacao web e nova tentativa on-chain.",
@@ -1336,6 +1339,66 @@ function hasAirdropStructuredAnswer(answer: string): boolean {
   );
 }
 
+function hasInstitutionalChartLayoutAnswer(answer: string): boolean {
+  const normalizedAnswer = normalizeText(answer);
+  const hasBullScenario = normalizedAnswer.includes("cenario bull");
+  const hasBearScenario = normalizedAnswer.includes("cenario bear");
+  const hasRiskBlock =
+    normalizedAnswer.includes("gestao de risco dinamica") ||
+    normalizedAnswer.includes("position size bull") ||
+    normalizedAnswer.includes("position size bear") ||
+    normalizedAnswer.includes("risco conservador de 1%");
+
+  return hasBullScenario && hasBearScenario && hasRiskBlock;
+}
+
+function parseScenarioProbability(normalizedAnswer: string, scenario: "bear" | "bull"): number | null {
+  const pattern =
+    scenario === "bull"
+      ? /cenario\s+bull[\s\S]{0,220}?probabilidade\s*([0-9]+(?:[\.,][0-9]+)?)\s*%/
+      : /cenario\s+bear[\s\S]{0,220}?probabilidade\s*([0-9]+(?:[\.,][0-9]+)?)\s*%/;
+  const match = normalizedAnswer.match(pattern);
+  const valueToken = match?.[1] ?? null;
+
+  if (valueToken === null) {
+    return null;
+  }
+
+  const parsedValue = Number(valueToken.replace(",", "."));
+
+  if (!Number.isFinite(parsedValue)) {
+    return null;
+  }
+
+  return parsedValue;
+}
+
+function hasConsistentDualScenarioProbabilities(answer: string): boolean {
+  const normalizedAnswer = normalizeText(answer);
+
+  if (!normalizedAnswer.includes("cenario bull") || !normalizedAnswer.includes("cenario bear")) {
+    return false;
+  }
+
+  const bullProbability = parseScenarioProbability(normalizedAnswer, "bull");
+  const bearProbability = parseScenarioProbability(normalizedAnswer, "bear");
+
+  if (bullProbability === null || bearProbability === null) {
+    return false;
+  }
+
+  if (
+    bullProbability < 0 ||
+    bullProbability > 100 ||
+    bearProbability < 0 ||
+    bearProbability > 100
+  ) {
+    return false;
+  }
+
+  return Math.abs(bullProbability + bearProbability - 100) <= 1;
+}
+
 function shouldForceWhereToBuyFallback(message: string, completion: OpenRouterChatCompletion): boolean {
   const normalizedMessage = normalizeText(message);
 
@@ -1389,12 +1452,20 @@ function shouldForceChartFallback(message: string, completion: OpenRouterChatCom
 
   const usedChartTool = completion.toolCallsUsed.includes("get_crypto_chart_insights");
   const normalizedAnswer = normalizeText(completion.answer);
+  const hasInstitutionalLayout = hasInstitutionalChartLayoutAnswer(completion.answer);
+  const hasConsistentProbabilities = hasConsistentDualScenarioProbabilities(completion.answer);
   const hasTechnicalMarkers =
     normalizedAnswer.includes("suporte") ||
     normalizedAnswer.includes("resistencia") ||
     normalizedAnswer.includes("rsi") ||
     normalizedAnswer.includes("macd") ||
     normalizedAnswer.includes("atr") ||
+    normalizedAnswer.includes("bos") ||
+    normalizedAnswer.includes("choch") ||
+    normalizedAnswer.includes("cenario bull") ||
+    normalizedAnswer.includes("cenario bear") ||
+    normalizedAnswer.includes("position size") ||
+    normalizedAnswer.includes("confluencia") ||
     normalizedAnswer.includes("trend") ||
     normalizedAnswer.includes("tendencia") ||
     normalizedAnswer.includes("take profit") ||
@@ -1406,7 +1477,13 @@ function shouldForceChartFallback(message: string, completion: OpenRouterChatCom
     !normalizedAnswer.includes("suporte") &&
     !normalizedAnswer.includes("resistencia");
 
-  return !usedChartTool || !hasTechnicalMarkers || isRiskOnlyAnswer;
+  return (
+    !usedChartTool ||
+    !hasTechnicalMarkers ||
+    isRiskOnlyAnswer ||
+    !hasInstitutionalLayout ||
+    !hasConsistentProbabilities
+  );
 }
 
 function hasInstitutionalRiskChecklistAnswer(answer: string): boolean {
@@ -1603,6 +1680,134 @@ function formatRangeLabel(range: CryptoChartRange): string {
   }
 
   return "1 ano";
+}
+
+function formatMarketSessionLabel(session: string): string {
+  if (session === "asia") {
+    return "Asia";
+  }
+
+  if (session === "london") {
+    return "London";
+  }
+
+  if (session === "new_york") {
+    return "New York";
+  }
+
+  if (session === "overlap") {
+    return "Overlap London/New York";
+  }
+
+  return "Fora das sessoes principais";
+}
+
+function formatLiquidityHeatLabel(heat: string): string {
+  if (heat === "high") {
+    return "alta";
+  }
+
+  if (heat === "medium") {
+    return "media";
+  }
+
+  return "baixa";
+}
+
+function formatStructureBiasLabel(bias: string): string {
+  if (bias === "bullish") {
+    return "estrutura de alta";
+  }
+
+  if (bias === "bearish") {
+    return "estrutura de baixa";
+  }
+
+  return "estrutura neutra";
+}
+
+function formatStructureSignalLabel(signal: string): string {
+  if (signal === "bullish") {
+    return "bullish";
+  }
+
+  if (signal === "bearish") {
+    return "bearish";
+  }
+
+  return "none";
+}
+
+function formatConfluenceTierLabel(tier: string): string {
+  if (tier === "high") {
+    return "alta";
+  }
+
+  if (tier === "medium") {
+    return "media";
+  }
+
+  return "baixa";
+}
+
+function clampNumber(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function resolveDualScenarioProbabilities(insights: {
+  confidenceScore: number;
+  macdHistogram: number;
+  momentumPercent: number;
+  trend: CryptoTrend;
+}): {
+  bearProbability: number;
+  bullProbability: number;
+} {
+  let bullProbability = 50;
+
+  if (insights.trend === "bullish") {
+    bullProbability += 8;
+  } else if (insights.trend === "bearish") {
+    bullProbability -= 8;
+  }
+
+  bullProbability += clampNumber(Math.round((insights.confidenceScore - 50) * 0.2), -6, 6);
+  bullProbability += insights.macdHistogram > 0 ? 3 : insights.macdHistogram < 0 ? -3 : 0;
+  bullProbability += insights.momentumPercent > 0 ? 2 : insights.momentumPercent < 0 ? -2 : 0;
+  bullProbability = Math.round(clampNumber(bullProbability, 20, 80));
+
+  return {
+    bearProbability: 100 - bullProbability,
+    bullProbability,
+  };
+}
+
+function computePositionSize(referenceBankUsd: number, entryPrice: number, stopLoss: number): {
+  notionalUsd: number;
+  positionSizeUnits: number;
+  priceRiskPerUnit: number;
+  riskAmountUsd: number;
+} {
+  const riskAmountUsd = referenceBankUsd * 0.01;
+  const priceRiskPerUnit = Math.abs(entryPrice - stopLoss);
+
+  if (!Number.isFinite(priceRiskPerUnit) || priceRiskPerUnit <= 0 || !Number.isFinite(entryPrice) || entryPrice <= 0) {
+    return {
+      notionalUsd: 0,
+      positionSizeUnits: 0,
+      priceRiskPerUnit,
+      riskAmountUsd,
+    };
+  }
+
+  const positionSizeUnits = riskAmountUsd / priceRiskPerUnit;
+
+  return {
+    notionalUsd: positionSizeUnits * entryPrice,
+    positionSizeUnits,
+    priceRiskPerUnit,
+    riskAmountUsd,
+  };
 }
 
 function formatIntervalMinutes(intervalSeconds: number): number {
@@ -1850,7 +2055,7 @@ const copilotTools: OpenRouterToolDefinition[] = [
   },
   {
     description:
-      "Retorna dados de grafico de cripto (historico + insights tecnicos) para analise de tendencia, momentum, suporte/resistencia e sinal tatico informativo (sem recomendacao de investimento).",
+      "Retorna dados de grafico cripto com leitura institucional (historico + SMC): tendencia, momentum, suporte/resistencia, swing highs/lows, sinais BOS/CHoCH e contexto de sessao de liquidez para cenarios bull/bear e gestao de risco.",
     inputSchema: copilotCryptoChartToolInputSchema,
     name: "get_crypto_chart_insights",
     parameters: {
@@ -1912,7 +2117,7 @@ const copilotTools: OpenRouterToolDefinition[] = [
         points: chart.points.slice(-160),
         provider: chart.provider,
         range: chart.range,
-        textualSummary: `Modo ${chart.mode} | Faixa ${formatRangeLabel(chart.range)} | ${formatTrendLabel(chart.insights.trend)} | acao ${formatTradeActionLabel(chart.insights.tradeAction)} | confianca ${formatConfidenceScore(chart.insights.confidenceScore)} | variacao ${chart.insights.changePercent}% | volatilidade ${chart.insights.volatilityPercent}%`,
+        textualSummary: `Modo ${chart.mode} | Faixa ${formatRangeLabel(chart.range)} | ${formatTrendLabel(chart.insights.trend)} | sessao ${formatMarketSessionLabel(chart.insights.marketSession.session)} (${formatLiquidityHeatLabel(chart.insights.marketSession.liquidityHeat)}) | estrutura ${formatStructureBiasLabel(chart.insights.marketStructure.bias)} | BOS ${formatStructureSignalLabel(chart.insights.marketStructure.bosSignal)} | CHoCH ${formatStructureSignalLabel(chart.insights.marketStructure.chochSignal)} | confluencia SMC ${chart.insights.smcConfluence.score}/100 (${formatConfluenceTierLabel(chart.insights.smcConfluence.tier)}) | acao ${formatTradeActionLabel(chart.insights.tradeAction)} | confianca ${formatConfidenceScore(chart.insights.confidenceScore)} | variacao ${chart.insights.changePercent}% | volatilidade ${chart.insights.volatilityPercent}%`,
       };
     },
   },
@@ -3440,19 +3645,71 @@ export class CopilotChatService {
     const trendLabel = formatTrendLabel(chart.insights.trend);
     const tradeActionLabel = formatTradeActionLabel(chart.insights.tradeAction);
     const rsi14Label = chart.insights.rsi14 === null ? "n/d" : `${chart.insights.rsi14.toFixed(2)}`;
+    const structure = chart.insights.marketStructure;
+    const session = chart.insights.marketSession;
+    const dualScenario = resolveDualScenarioProbabilities(chart.insights);
+    const structuralHigh = Math.max(chart.insights.resistanceLevel, structure.lastSwingHigh);
+    const structuralLow = Math.min(chart.insights.supportLevel, structure.lastSwingLow);
+    const atrBand = Math.max(
+      0.006,
+      chart.insights.atrPercent > 0
+        ? chart.insights.atrPercent / 100
+        : Math.max(0.004, chart.insights.volatilityPercent / 100),
+    );
+    const bullTrigger = Math.max(
+      chart.insights.tradeLevels.entryZoneHigh,
+      structuralHigh * 1.0005,
+    );
+    const bullInvalidation = Math.min(
+      chart.insights.tradeLevels.stopLoss,
+      structuralLow * (1 - atrBand * 0.35),
+    );
+    const bullTp1 = Math.max(
+      chart.insights.tradeLevels.takeProfit1,
+      bullTrigger * (1 + atrBand * 0.85),
+    );
+    const bullTp2 = Math.max(
+      chart.insights.tradeLevels.takeProfit2,
+      bullTrigger * (1 + atrBand * 1.45),
+    );
+    const bearTrigger = Math.min(
+      chart.insights.tradeLevels.entryZoneLow,
+      structuralLow * 0.9995,
+    );
+    const bearInvalidation = Math.max(
+      chart.insights.resistanceLevel,
+      structuralHigh * (1 + atrBand * 0.35),
+    );
+    const bearTp1 = Math.min(
+      chart.insights.supportLevel,
+      bearTrigger * (1 - atrBand * 0.85),
+    );
+    const bearTp2 = Math.min(
+      chart.insights.lowPrice,
+      bearTrigger * (1 - atrBand * 1.45),
+    );
+    const referenceBankUsd = 10_000;
+    const bullPositionSizing = computePositionSize(referenceBankUsd, bullTrigger, bullInvalidation);
+    const bearPositionSizing = computePositionSize(referenceBankUsd, bearTrigger, bearInvalidation);
     const liveSummary =
       chart.mode === "live"
         ? ` | live 24h: ${formatPercent(chart.live?.changePercent24h ?? null)} | volume 24h: ${formatCompactUsd(chart.live?.volume24h ?? null)}`
         : "";
 
     return [
-      `Analise tecnica objetiva de ${capitalizeAssetId(chart.assetId)} (${formatRangeLabel(chart.range)}, modo ${chart.mode}).`,
-      `Preco atual: ${formatSpotPrice(chart.insights.currentPrice, chart.currency)} | variacao no periodo: ${chart.insights.changePercent}% | ${trendLabel}.`,
-      `Sinal tatico atual: ${tradeActionLabel} com confianca ${formatConfidenceScore(chart.insights.confidenceScore)} (informativo, nao e recomendacao).`,
-      `Momentum: ${chart.insights.momentumPercent}% | volatilidade: ${chart.insights.volatilityPercent}% | RSI14: ${rsi14Label} | MACD hist: ${chart.insights.macdHistogram}% | ATR: ${chart.insights.atrPercent}%.`,
-      `Faixa tecnica: suporte ${formatSpotPrice(chart.insights.supportLevel, chart.currency)} | resistencia ${formatSpotPrice(chart.insights.resistanceLevel, chart.currency)} | entrada ${formatSpotPrice(chart.insights.tradeLevels.entryZoneLow, chart.currency)} - ${formatSpotPrice(chart.insights.tradeLevels.entryZoneHigh, chart.currency)} | stop ${formatSpotPrice(chart.insights.tradeLevels.stopLoss, chart.currency)} | TP1 ${formatSpotPrice(chart.insights.tradeLevels.takeProfit1, chart.currency)} | TP2 ${formatSpotPrice(chart.insights.tradeLevels.takeProfit2, chart.currency)}.`,
-      `EMA rapida: ${formatSpotPrice(chart.insights.emaFast, chart.currency)} | EMA lenta: ${formatSpotPrice(chart.insights.emaSlow, chart.currency)} | provider ${chart.provider}${liveSummary} | cache ${chart.cache.state}${chart.cache.stale ? " (stale)" : ""}.`,
-      "Leitura profissional: combine sinais tecnicos com gestao de risco, tamanho de posicao e confirmacao de liquidez antes de qualquer execucao.",
+      `Framework institucional SMC para ${capitalizeAssetId(chart.assetId)} (${formatRangeLabel(chart.range)}, modo ${chart.mode}).`,
+      `Contexto quantitativo: preco ${formatSpotPrice(chart.insights.currentPrice, chart.currency)} | variacao ${chart.insights.changePercent}% | ${trendLabel} | sinal base ${tradeActionLabel} | confianca ${formatConfidenceScore(chart.insights.confidenceScore)} | provider ${chart.provider}${liveSummary} | cache ${chart.cache.state}${chart.cache.stale ? " (stale)" : ""}.`,
+      `Osciladores de apoio (nao exclusivos): RSI14 ${rsi14Label} | MACD hist ${chart.insights.macdHistogram}% | ATR ${chart.insights.atrPercent}% | momentum ${chart.insights.momentumPercent}% | volatilidade ${chart.insights.volatilityPercent}%.`,
+      `Sessao de liquidez: ${formatMarketSessionLabel(session.session)} (${session.utcWindow}, ${session.utcHour}h UTC, intensidade ${formatLiquidityHeatLabel(session.liquidityHeat)}).`,
+      `Leitura SMC & Wyckoff: ${formatStructureBiasLabel(structure.bias)} | swing high ${formatSpotPrice(structure.lastSwingHigh, chart.currency)} | swing low ${formatSpotPrice(structure.lastSwingLow, chart.currency)} | BOS ${formatStructureSignalLabel(structure.bosSignal)} | CHoCH ${formatStructureSignalLabel(structure.chochSignal)} | Order Blocks de referencia: suporte ${formatSpotPrice(chart.insights.supportLevel, chart.currency)} e resistencia ${formatSpotPrice(chart.insights.resistanceLevel, chart.currency)}.`,
+      `Confluencia SMC: ${chart.insights.smcConfluence.score}/100 (${formatConfluenceTierLabel(chart.insights.smcConfluence.tier)}) | estrutura ${chart.insights.smcConfluence.components.marketStructure}/45 | sessao ${chart.insights.smcConfluence.components.sessionLiquidity}/30 | volatilidade ${chart.insights.smcConfluence.components.volatilityRegime}/25.`,
+      `Cenario Bull: Probabilidade ${dualScenario.bullProbability}%. Gatilho acima de ${formatSpotPrice(bullTrigger, chart.currency)}. Invalida abaixo de ${formatSpotPrice(bullInvalidation, chart.currency)}. Alvos TP1 ${formatSpotPrice(bullTp1, chart.currency)} e TP2 ${formatSpotPrice(bullTp2, chart.currency)}.`,
+      `Cenario Bear: Probabilidade ${dualScenario.bearProbability}%. Gatilho abaixo de ${formatSpotPrice(bearTrigger, chart.currency)}. Invalida acima de ${formatSpotPrice(bearInvalidation, chart.currency)}. Alvos TP1 ${formatSpotPrice(bearTp1, chart.currency)} e TP2 ${formatSpotPrice(bearTp2, chart.currency)}.`,
+      `Gestao de risco dinamica (banca teorica ${formatSpotPrice(referenceBankUsd, "usd")}; risco conservador de 1% = ${formatSpotPrice(bullPositionSizing.riskAmountUsd, "usd")}).`,
+      `Position Size Bull: max ${bullPositionSizing.positionSizeUnits.toFixed(6)} unidades (nocional ~ ${formatSpotPrice(bullPositionSizing.notionalUsd, "usd")}), risco por unidade ${formatSpotPrice(bullPositionSizing.priceRiskPerUnit, chart.currency)}.`,
+      `Position Size Bear: max ${bearPositionSizing.positionSizeUnits.toFixed(6)} unidades (nocional ~ ${formatSpotPrice(bearPositionSizing.notionalUsd, "usd")}), risco por unidade ${formatSpotPrice(bearPositionSizing.priceRiskPerUnit, chart.currency)}.`,
+      "Checklist de execucao institucional: confirmar gatilho em fechamento, validar liquidez da sessao e evitar entrada com relacao risco/retorno inferior a 1.5.",
+      "Nota: leitura institucional informativa, sem recomendacao de investimento.",
     ].join("\n");
   }
 

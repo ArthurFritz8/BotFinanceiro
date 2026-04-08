@@ -215,7 +215,30 @@ void it("GET /v1/crypto/chart retorna pontos e insights tecnicos", async () => {
         confidenceScore: number;
         changePercent: number;
         currentPrice: number;
+        marketSession: {
+          liquidityHeat: "high" | "low" | "medium";
+          session: "asia" | "london" | "new_york" | "off_session" | "overlap";
+          utcHour: number;
+          utcWindow: string;
+        };
+        marketStructure: {
+          bias: "bearish" | "bullish" | "neutral";
+          bosSignal: "bearish" | "bullish" | "none";
+          chochSignal: "bearish" | "bullish" | "none";
+          lastSwingHigh: number;
+          lastSwingLow: number;
+          swingRangePercent: number;
+        };
         tradeAction: "buy" | "sell" | "wait";
+        smcConfluence: {
+          components: {
+            marketStructure: number;
+            sessionLiquidity: number;
+            volatilityRegime: number;
+          };
+          score: number;
+          tier: "high" | "low" | "medium";
+        };
         trend: "bearish" | "bullish" | "sideways";
         volatilityPercent: number;
       };
@@ -252,6 +275,32 @@ void it("GET /v1/crypto/chart retorna pontos e insights tecnicos", async () => {
   assert.equal(typeof body.data.insights.confidenceScore, "number");
   assert.equal(typeof body.data.insights.changePercent, "number");
   assert.equal(typeof body.data.insights.volatilityPercent, "number");
+  assert.equal(typeof body.data.insights.marketSession.session, "string");
+  assert.equal(typeof body.data.insights.marketSession.utcHour, "number");
+  assert.equal(typeof body.data.insights.marketSession.utcWindow, "string");
+  assert.equal(typeof body.data.insights.marketStructure.bias, "string");
+  assert.equal(typeof body.data.insights.marketStructure.bosSignal, "string");
+  assert.equal(typeof body.data.insights.marketStructure.chochSignal, "string");
+  assert.equal(typeof body.data.insights.marketStructure.lastSwingHigh, "number");
+  assert.equal(typeof body.data.insights.marketStructure.lastSwingLow, "number");
+  assert.equal(typeof body.data.insights.smcConfluence.score, "number");
+  assert.equal(typeof body.data.insights.smcConfluence.tier, "string");
+  assert.equal(typeof body.data.insights.smcConfluence.components.marketStructure, "number");
+  assert.equal(typeof body.data.insights.smcConfluence.components.sessionLiquidity, "number");
+  assert.equal(typeof body.data.insights.smcConfluence.components.volatilityRegime, "number");
+  assert.ok(body.data.insights.smcConfluence.score >= 5 && body.data.insights.smcConfluence.score <= 95);
+  assert.ok(
+    body.data.insights.smcConfluence.components.marketStructure >= 4 &&
+      body.data.insights.smcConfluence.components.marketStructure <= 45,
+  );
+  assert.ok(
+    body.data.insights.smcConfluence.components.sessionLiquidity >= 6 &&
+      body.data.insights.smcConfluence.components.sessionLiquidity <= 30,
+  );
+  assert.ok(
+    body.data.insights.smcConfluence.components.volatilityRegime >= 3 &&
+      body.data.insights.smcConfluence.components.volatilityRegime <= 25,
+  );
 });
 
 void it("GET /v1/crypto/chart usa fallback Binance quando CoinGecko falha", async () => {

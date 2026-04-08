@@ -21,6 +21,11 @@ export type CryptoTrend = "bearish" | "bullish" | "sideways";
 export type TradeAction = "buy" | "sell" | "wait";
 export type LiveChartBroker = "binance" | ExchangeBroker;
 export type CryptoChartProvider = "coingecko" | LiveChartBroker;
+export type MarketStructureSignal = "bearish" | "bullish" | "none";
+export type MarketStructureBias = "bearish" | "bullish" | "neutral";
+export type MarketSessionLabel = "asia" | "london" | "new_york" | "off_session" | "overlap";
+export type MarketLiquidityHeat = "high" | "low" | "medium";
+export type SmcConfluenceTier = "high" | "low" | "medium";
 
 interface CachedChartPayload {
   assetId: string;
@@ -60,6 +65,34 @@ export interface CryptoTradeLevels {
   takeProfit2: number;
 }
 
+export interface CryptoMarketStructure {
+  bias: MarketStructureBias;
+  bosSignal: MarketStructureSignal;
+  chochSignal: MarketStructureSignal;
+  lastSwingHigh: number;
+  lastSwingLow: number;
+  previousSwingHigh: number | null;
+  previousSwingLow: number | null;
+  swingRangePercent: number;
+}
+
+export interface CryptoMarketSession {
+  liquidityHeat: MarketLiquidityHeat;
+  session: MarketSessionLabel;
+  utcHour: number;
+  utcWindow: string;
+}
+
+export interface CryptoSmcConfluence {
+  components: {
+    marketStructure: number;
+    sessionLiquidity: number;
+    volatilityRegime: number;
+  };
+  score: number;
+  tier: SmcConfluenceTier;
+}
+
 export interface CryptoChartInsights {
   atrPercent: number;
   changePercent: number;
@@ -71,7 +104,10 @@ export interface CryptoChartInsights {
   longMovingAverage: number;
   lowPrice: number;
   macdHistogram: number;
+  marketSession: CryptoMarketSession;
+  marketStructure: CryptoMarketStructure;
   momentumPercent: number;
+  smcConfluence: CryptoSmcConfluence;
   resistanceLevel: number;
   rsi14: number | null;
   shortMovingAverage: number;
@@ -197,6 +233,302 @@ function roundPrice(value: number): number {
 
 function roundPercent(value: number): number {
   return Number(value.toFixed(2));
+}
+
+interface SwingPoint {
+  index: number;
+  price: number;
+  timestamp: string;
+}
+
+function detectSwingPoints(points: CryptoChartPoint[], lookAround = 2): {
+  highs: SwingPoint[];
+  lows: SwingPoint[];
+} {
+  if (points.length < lookAround * 2 + 1) {
+    return {
+      highs: [],
+      lows: [],
+    };
+  }
+
+  const highs: SwingPoint[] = [];
+  const lows: SwingPoint[] = [];
+
+  for (let index = lookAround; index < points.length - lookAround; index += 1) {
+    const currentPoint = points[index];
+
+    if (!currentPoint) {
+      continue;
+    }
+
+    let isSwingHigh = true;
+    let isSwingLow = true;
+
+    for (let offset = 1; offset <= lookAround; offset += 1) {
+      const previousPoint = points[index - offset];
+      const nextPoint = points[index + offset];
+
+      if (!previousPoint || !nextPoint) {
+        continue;
+      }
+
+      if (currentPoint.high <= previousPoint.high || currentPoint.high <= nextPoint.high) {
+        isSwingHigh = false;
+      }
+
+      if (currentPoint.low >= previousPoint.low || currentPoint.low >= nextPoint.low) {
+        isSwingLow = false;
+      }
+
+      if (!isSwingHigh && !isSwingLow) {
+        break;
+      }
+    }
+
+    if (isSwingHigh) {
+      highs.push({
+        index,
+        price: currentPoint.high,
+        timestamp: currentPoint.timestamp,
+      });
+    }
+
+    if (isSwingLow) {
+      lows.push({
+        index,
+        price: currentPoint.low,
+        timestamp: currentPoint.timestamp,
+      });
+    }
+  }
+
+  return {
+    highs,
+    lows,
+  };
+}
+
+function computeSwingRangePercent(lastSwingHigh: number, lastSwingLow: number): number {
+  if (lastSwingLow <= 0) {
+    return 0;
+  }
+
+  return roundPercent(((lastSwingHigh - lastSwingLow) / lastSwingLow) * 100);
+}
+
+function computeMarketStructure(
+  points: CryptoChartPoint[],
+  currentPrice: number,
+  trend: CryptoTrend,
+  supportLevel: number,
+  resistanceLevel: number,
+): CryptoMarketStructure {
+  const { highs, lows } = detectSwingPoints(points, 2);
+  const lastSwingHighPoint = highs[highs.length - 1] ?? null;
+  const previousSwingHighPoint = highs[highs.length - 2] ?? null;
+  const lastSwingLowPoint = lows[lows.length - 1] ?? null;
+  const previousSwingLowPoint = lows[lows.length - 2] ?? null;
+
+  const lastSwingHigh = lastSwingHighPoint?.price ?? resistanceLevel;
+  const lastSwingLow = lastSwingLowPoint?.price ?? supportLevel;
+  const previousSwingHigh = previousSwingHighPoint?.price ?? null;
+  const previousSwingLow = previousSwingLowPoint?.price ?? null;
+
+  let bias: MarketStructureBias = "neutral";
+
+  if (previousSwingHigh !== null && previousSwingLow !== null) {
+    if (lastSwingHigh > previousSwingHigh && lastSwingLow > previousSwingLow) {
+      bias = "bullish";
+    } else if (lastSwingHigh < previousSwingHigh && lastSwingLow < previousSwingLow) {
+      bias = "bearish";
+    }
+  } else if (trend === "bullish") {
+    bias = "bullish";
+  } else if (trend === "bearish") {
+    bias = "bearish";
+  }
+
+  const bullishBreak = currentPrice > lastSwingHigh * 1.0008;
+  const bearishBreak = currentPrice < lastSwingLow * 0.9992;
+  const bosSignal: MarketStructureSignal = bullishBreak ? "bullish" : bearishBreak ? "bearish" : "none";
+
+  let chochSignal: MarketStructureSignal = "none";
+
+  if (bias === "bullish" && bearishBreak) {
+    chochSignal = "bearish";
+  } else if (bias === "bearish" && bullishBreak) {
+    chochSignal = "bullish";
+  }
+
+  return {
+    bias,
+    bosSignal,
+    chochSignal,
+    lastSwingHigh: roundPrice(lastSwingHigh),
+    lastSwingLow: roundPrice(lastSwingLow),
+    previousSwingHigh: previousSwingHigh === null ? null : roundPrice(previousSwingHigh),
+    previousSwingLow: previousSwingLow === null ? null : roundPrice(previousSwingLow),
+    swingRangePercent: computeSwingRangePercent(lastSwingHigh, lastSwingLow),
+  };
+}
+
+function resolveMarketSession(timestampIso: string): CryptoMarketSession {
+  const parsedDate = new Date(timestampIso);
+  const referenceDate = Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+  const utcHour = referenceDate.getUTCHours();
+
+  if (utcHour >= 0 && utcHour < 7) {
+    return {
+      liquidityHeat: "medium",
+      session: "asia",
+      utcHour,
+      utcWindow: "00:00-06:59 UTC",
+    };
+  }
+
+  if (utcHour >= 7 && utcHour < 12) {
+    return {
+      liquidityHeat: "medium",
+      session: "london",
+      utcHour,
+      utcWindow: "07:00-11:59 UTC",
+    };
+  }
+
+  if (utcHour >= 12 && utcHour < 16) {
+    return {
+      liquidityHeat: "high",
+      session: "overlap",
+      utcHour,
+      utcWindow: "12:00-15:59 UTC",
+    };
+  }
+
+  if (utcHour >= 16 && utcHour < 21) {
+    return {
+      liquidityHeat: "medium",
+      session: "new_york",
+      utcHour,
+      utcWindow: "16:00-20:59 UTC",
+    };
+  }
+
+  return {
+    liquidityHeat: "low",
+    session: "off_session",
+    utcHour,
+    utcWindow: "21:00-23:59 UTC",
+  };
+}
+
+function clampScore(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function resolveSmcConfluenceTier(score: number): SmcConfluenceTier {
+  if (score >= 72) {
+    return "high";
+  }
+
+  if (score >= 48) {
+    return "medium";
+  }
+
+  return "low";
+}
+
+function computeSmcStructureComponent(marketStructure: CryptoMarketStructure, trend: CryptoTrend): number {
+  let component = 18;
+
+  if (marketStructure.bias !== "neutral") {
+    component += 9;
+  }
+
+  if (marketStructure.bosSignal !== "none") {
+    component += 8;
+  }
+
+  if (marketStructure.chochSignal !== "none") {
+    component -= 6;
+  }
+
+  if (trend !== "sideways") {
+    const isTrendAligned =
+      (trend === "bullish" && marketStructure.bias === "bullish") ||
+      (trend === "bearish" && marketStructure.bias === "bearish");
+
+    if (isTrendAligned) {
+      component += 8;
+    } else if (marketStructure.bias !== "neutral") {
+      component -= 4;
+    }
+  }
+
+  return clampScore(component, 4, 45);
+}
+
+function computeSmcSessionComponent(marketSession: CryptoMarketSession): number {
+  let component = 10;
+
+  if (marketSession.liquidityHeat === "high") {
+    component = 30;
+  } else if (marketSession.liquidityHeat === "medium") {
+    component = 21;
+  } else if (marketSession.session !== "off_session") {
+    component = 13;
+  }
+
+  if (marketSession.session === "overlap") {
+    component += 2;
+  }
+
+  return clampScore(component, 6, 30);
+}
+
+function computeSmcVolatilityComponent(atrPercent: number, volatilityPercent: number): number {
+  let component = 10;
+
+  if (atrPercent >= 0.4 && atrPercent <= 4.5) {
+    component += 8;
+  } else if (atrPercent > 6.5) {
+    component -= 3;
+  } else {
+    component += 4;
+  }
+
+  if (volatilityPercent >= 0.35 && volatilityPercent <= 4.5) {
+    component += 7;
+  } else if (volatilityPercent > 7) {
+    component -= 2;
+  } else {
+    component += 4;
+  }
+
+  return clampScore(component, 3, 25);
+}
+
+function computeSmcConfluence(input: {
+  atrPercent: number;
+  marketSession: CryptoMarketSession;
+  marketStructure: CryptoMarketStructure;
+  trend: CryptoTrend;
+  volatilityPercent: number;
+}): CryptoSmcConfluence {
+  const structureComponent = computeSmcStructureComponent(input.marketStructure, input.trend);
+  const sessionComponent = computeSmcSessionComponent(input.marketSession);
+  const volatilityComponent = computeSmcVolatilityComponent(input.atrPercent, input.volatilityPercent);
+  const score = clampScore(Math.round(structureComponent + sessionComponent + volatilityComponent), 5, 95);
+
+  return {
+    components: {
+      marketStructure: structureComponent,
+      sessionLiquidity: sessionComponent,
+      volatilityRegime: volatilityComponent,
+    },
+    score,
+    tier: resolveSmcConfluenceTier(score),
+  };
 }
 
 function percentile(sortedValues: number[], ratio: number): number {
@@ -468,6 +800,22 @@ function computeInsights(points: CryptoChartPoint[]): CryptoChartInsights {
     emaFast,
     emaSlow,
   );
+  const marketStructure = computeMarketStructure(
+    points,
+    lastPrice,
+    trend,
+    supportLevel,
+    resistanceLevel,
+  );
+  const latestTimestamp = points[points.length - 1]?.timestamp ?? new Date().toISOString();
+  const marketSession = resolveMarketSession(latestTimestamp);
+  const smcConfluence = computeSmcConfluence({
+    atrPercent,
+    marketSession,
+    marketStructure,
+    trend,
+    volatilityPercent,
+  });
 
   return {
     atrPercent: roundPercent(atrPercent),
@@ -480,7 +828,10 @@ function computeInsights(points: CryptoChartPoint[]): CryptoChartInsights {
     longMovingAverage: roundPrice(longMovingAverage),
     lowPrice: roundPrice(lowPrice),
     macdHistogram: roundPercent(macdHistogramRaw),
+    marketSession,
+    marketStructure,
     momentumPercent: roundPercent(momentumPercent),
+    smcConfluence,
     resistanceLevel: roundPrice(resistanceLevel),
     rsi14,
     shortMovingAverage: roundPrice(shortMovingAverage),

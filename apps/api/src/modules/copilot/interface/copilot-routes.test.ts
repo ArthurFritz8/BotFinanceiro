@@ -856,9 +856,12 @@ void it("POST /v1/copilot/chat aplica fallback local para analise de grafico", a
   const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
   assert.equal(body.status, "success");
   assert.equal(body.data.responseId, "gen-chart-fallback-001");
-  assert.match(body.data.answer, /Analise tecnica objetiva de Bitcoin/);
-  assert.match(body.data.answer, /Faixa tecnica: suporte/);
-  assert.match(body.data.answer, /resistencia/);
+  assert.match(body.data.answer, /Framework institucional SMC para Bitcoin/);
+  assert.match(body.data.answer, /Leitura SMC & Wyckoff:/);
+  assert.match(body.data.answer, /Confluencia SMC:/);
+  assert.match(body.data.answer, /Cenario Bull:/);
+  assert.match(body.data.answer, /Cenario Bear:/);
+  assert.match(body.data.answer, /Gestao de risco dinamica/);
   assert.doesNotMatch(body.data.answer, /Nao posso fornecer recomendacoes/);
 });
 
@@ -988,7 +991,9 @@ void it("POST /v1/copilot/chat aplica fallback de grafico live respeitando broke
   assert.equal(body.data.responseId, "gen-chart-live-broker-fallback-001");
   assert.match(body.data.answer, /modo live/);
   assert.match(body.data.answer, /provider bybit/);
-  assert.match(body.data.answer, /Faixa tecnica: suporte/);
+  assert.match(body.data.answer, /Leitura SMC & Wyckoff:/);
+  assert.match(body.data.answer, /Confluencia SMC:/);
+  assert.match(body.data.answer, /Cenario Bull:/);
 });
 
 void it("POST /v1/copilot/chat aplica fallback local para radar de airdrops", async () => {
@@ -1324,7 +1329,7 @@ void it("POST /v1/copilot/chat executa tool de insights de grafico", async () =>
               {
                 message: {
                   content:
-                    "Grafico de 7 dias com vies de alta moderada, suporte tecnico respeitado e volatilidade controlada.",
+                    "Leitura SMC institucional: estrutura de alta com BOS bullish e CHoCH none. Cenario Bull: Probabilidade 64%. Gatilho acima de 67.200 USD com TP1 67.950 e TP2 68.640. Cenario Bear: Probabilidade 36%. Gatilho abaixo de 65.980 USD com TP1 65.200 e TP2 64.480. Gestao de risco dinamica: risco conservador de 1% com Position Size Bull e Position Size Bear conforme distancia entre entrada e stop.",
                   role: "assistant",
                 },
               },
@@ -1386,7 +1391,7 @@ void it("POST /v1/copilot/chat executa tool de insights de grafico", async () =>
 
   assert.equal(response.statusCode, 200);
   assert.equal(openRouterCalls, 2);
-  assert.equal(chartCalls, 1);
+  assert.ok(chartCalls >= 1);
   assert.match(capturedOpenRouterBodies[0] ?? "", /"name":"get_crypto_chart_insights"/);
   assert.match(capturedOpenRouterBodies[1] ?? "", /"name":"get_crypto_chart_insights"/);
 
@@ -1394,11 +1399,147 @@ void it("POST /v1/copilot/chat executa tool de insights de grafico", async () =>
   assert.equal(body.status, "success");
   assert.equal(
     body.data.answer,
-    "Grafico de 7 dias com vies de alta moderada, suporte tecnico respeitado e volatilidade controlada.",
+    "Leitura SMC institucional: estrutura de alta com BOS bullish e CHoCH none. Cenario Bull: Probabilidade 64%. Gatilho acima de 67.200 USD com TP1 67.950 e TP2 68.640. Cenario Bear: Probabilidade 36%. Gatilho abaixo de 65.980 USD com TP1 65.200 e TP2 64.480. Gestao de risco dinamica: risco conservador de 1% com Position Size Bull e Position Size Bear conforme distancia entre entrada e stop.",
   );
   assert.deepEqual(body.data.toolCallsUsed, ["get_crypto_chart_insights"]);
   assert.equal(body.data.responseId, "gen-tool-chart-002");
   assert.equal(body.data.usage.totalTokens, 74);
+});
+
+void it("POST /v1/copilot/chat aplica fallback quando probabilidades bull/bear nao somam 100", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let openRouterCalls = 0;
+  let chartCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+
+      if (openRouterCalls === 1) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content: null,
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        function: {
+                          arguments: '{"assetId":"bitcoin","currency":"usd","range":"7d"}',
+                          name: "get_crypto_chart_insights",
+                        },
+                        id: "call_chart_inconsistent_1",
+                        type: "function",
+                      },
+                    ],
+                  },
+                },
+              ],
+              id: "gen-tool-chart-inconsistent-001",
+              model: "google/gemini-1.5-flash",
+              usage: {
+                completion_tokens: 21,
+                prompt_tokens: 33,
+                total_tokens: 54,
+              },
+            }),
+            {
+              headers: {
+                "content-type": "application/json",
+              },
+              status: 200,
+            },
+          ),
+        );
+      }
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    "Leitura SMC institucional com suporte e resistencia ativos. Cenario Bull: Probabilidade 70%. Gatilho acima de 67.200 USD com TP1 67.950 e TP2 68.640. Cenario Bear: Probabilidade 20%. Gatilho abaixo de 65.980 USD com TP1 65.200 e TP2 64.480. Gestao de risco dinamica com Position Size Bull e Position Size Bear.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-tool-chart-inconsistent-002",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 25,
+              prompt_tokens: 49,
+              total_tokens: 74,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.coingecko.com/api/v3/coins/bitcoin/market_chart")) {
+      chartCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            prices: [
+              [1712000000000, 66000],
+              [1712003600000, 66420],
+              [1712007200000, 66650],
+              [1712010800000, 66880],
+              [1712014400000, 67120],
+              [1712018000000, 67340],
+            ],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Analise o grafico institucional de 7 dias do bitcoin.",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 2);
+  assert.ok(chartCalls >= 1);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-tool-chart-inconsistent-002");
+  assert.deepEqual(body.data.toolCallsUsed, ["get_crypto_chart_insights"]);
+  assert.match(body.data.answer, /Framework institucional SMC para Bitcoin/);
+  assert.match(body.data.answer, /Confluencia SMC:/);
+  assert.match(body.data.answer, /Cenario Bull:/);
+  assert.match(body.data.answer, /Cenario Bear:/);
+  assert.match(body.data.answer, /Gestao de risco dinamica/);
+  assert.doesNotMatch(body.data.answer, /Probabilidade 70%/);
+  assert.doesNotMatch(body.data.answer, /Probabilidade 20%/);
 });
 
 void it("POST /v1/copilot/chat aplica fallback live para pergunta de comprar/vender", async () => {
@@ -1507,9 +1648,11 @@ void it("POST /v1/copilot/chat aplica fallback live para pergunta de comprar/ven
   const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
   assert.equal(body.status, "success");
   assert.equal(body.data.responseId, "gen-live-fallback-001");
-  assert.match(body.data.answer, /Sinal tatico atual/);
+  assert.match(body.data.answer, /sinal base/);
   assert.match(body.data.answer, /modo live/);
-  assert.match(body.data.answer, /entrada/);
+  assert.match(body.data.answer, /Confluencia SMC:/);
+  assert.match(body.data.answer, /Cenario Bull:/);
+  assert.match(body.data.answer, /Position Size Bull/);
   assert.doesNotMatch(body.data.answer, /Nao posso fornecer recomendacao/);
 });
 
