@@ -128,6 +128,7 @@ function isRetryableStatusCode(statusCode: number): boolean {
 }
 
 interface RetryableErrorDetails {
+  promptTokensLimitExceeded?: boolean;
   retryable?: boolean;
 }
 
@@ -138,6 +139,15 @@ function hasRetryableFlag(details: unknown): details is RetryableErrorDetails {
 
   const detailsRecord = details as Record<string, unknown>;
   return typeof detailsRecord.retryable === "boolean";
+}
+
+function hasPromptTokensLimitFlag(details: unknown): details is RetryableErrorDetails {
+  if (typeof details !== "object" || details === null) {
+    return false;
+  }
+
+  const detailsRecord = details as Record<string, unknown>;
+  return typeof detailsRecord.promptTokensLimitExceeded === "boolean";
 }
 
 function toObjectRecord(value: unknown): Record<string, unknown> | null {
@@ -174,6 +184,32 @@ function shouldRetryOpenRouterRequest(error: unknown): boolean {
   }
 
   return false;
+}
+
+function shouldFallbackToPromptBudgetMode(error: unknown): boolean {
+  if (!(error instanceof AppError)) {
+    return false;
+  }
+
+  if (error.code !== "OPENROUTER_BAD_STATUS") {
+    return false;
+  }
+
+  if (!hasPromptTokensLimitFlag(error.details)) {
+    return false;
+  }
+
+  return error.details.promptTokensLimitExceeded === true;
+}
+
+function isPromptTokensLimitExceededStatus(responseStatus: number, responseText: string): boolean {
+  if (responseStatus !== 402) {
+    return false;
+  }
+
+  const normalizedResponseText = responseText.toLowerCase();
+
+  return normalizedResponseText.includes("prompt tokens limit exceeded");
 }
 
 function extractAssistantContent(content: OpenRouterMessageContent): string {
@@ -317,9 +353,21 @@ export class OpenRouterChatAdapter {
 
     const usedTools = new Set<string>();
     const maxToolRounds = tools.length > 0 ? 3 : 0;
+    let warnedPromptBudgetFallback = false;
 
     for (let round = 0; round <= maxToolRounds; round += 1) {
-      const parsedPayload = await this.requestCompletion(messages, parsedInput, tools);
+      const parsedPayload = await this.requestCompletionWithPromptBudgetFallback(
+        messages,
+        parsedInput,
+        tools,
+        () => {
+          if (warnedPromptBudgetFallback) {
+            return;
+          }
+
+          warnedPromptBudgetFallback = true;
+        },
+      );
 
       const firstChoice = parsedPayload.choices[0];
 
@@ -417,9 +465,21 @@ export class OpenRouterChatAdapter {
     const messages = buildRequestMessages(parsedInput);
     const usedTools = new Set<string>();
     const maxToolRounds = tools.length > 0 ? 3 : 0;
+    let warnedPromptBudgetFallback = false;
 
     for (let round = 0; round <= maxToolRounds; round += 1) {
-      const response = await this.requestCompletionStream(messages, parsedInput, tools);
+      const response = await this.requestCompletionStreamWithPromptBudgetFallback(
+        messages,
+        parsedInput,
+        tools,
+        () => {
+          if (warnedPromptBudgetFallback) {
+            return;
+          }
+
+          warnedPromptBudgetFallback = true;
+        },
+      );
       const streamedCompletion = await this.consumeCompletionStream(response, onChunk);
       const toolCalls = streamedCompletion.toolCalls;
 
@@ -593,6 +653,25 @@ export class OpenRouterChatAdapter {
     );
   }
 
+  private async requestCompletionStreamWithPromptBudgetFallback(
+    messages: OpenRouterRequestMessage[],
+    input: z.infer<typeof openRouterChatInputSchema>,
+    tools: OpenRouterToolDefinition[],
+    onFallbackActivated: () => void,
+  ): Promise<Response> {
+    try {
+      return await this.requestCompletionStream(messages, input, tools);
+    } catch (error) {
+      if (!shouldFallbackToPromptBudgetMode(error) || tools.length === 0) {
+        throw error;
+      }
+
+      onFallbackActivated();
+
+      return this.requestCompletionStream(messages, input, []);
+    }
+  }
+
   private async requestCompletionStreamOnce(
     messages: OpenRouterRequestMessage[],
     input: z.infer<typeof openRouterChatInputSchema>,
@@ -646,10 +725,12 @@ export class OpenRouterChatAdapter {
     if (!response.ok) {
       const responseText = await response.text();
       const retryable = isRetryableStatusCode(response.status);
+      const promptTokensLimitExceeded = isPromptTokensLimitExceededStatus(response.status, responseText);
 
       throw new AppError({
         code: "OPENROUTER_BAD_STATUS",
         details: {
+          promptTokensLimitExceeded,
           responseBody: responseText.slice(0, 1000),
           responseStatus: response.status,
           retryable,
@@ -899,6 +980,25 @@ export class OpenRouterChatAdapter {
     );
   }
 
+  private async requestCompletionWithPromptBudgetFallback(
+    messages: OpenRouterRequestMessage[],
+    input: z.infer<typeof openRouterChatInputSchema>,
+    tools: OpenRouterToolDefinition[],
+    onFallbackActivated: () => void,
+  ): Promise<z.infer<typeof openRouterResponseSchema>> {
+    try {
+      return await this.requestCompletion(messages, input, tools);
+    } catch (error) {
+      if (!shouldFallbackToPromptBudgetMode(error) || tools.length === 0) {
+        throw error;
+      }
+
+      onFallbackActivated();
+
+      return this.requestCompletion(messages, input, []);
+    }
+  }
+
   private async requestCompletionOnce(
     messages: OpenRouterRequestMessage[],
     input: z.infer<typeof openRouterChatInputSchema>,
@@ -948,10 +1048,12 @@ export class OpenRouterChatAdapter {
     if (!response.ok) {
       const responseText = await response.text();
       const retryable = isRetryableStatusCode(response.status);
+      const promptTokensLimitExceeded = isPromptTokensLimitExceededStatus(response.status, responseText);
 
       throw new AppError({
         code: "OPENROUTER_BAD_STATUS",
         details: {
+          promptTokensLimitExceeded,
           responseBody: responseText.slice(0, 1000),
           responseStatus: response.status,
           retryable,
