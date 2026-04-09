@@ -158,6 +158,9 @@ const copilotDefaultSystemPrompt = [
   "Checklist institucional PASS/FAIL: HIGH_CONCENTRATION_RISK, SYMMETRIC_BUNDLE_DETECTED, FAKE_HOLDERS_WARNING, COORDINATED_BUNDLE, EARLY_DUMP_TRAP, COMMUNITY_HEALTH_FAILURE.",
   "Regras: viewers menor que 30% de holders => FAKE_HOLDERS_WARNING; funding comum no Top 10 => COORDINATED_BUNDLE; market cap menor que 10000 com 2+ snipers/dev/fresh => EARLY_DUMP_TRAP com alerta de risco extremo.",
   "Formato: inclua tabela Markdown 'Checklist de Seguranca' com Status PASS/FAIL; para falhas criticas use destaque visual.",
+  "Melhoria adicional: ao chamar search_web_realtime, use somente um ticker oficial ou um contract address na query; nunca envie a frase completa do usuario.",
+  "Melhoria adicional: se nao houver ticker/contract address valido, solicite explicitamente essa entidade ao usuario antes de concluir a investigacao.",
+  "Melhoria adicional: gere o Checklist institucional apenas depois de receber e validar as evidencias retornadas pelas tools.",
 ].join(" ");
 
 const copilotGeneralAssistantSystemPrompt = [
@@ -228,7 +231,15 @@ const copilotDexScreenerTokenLookupToolInputSchema = z.object({
 const copilotWebSearchToolInputSchema = z.object({
   focus: z.enum(["general", "news", "token_lookup", "where_to_buy"]).default("general"),
   maxResults: z.number().int().min(3).max(10).default(6),
-  query: z.string().trim().min(2).max(180),
+  query: z
+    .string()
+    .trim()
+    .min(2)
+    .max(80)
+    .regex(
+      /^(0x[a-fA-F0-9]{40}|[A-Za-z][A-Za-z0-9._-]{1,23})$/,
+      "query must be a single ticker symbol or contract address",
+    ),
 });
 
 const copilotForexMarketSnapshotToolInputSchema = z.object({
@@ -674,31 +685,45 @@ function resolvePrimaryAssetHint(message: string): string {
   const candidates = extractAssetHintCandidates(message);
 
   if (candidates.length > 0) {
-    return candidates[0] ?? "bitcoin";
+    return candidates[0] ?? "token";
   }
 
-  return resolvePrimaryAssetIdForChart(message);
+  return "token";
+}
+
+function extractSearchEntityFromQuery(rawQuery: string): string {
+  const trimmedQuery = rawQuery.trim();
+
+  if (trimmedQuery.length === 0) {
+    return "";
+  }
+
+  const contractCandidates = extractContractAddressCandidatesFromText(trimmedQuery);
+
+  if (contractCandidates.length > 0) {
+    return contractCandidates[0] ?? "";
+  }
+
+  const assetHintCandidates = extractAssetHintCandidates(trimmedQuery);
+
+  if (assetHintCandidates.length > 0) {
+    return assetHintCandidates[0] ?? "";
+  }
+
+  if (/^[A-Za-z][A-Za-z0-9._-]{1,23}$/.test(trimmedQuery)) {
+    return trimmedQuery.toLowerCase();
+  }
+
+  return "";
 }
 
 function buildFocusedWebSearchQuery(
   query: string,
   focus: "general" | "news" | "token_lookup" | "where_to_buy",
 ): string {
-  const trimmedQuery = query.trim();
+  void focus;
 
-  if (focus === "where_to_buy") {
-    return `${trimmedQuery} token where to buy exchange listing liquidity`;
-  }
-
-  if (focus === "token_lookup") {
-    return `${trimmedQuery} crypto token overview official website contract`;
-  }
-
-  if (focus === "news") {
-    return `${trimmedQuery} crypto market latest news today`;
-  }
-
-  return trimmedQuery;
+  return extractSearchEntityFromQuery(query);
 }
 
 function extractExchangeMentionsFromWebResults(results: WebSearchResultItem[]): string[] {
@@ -2418,7 +2443,7 @@ const copilotTools: OpenRouterToolDefinition[] = [
           type: "number",
         },
         query: {
-          description: "Consulta textual livre para pesquisa global",
+          description: "Ticker oficial (ex: SANAET) ou Contract Address (ex: 0x...) sem texto adicional",
           type: "string",
         },
       },
@@ -2427,6 +2452,19 @@ const copilotTools: OpenRouterToolDefinition[] = [
     },
     run: async (input: z.infer<typeof copilotWebSearchToolInputSchema>) => {
       const focusedQuery = buildFocusedWebSearchQuery(input.query, input.focus);
+
+      if (focusedQuery.length === 0) {
+        throw new AppError({
+          code: "WEB_SEARCH_INVALID_QUERY_ENTITY",
+          details: {
+            focus: input.focus,
+            query: input.query,
+          },
+          message: "Web search query must contain only a ticker symbol or contract address",
+          statusCode: 422,
+        });
+      }
+
       const searchResponse = await webSearchAdapter.search({
         maxResults: input.maxResults,
         query: focusedQuery,
@@ -4266,10 +4304,18 @@ export class CopilotChatService {
     conversationMessages: OpenRouterConversationMessage[],
   ): Promise<string | null> {
     const normalizedAssetHint = assetHint.trim().length > 0 ? assetHint.trim().toLowerCase() : "token";
+    const resolvedEntitySeed = normalizedAssetHint === "token"
+      ? message.trim()
+      : `${normalizedAssetHint}`.trim();
     const tokenLookupQuery = truncateForQuery(
-      normalizedAssetHint === "token" ? message.trim() : `${normalizedAssetHint} ${message}`.trim(),
-      120,
+      buildFocusedWebSearchQuery(resolvedEntitySeed, "where_to_buy"),
+      80,
     );
+
+    if (tokenLookupQuery.length === 0) {
+      return null;
+    }
+
     const directLookupResponse = await dexScreenerSearchAdapter.searchTokenListings({
       maxResults: 5,
       query: tokenLookupQuery,
@@ -4333,14 +4379,25 @@ export class CopilotChatService {
     }
 
     const domainHint = extractDomainsFromUrls(historyLinks).slice(0, 2).join(" ");
-    const sourceHint = domainHint.length > 0 ? ` ${domainHint}` : "";
+    const entitySeed = [
+      normalizedAssetHint !== "token" ? normalizedAssetHint : "",
+      message,
+      domainHint,
+    ]
+      .filter((item) => item.trim().length > 0)
+      .join("\n");
     const focusedQuery = truncateForQuery(
-      buildFocusedWebSearchQuery(
-        `${normalizedAssetHint} ${message}${sourceHint}`.trim(),
-        "where_to_buy",
-      ),
-      220,
+      buildFocusedWebSearchQuery(entitySeed, "where_to_buy"),
+      80,
     );
+
+    if (focusedQuery.length === 0) {
+      return [
+        "Nao foi possivel extrair ticker oficial ou contract address para a busca.",
+        "Envie somente o ticker (ex.: SANAET) ou o contract address (0x...) para eu continuar a investigacao on-chain.",
+      ].join("\n");
+    }
+
     const searchResponse = await webSearchAdapter.search({
       maxResults: 6,
       query: focusedQuery,
@@ -4478,25 +4535,25 @@ export class CopilotChatService {
     );
 
     const historyLinks = extractRecentUserLinks(conversationMessages);
+    const entitySeed = assetHint === "token" ? operativeMessage : `${assetHint}`;
     const focusedQuery = truncateForQuery(
-      buildFocusedWebSearchQuery(
-        `${assetHint} ${operativeMessage} old contract dead contract migrated token`.trim(),
-        "token_lookup",
-      ),
-      220,
+      buildFocusedWebSearchQuery(entitySeed, "token_lookup"),
+      80,
     );
 
     let webProvider = "n/d";
     let topResults: WebSearchResultItem[] = [];
 
     try {
-      const webResponse = await webSearchAdapter.search({
-        maxResults: 6,
-        query: focusedQuery,
-      });
+      if (focusedQuery.length > 0) {
+        const webResponse = await webSearchAdapter.search({
+          maxResults: 6,
+          query: focusedQuery,
+        });
 
-      webProvider = webResponse.provider;
-      topResults = webResponse.results.slice(0, 5);
+        webProvider = webResponse.provider;
+        topResults = webResponse.results.slice(0, 5);
+      }
     } catch (error) {
       logger.warn(
         {

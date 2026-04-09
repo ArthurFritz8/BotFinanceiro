@@ -203,6 +203,10 @@ function shouldRetryOpenRouterRequest(error: unknown): boolean {
     return true;
   }
 
+  if (error.code === "OPENROUTER_EMPTY_RESPONSE") {
+    return true;
+  }
+
   if (error.code === "OPENROUTER_BAD_STATUS" && hasRetryableFlag(error.details)) {
     return error.details.retryable === true;
   }
@@ -352,6 +356,7 @@ function parseToolArguments(argumentsJson: string): Record<string, unknown> {
     });
   }
 }
+
 
 function stringifyToolResult(result: unknown): string {
   try {
@@ -517,7 +522,7 @@ export class OpenRouterChatAdapter {
       }
 
       messages.push({
-        content: responseMessage.content ?? null,
+        content: responseMessage.content ?? "",
         role: "assistant",
         tool_calls: toolCalls,
       });
@@ -620,7 +625,7 @@ export class OpenRouterChatAdapter {
       }
 
       messages.push({
-        content: streamedCompletion.answer.length > 0 ? streamedCompletion.answer : null,
+        content: streamedCompletion.answer.length > 0 ? streamedCompletion.answer : "",
         role: "assistant",
         tool_calls: toolCalls,
       });
@@ -1267,6 +1272,24 @@ export class OpenRouterChatAdapter {
         message: "OpenRouter payload schema mismatch",
         statusCode: 502,
       });
+    }
+
+    const firstChoice = parsedPayload.data.choices[0];
+
+    if (firstChoice) {
+      const toolCalls = firstChoice.message.tool_calls ?? [];
+      const answer = extractAssistantContent(firstChoice.message.content ?? "");
+
+      if (toolCalls.length === 0 && answer.length === 0) {
+        throw new AppError({
+          code: "OPENROUTER_EMPTY_RESPONSE",
+          details: {
+            model: parsedPayload.data.model,
+          },
+          message: "OpenRouter returned an empty completion",
+          statusCode: 503,
+        });
+      }
     }
 
     return parsedPayload.data;

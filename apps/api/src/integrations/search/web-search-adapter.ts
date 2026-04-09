@@ -42,15 +42,7 @@ const serpApiSearchPayloadSchema = z.object({
   organic_results: z.array(serpApiSearchResultSchema).optional(),
 });
 
-const duckDuckGoInstantPayloadSchema = z.object({
-  AbstractText: z.string().optional(),
-  AbstractURL: z.string().optional(),
-  Heading: z.string().optional(),
-  RelatedTopics: z.array(z.record(z.string(), z.unknown())).optional(),
-  Results: z.array(z.record(z.string(), z.unknown())).optional(),
-});
-
-type WebSearchProvider = "duckduckgo" | "serpapi" | "serper" | "tavily";
+type WebSearchProvider = "serpapi" | "serper" | "tavily";
 type WebSearchConfidenceLabel = "high" | "low" | "medium";
 type WebSearchSourceType =
   | "community"
@@ -382,17 +374,6 @@ function removeHtmlTags(value: string): string {
   return collapseWhitespace(value.replace(/<[^>]*>/g, " "));
 }
 
-function readStringField(record: Record<string, unknown>, fieldName: string): string | null {
-  const fieldValue = record[fieldName];
-
-  if (typeof fieldValue !== "string") {
-    return null;
-  }
-
-  const sanitizedValue = collapseWhitespace(fieldValue);
-  return sanitizedValue.length > 0 ? sanitizedValue : null;
-}
-
 function isHttpUrl(value: string): boolean {
   try {
     const parsedUrl = new URL(value);
@@ -601,6 +582,14 @@ export class WebSearchAdapter {
     const parsedInput = webSearchInputSchema.parse(input);
     const providerOrder = this.resolveProviderOrder();
 
+    if (providerOrder.length === 0) {
+      throw new AppError({
+        code: "WEB_SEARCH_NOT_CONFIGURED",
+        message: "No web search provider configured. Configure Tavily or Serper API keys",
+        statusCode: 503,
+      });
+    }
+
     for (const provider of providerOrder) {
       try {
         const providerResults = await this.searchWithProvider(provider, parsedInput.query, parsedInput.maxResults);
@@ -630,19 +619,9 @@ export class WebSearchAdapter {
 
     return {
       fetchedAt: new Date().toISOString(),
-      provider: providerOrder[0] ?? "duckduckgo",
+      provider: providerOrder[0] ?? "tavily",
       query: parsedInput.query,
-      results: [
-        {
-          confidenceLabel: "low",
-          confidenceScore: 24,
-          domain: "duckduckgo.com",
-          snippet: "Busca global concluida sem resultado estruturado nos providers configurados.",
-          sourceType: "unknown",
-          title: "DuckDuckGo Search",
-          url: `https://duckduckgo.com/?q=${encodeURIComponent(parsedInput.query)}`,
-        },
-      ],
+      results: [],
     };
   }
 
@@ -657,46 +636,23 @@ export class WebSearchAdapter {
       case "serper":
         return this.searchWithSerper(query, maxResults);
       case "serpapi":
-        return this.searchWithSerpApi(query, maxResults);
-      case "duckduckgo":
       default:
-        return this.searchWithDuckDuckGo(query);
+        return this.searchWithSerpApi(query, maxResults);
     }
   }
 
   private resolveProviderOrder(): WebSearchProvider[] {
-    const hasTavilyKey = env.WEB_SEARCH_TAVILY_API_KEY.trim().length >= 10;
-    const hasSerperKey = env.WEB_SEARCH_SERPER_API_KEY.trim().length >= 10;
-    const hasSerpApiKey = env.WEB_SEARCH_SERPAPI_API_KEY.trim().length >= 10;
+    const providerStrategy = String(env.WEB_SEARCH_PROVIDER_STRATEGY);
 
-    if (env.WEB_SEARCH_PROVIDER_STRATEGY === "duckduckgo_only") {
-      return ["duckduckgo"];
+    if (providerStrategy === "tavily_only") {
+      return ["tavily"];
     }
 
-    if (env.WEB_SEARCH_PROVIDER_STRATEGY === "duckduckgo_then_tavily") {
-      return hasTavilyKey ? ["duckduckgo", "tavily"] : ["duckduckgo"];
+    if (providerStrategy === "tavily_then_serper_then_serpapi") {
+      return ["tavily", "serper", "serpapi"];
     }
 
-    if (env.WEB_SEARCH_PROVIDER_STRATEGY === "tavily_then_serper_then_serpapi_then_duckduckgo") {
-      const prioritizedProviders: WebSearchProvider[] = [];
-
-      if (hasTavilyKey) {
-        prioritizedProviders.push("tavily");
-      }
-
-      if (hasSerperKey) {
-        prioritizedProviders.push("serper");
-      }
-
-      if (hasSerpApiKey) {
-        prioritizedProviders.push("serpapi");
-      }
-
-      prioritizedProviders.push("duckduckgo");
-      return prioritizedProviders;
-    }
-
-    return hasTavilyKey ? ["tavily", "duckduckgo"] : ["duckduckgo"];
+    return ["tavily", "serper"];
   }
 
   private normalizeAndRankResults(
@@ -822,69 +778,6 @@ export class WebSearchAdapter {
         } satisfies WebSearchRawResultItem;
       })
       .filter((item): item is WebSearchRawResultItem => item !== null);
-  }
-
-  private async searchWithDuckDuckGo(query: string): Promise<WebSearchRawResultItem[]> {
-    const payload = await this.requestDuckDuckGo(query);
-    const results: WebSearchRawResultItem[] = [];
-
-    const abstractText = collapseWhitespace(payload.AbstractText ?? "");
-    const abstractUrl = ensureAbsoluteUrl(collapseWhitespace(payload.AbstractURL ?? ""));
-
-    if (abstractText.length > 0 && abstractUrl.length > 0) {
-      results.push({
-        snippet: abstractText,
-        title: collapseWhitespace(payload.Heading ?? "") || buildTitleFromUrl(abstractUrl),
-        url: abstractUrl,
-      });
-    }
-
-    for (const resultRecord of payload.Results ?? []) {
-      const firstUrl = ensureAbsoluteUrl(readStringField(resultRecord, "FirstURL") ?? "");
-      const text = removeHtmlTags(readStringField(resultRecord, "Text") ?? "");
-
-      if (firstUrl.length === 0 || text.length === 0) {
-        continue;
-      }
-
-      results.push({
-        snippet: text,
-        title: buildTitleFromUrl(firstUrl),
-        url: firstUrl,
-      });
-    }
-
-    const appendRelatedTopics = (topics: Array<Record<string, unknown>>): void => {
-      for (const topicRecord of topics) {
-        const nestedTopics = topicRecord.Topics;
-
-        if (Array.isArray(nestedTopics)) {
-          const normalizedNestedTopics = nestedTopics.filter(
-            (topic): topic is Record<string, unknown> => typeof topic === "object" && topic !== null,
-          );
-
-          appendRelatedTopics(normalizedNestedTopics);
-          continue;
-        }
-
-        const firstUrl = ensureAbsoluteUrl(readStringField(topicRecord, "FirstURL") ?? "");
-        const text = removeHtmlTags(readStringField(topicRecord, "Text") ?? "");
-
-        if (firstUrl.length === 0 || text.length === 0) {
-          continue;
-        }
-
-        results.push({
-          snippet: text,
-          title: buildTitleFromUrl(firstUrl),
-          url: firstUrl,
-        });
-      }
-    };
-
-    appendRelatedTopics(payload.RelatedTopics ?? []);
-
-    return results;
   }
 
   private async requestTavily(
@@ -1202,100 +1095,4 @@ export class WebSearchAdapter {
     return parsedPayload.data;
   }
 
-  private async requestDuckDuckGo(query: string): Promise<z.infer<typeof duckDuckGoInstantPayloadSchema>> {
-    return retryWithExponentialBackoff(
-      () => this.requestDuckDuckGoOnce(query),
-      {
-        attempts: 2,
-        baseDelayMs: 250,
-        jitterPercent: 25,
-        shouldRetry: shouldRetryWebSearchRequest,
-      },
-    );
-  }
-
-  private async requestDuckDuckGoOnce(query: string): Promise<z.infer<typeof duckDuckGoInstantPayloadSchema>> {
-    const requestUrl = `${env.WEB_SEARCH_DUCKDUCKGO_API_BASE_URL}/?${new URLSearchParams({
-      format: "json",
-      no_html: "1",
-      no_redirect: "1",
-      q: query,
-      skip_disambig: "1",
-    }).toString()}`;
-
-    let response: Response;
-
-    try {
-      response = await fetch(requestUrl, {
-        headers: {
-          Accept: "application/json",
-          "User-Agent": "BotFinanceiro/1.0 (+https://github.com/ArthurFritz8/BotFinanceiro)",
-        },
-        method: "GET",
-        signal: AbortSignal.timeout(env.WEB_SEARCH_TIMEOUT_MS),
-      });
-    } catch (error) {
-      throw new AppError({
-        code: "WEB_SEARCH_UNAVAILABLE",
-        details: {
-          cause: error,
-          provider: "duckduckgo",
-          query,
-        },
-        message: "Web search provider request failed",
-        statusCode: 503,
-      });
-    }
-
-    if (!response.ok) {
-      const responseBodyPreview = await response.text();
-      const retryable = isRetryableStatusCode(response.status);
-
-      throw new AppError({
-        code: "WEB_SEARCH_BAD_STATUS",
-        details: {
-          provider: "duckduckgo",
-          query,
-          responseBody: responseBodyPreview.slice(0, 500),
-          responseStatus: response.status,
-          retryable,
-        },
-        message: "Web search provider returned non-success status",
-        statusCode: retryable ? 503 : 502,
-      });
-    }
-
-    let payload: unknown;
-
-    try {
-      payload = await response.json();
-    } catch {
-      throw new AppError({
-        code: "WEB_SEARCH_INVALID_JSON",
-        details: {
-          provider: "duckduckgo",
-          query,
-        },
-        message: "Web search provider returned invalid JSON",
-        statusCode: 502,
-      });
-    }
-
-    const parsedPayload = duckDuckGoInstantPayloadSchema.safeParse(payload);
-
-    if (!parsedPayload.success) {
-      throw new AppError({
-        code: "WEB_SEARCH_SCHEMA_MISMATCH",
-        details: {
-          issues: parsedPayload.error.issues,
-          provider: "duckduckgo",
-          query,
-        },
-        message: "Web search payload schema mismatch",
-        statusCode: 502,
-      });
-    }
-
-    return parsedPayload.data;
-  }
 }
