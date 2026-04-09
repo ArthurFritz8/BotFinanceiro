@@ -3278,6 +3278,63 @@ function getMemecoinFilterState() {
   };
 }
 
+function isLikelyValidPoolUrlForNotification(notification) {
+  const pairUrl = typeof notification?.pairUrl === "string"
+    ? notification.pairUrl.trim()
+    : "";
+
+  if (pairUrl.length === 0) {
+    return false;
+  }
+
+  let parsedUrl;
+
+  try {
+    parsedUrl = new URL(pairUrl);
+  } catch {
+    return false;
+  }
+
+  const host = parsedUrl.hostname.toLowerCase();
+
+  if (!host.includes("dexscreener.com")) {
+    return false;
+  }
+
+  const pathSegments = parsedUrl.pathname
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+
+  if (pathSegments.length < 2) {
+    return false;
+  }
+
+  const pairAddress = typeof notification?.pairAddress === "string"
+    ? notification.pairAddress.trim()
+    : "";
+  const chain = typeof notification?.chain === "string"
+    ? notification.chain.trim().toLowerCase()
+    : "";
+  const trailingSegment = pathSegments[pathSegments.length - 1] ?? "";
+
+  if (pairAddress.length === 0 || trailingSegment.length === 0) {
+    return false;
+  }
+
+  if (chain === "base") {
+    return /^0x[a-fA-F0-9]{40}$/.test(pairAddress)
+      && trailingSegment.toLowerCase() === pairAddress.toLowerCase();
+  }
+
+  if (chain === "solana") {
+    return /^[1-9A-HJ-NP-Za-km-z]{32,64}$/.test(pairAddress)
+      && trailingSegment === pairAddress;
+  }
+
+  return trailingSegment.length >= 8;
+}
+
 function buildMemecoinChatPrompt(notification) {
   const tokenSymbol = typeof notification?.token?.symbol === "string"
     ? notification.token.symbol
@@ -3300,6 +3357,7 @@ function buildMemecoinChatPrompt(notification) {
     ? notification.riskFlags.slice(0, 3).join("; ")
     : "n/d";
   const pairUrl = typeof notification?.pairUrl === "string" ? notification.pairUrl : "";
+  const hasValidPoolUrl = isLikelyValidPoolUrlForNotification(notification);
   const poolStatus = typeof notification?.poolStatus === "string"
     ? notification.poolStatus
     : "ALIVE";
@@ -3326,7 +3384,7 @@ function buildMemecoinChatPrompt(notification) {
     `Operacional: ${actionable ? "acionavel" : "bloqueado por risco"}`,
     `Catalisadores: ${catalysts}`,
     `Riscos: ${risks}`,
-    pairUrl.length > 0 ? `Link da pool: ${pairUrl}` : "Link da pool: n/d",
+    hasValidPoolUrl ? `Link da pool: ${pairUrl}` : "Link da pool: n/d",
     "Quero resposta em 4 blocos: leitura de momentum, risco de liquidez, gatilhos de entrada/saida para monitoramento e red flags de manipulacao.",
   ].join("\n");
 }
@@ -3392,9 +3450,11 @@ function createMemecoinCard(notification) {
   const securityStatusReason = typeof notification?.securityStatusReason === "string"
     ? notification.securityStatusReason
     : "";
+  const hasValidPoolUrl = isLikelyValidPoolUrlForNotification(notification);
   const actionable = notification?.actionable !== false
     && poolStatus === "ALIVE"
-    && securityStatus !== "HONEYPOT";
+    && securityStatus !== "HONEYPOT"
+    && hasValidPoolUrl;
 
   const card = document.createElement("article");
   card.className = "memecoin-card";
@@ -3536,7 +3596,7 @@ function createMemecoinCard(notification) {
 
   actions.append(pinButton, chatButton);
 
-  if (actionable && notification.pairUrl) {
+  if (actionable && notification.pairUrl && hasValidPoolUrl) {
     const link = document.createElement("a");
     link.className = "memecoin-card-link";
     link.href = notification.pairUrl;
@@ -3544,6 +3604,11 @@ function createMemecoinCard(notification) {
     link.target = "_blank";
     link.textContent = "Pool";
     actions.append(link);
+  } else if (notification.pairUrl && !hasValidPoolUrl) {
+    const invalidLink = document.createElement("span");
+    invalidLink.className = "memecoin-card-link memecoin-card-link-disabled";
+    invalidLink.textContent = "Pool invalida";
+    actions.append(invalidLink);
   } else if (notification.pairUrl) {
     const blockedLink = document.createElement("span");
     blockedLink.className = "memecoin-card-link memecoin-card-link-disabled";

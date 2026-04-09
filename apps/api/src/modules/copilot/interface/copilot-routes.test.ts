@@ -132,7 +132,58 @@ void after(async () => {
   await app.close();
 });
 
-void it("POST /v1/copilot/chat retorna 503 quando OpenRouter nao esta configurado", async () => {
+void it("POST /v1/copilot/chat retorna fallback local quando OpenRouter nao esta configurado", async () => {
+  let openRouterCalled = false;
+
+  globalThis.fetch = ((input, init) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.startsWith("https://openrouter.ai/api/v1/chat/completions")) {
+      openRouterCalled = true;
+      return Promise.reject(new Error("OpenRouter nao deveria ser chamado neste cenario"));
+    }
+
+    if (requestUrl.startsWith("https://api.coincap.io/v2/assets")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                changePercent24Hr: "2.4",
+                id: "bitcoin",
+                marketCapUsd: "1200000000000",
+                name: "Bitcoin",
+                priceUsd: "64000",
+                symbol: "BTC",
+                volumeUsd24Hr: "28000000000",
+              },
+              {
+                changePercent24Hr: "1.1",
+                id: "ethereum",
+                marketCapUsd: "420000000000",
+                name: "Ethereum",
+                priceUsd: "3200",
+                symbol: "ETH",
+                volumeUsd24Hr: "14000000000",
+              },
+            ],
+            timestamp: Date.now(),
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    void init;
+
+    return Promise.reject(new Error(`Unhandled test fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
   const response = await app.inject({
     method: "POST",
     payload: {
@@ -141,11 +192,12 @@ void it("POST /v1/copilot/chat retorna 503 quando OpenRouter nao esta configurad
     url: "/v1/copilot/chat",
   });
 
-  assert.equal(response.statusCode, 503);
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalled, false);
 
-  const body = response.json<ApiErrorResponse>();
-  assert.equal(body.status, "error");
-  assert.equal(body.error.code, "OPENROUTER_NOT_CONFIGURED");
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.match(body.data.answer, /Resumo rapido do mercado cripto/);
 });
 
 void it("POST /v1/copilot/chat retorna resposta da IA quando OpenRouter esta configurado", async () => {

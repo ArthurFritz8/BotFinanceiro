@@ -3118,15 +3118,30 @@ export class CopilotChatService {
     const intentContextMessage = this.buildIntentContextMessage(preparedInput.message, conversationMessages);
     const latestUserMessage = this.resolveLatestUserMessage(intentContextMessage, conversationMessages);
     const scopedTools = this.resolveToolsForMessage(latestUserMessage);
-    const completion = await openRouterChatAdapter.createCompletionWithTools(
-      {
-        maxTokens: preparedInput.maxTokens,
-        messages: conversationMessages,
-        systemPrompt: preparedInput.systemPrompt,
-        temperature: preparedInput.temperature,
-      },
-      scopedTools,
-    );
+    let completion: OpenRouterChatCompletion;
+
+    try {
+      completion = await openRouterChatAdapter.createCompletionWithTools(
+        {
+          maxTokens: preparedInput.maxTokens,
+          messages: conversationMessages,
+          systemPrompt: preparedInput.systemPrompt,
+          temperature: preparedInput.temperature,
+        },
+        scopedTools,
+      );
+    } catch (error) {
+      if (!this.shouldUseEmergencyLocalFallback(error)) {
+        throw error;
+      }
+
+      completion = await this.buildEmergencyLocalCompletion(
+        latestUserMessage,
+        conversationMessages,
+        "chat",
+      );
+    }
+
     const completionWithFallback = await this.applyIntentFallback(
       {
         ...preparedInput,
@@ -3163,16 +3178,32 @@ export class CopilotChatService {
     const intentContextMessage = this.buildIntentContextMessage(preparedInput.message, conversationMessages);
     const latestUserMessage = this.resolveLatestUserMessage(intentContextMessage, conversationMessages);
     const scopedTools = this.resolveToolsForMessage(latestUserMessage);
-    const completion = await openRouterChatAdapter.createCompletionStreamWithTools(
-      {
-        maxTokens: preparedInput.maxTokens,
-        messages: conversationMessages,
-        systemPrompt: preparedInput.systemPrompt,
-        temperature: preparedInput.temperature,
-      },
-      scopedTools,
-      onChunk,
-    );
+    let completion: OpenRouterChatCompletion;
+
+    try {
+      completion = await openRouterChatAdapter.createCompletionStreamWithTools(
+        {
+          maxTokens: preparedInput.maxTokens,
+          messages: conversationMessages,
+          systemPrompt: preparedInput.systemPrompt,
+          temperature: preparedInput.temperature,
+        },
+        scopedTools,
+        onChunk,
+      );
+    } catch (error) {
+      if (!this.shouldUseEmergencyLocalFallback(error)) {
+        throw error;
+      }
+
+      completion = await this.buildEmergencyLocalCompletion(
+        latestUserMessage,
+        conversationMessages,
+        "stream",
+        onChunk,
+      );
+    }
+
     const completionWithFallback = await this.applyIntentFallback(
       {
         ...preparedInput,
@@ -3205,6 +3236,126 @@ export class CopilotChatService {
     sessionId: string;
   }): Promise<CopilotChatSessionHistory> {
     return copilotChatAuditStore.getSessionHistory(input);
+  }
+
+  private shouldUseEmergencyLocalFallback(error: unknown): boolean {
+    if (!(error instanceof AppError)) {
+      return false;
+    }
+
+    if (
+      error.code === "OPENROUTER_NOT_CONFIGURED"
+      || error.code === "OPENROUTER_UNAVAILABLE"
+      || error.code === "OPENROUTER_INVALID_JSON"
+      || error.code === "OPENROUTER_DEGRADATION_EXHAUSTED"
+    ) {
+      return true;
+    }
+
+    if (error.code !== "OPENROUTER_BAD_STATUS") {
+      return false;
+    }
+
+    if (typeof error.details !== "object" || error.details === null) {
+      return false;
+    }
+
+    const details = error.details as Record<string, unknown>;
+    const responseStatus =
+      typeof details.responseStatus === "number" && Number.isFinite(details.responseStatus)
+        ? Math.trunc(details.responseStatus)
+        : null;
+
+    if (responseStatus === null) {
+      return false;
+    }
+
+    return responseStatus === 402 || responseStatus === 429 || responseStatus >= 500;
+  }
+
+  private async buildEmergencyLocalCompletion(
+    operativeMessage: string,
+    conversationMessages: OpenRouterConversationMessage[],
+    mode: "chat" | "stream",
+    onChunk?: (chunk: string) => void | Promise<void>,
+  ): Promise<OpenRouterChatCompletion> {
+    const fallbackAnswer = await this.buildEmergencyLocalFallbackAnswer(
+      operativeMessage,
+      conversationMessages,
+    );
+
+    if (mode === "stream" && typeof onChunk === "function" && fallbackAnswer.length > 0) {
+      await onChunk(fallbackAnswer);
+    }
+
+    return {
+      answer: fallbackAnswer,
+      fetchedAt: new Date().toISOString(),
+      model: "fallback/local-intent-router",
+      provider: "openrouter",
+      responseId: `fallback-${Date.now()}`,
+      toolCallsUsed: [],
+      usage: {},
+    };
+  }
+
+  private async buildEmergencyLocalFallbackAnswer(
+    operativeMessage: string,
+    conversationMessages: OpenRouterConversationMessage[],
+  ): Promise<string> {
+    const normalizedMessage = normalizeText(operativeMessage);
+
+    try {
+      if (hasWhereToBuyIntent(normalizedMessage) || hasBrokerIntegrationIntent(operativeMessage)) {
+        return await this.buildBrokerIntegrationFallback(operativeMessage, conversationMessages);
+      }
+
+      if (hasAirdropIntent(operativeMessage)) {
+        return await this.buildAirdropIntelligenceFallback(operativeMessage);
+      }
+
+      if (hasInstitutionalFraudIntent(operativeMessage) || hasMemeAlertPayloadIntent(operativeMessage)) {
+        return await this.buildInstitutionalFraudFallback(operativeMessage, conversationMessages);
+      }
+
+      if (hasChartAnalysisIntent(operativeMessage)) {
+        return await this.buildChartAnalysisFallback(operativeMessage);
+      }
+
+      if (hasMonitoringPlanIntent(operativeMessage)) {
+        return await this.buildMonitoringPlanFallback();
+      }
+
+      if (hasRiskAnalysisIntent(operativeMessage)) {
+        return await this.buildShortTermRiskFallback(operativeMessage);
+      }
+
+      if (hasMarketSummaryIntent(operativeMessage) || hasFinancialIntent(operativeMessage)) {
+        return await this.buildMarketSummaryFallback();
+      }
+    } catch (error) {
+      logger.warn(
+        {
+          err: error,
+          messagePreview: operativeMessage.slice(0, 120),
+        },
+        "Emergency local fallback failed on intent-specific path",
+      );
+    }
+
+    if (!hasFinancialIntent(operativeMessage)) {
+      return [
+        "Estou em modo de contingencia temporaria para o provedor principal de IA.",
+        "Posso continuar te ajudando com perguntas de mercado, risco, corretoras e leitura de sinais sem interromper o fluxo.",
+        "Se quiser, envie um ativo especifico (ticker/contrato) para analise objetiva agora.",
+      ].join("\n");
+    }
+
+    return [
+      "Modo de contingencia ativo: analise por IA externa indisponivel neste instante.",
+      "Posso seguir com leitura operacional baseada em dados de mercado do proprio backend.",
+      "Envie o ativo e horizonte (ex.: BTC 24h, ETH 7d, ou token+contrato) para resposta direta.",
+    ].join("\n");
   }
 
   private withDefaultSystemPrompt(input: CopilotChatInput): CopilotChatInput {
