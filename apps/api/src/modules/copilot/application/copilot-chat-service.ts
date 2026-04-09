@@ -3238,39 +3238,8 @@ export class CopilotChatService {
     return copilotChatAuditStore.getSessionHistory(input);
   }
 
-  private shouldUseEmergencyLocalFallback(error: unknown): boolean {
-    if (!(error instanceof AppError)) {
-      return false;
-    }
-
-    if (
-      error.code === "OPENROUTER_NOT_CONFIGURED"
-      || error.code === "OPENROUTER_UNAVAILABLE"
-      || error.code === "OPENROUTER_INVALID_JSON"
-      || error.code === "OPENROUTER_DEGRADATION_EXHAUSTED"
-    ) {
-      return true;
-    }
-
-    if (error.code !== "OPENROUTER_BAD_STATUS") {
-      return false;
-    }
-
-    if (typeof error.details !== "object" || error.details === null) {
-      return false;
-    }
-
-    const details = error.details as Record<string, unknown>;
-    const responseStatus =
-      typeof details.responseStatus === "number" && Number.isFinite(details.responseStatus)
-        ? Math.trunc(details.responseStatus)
-        : null;
-
-    if (responseStatus === null) {
-      return false;
-    }
-
-    return responseStatus === 402 || responseStatus === 429 || responseStatus >= 500;
+  private shouldUseEmergencyLocalFallback(_error: unknown): boolean {
+    return false;
   }
 
   private async buildEmergencyLocalCompletion(

@@ -132,7 +132,7 @@ void after(async () => {
   await app.close();
 });
 
-void it("POST /v1/copilot/chat retorna fallback local quando OpenRouter nao esta configurado", async () => {
+void it("POST /v1/copilot/chat retorna erro quando OpenRouter nao esta configurado", async () => {
   let openRouterCalled = false;
 
   globalThis.fetch = ((input, init) => {
@@ -192,12 +192,13 @@ void it("POST /v1/copilot/chat retorna fallback local quando OpenRouter nao esta
     url: "/v1/copilot/chat",
   });
 
-  assert.equal(response.statusCode, 200);
+  assert.equal(response.statusCode, 503);
   assert.equal(openRouterCalled, false);
 
-  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
-  assert.equal(body.status, "success");
-  assert.match(body.data.answer, /Resumo rapido do mercado cripto/);
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "OPENROUTER_NOT_CONFIGURED");
+  assert.match(body.error.message, /not configured/i);
 });
 
 void it("POST /v1/copilot/chat retorna resposta da IA quando OpenRouter esta configurado", async () => {
