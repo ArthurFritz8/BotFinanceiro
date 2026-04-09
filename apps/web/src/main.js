@@ -10127,7 +10127,7 @@ async function initializeChatHistory() {
           "Desk pronto para apoiar. Abra uma conversa e diga o objetivo do momento.",
           {
             meta: {
-              model: "google/gemini-2.0-flash-001",
+              model: "qwen/qwen3.6-plus",
               time: new Date().toLocaleTimeString("pt-BR", {
                 hour: "2-digit",
                 minute: "2-digit",
@@ -10173,7 +10173,7 @@ async function initializeChatHistory() {
     "Desk pronto para ajudar. Peça um resumo de mercado, riscos de curto prazo, panorama macro ou analise tecnica.",
     {
       meta: {
-        model: "google/gemini-2.0-flash-001",
+        model: "qwen/qwen3.6-plus",
         time: new Date().toLocaleTimeString("pt-BR", {
           hour: "2-digit",
           minute: "2-digit",
