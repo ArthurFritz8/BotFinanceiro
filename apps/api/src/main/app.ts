@@ -26,7 +26,17 @@ import { httpErrorHandler } from "../shared/errors/http-error-handler.js";
 import { logger } from "../shared/logger/logger.js";
 
 function normalizeOrigin(value: string): string {
-  return value.trim().replace(/\/$/, "");
+  const trimmedValue = value.trim();
+
+  if (trimmedValue.length === 0) {
+    return "";
+  }
+
+  try {
+    return new URL(trimmedValue).origin;
+  } catch {
+    return trimmedValue.replace(/\/$/, "");
+  }
 }
 
 export function buildApp() {

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 
+import { env } from "../../../shared/config/env.js";
 import { brokerLiveQuoteStreamMetricsStore } from "../../../shared/observability/broker-live-quote-stream-metrics-store.js";
 import {
   getBrokerCatalog,
@@ -9,23 +10,59 @@ import {
   parseBrokerLiveQuoteStreamQuery,
 } from "./brokers-controller.js";
 
+function normalizeOrigin(value: string): string {
+  const trimmedValue = value.trim();
+
+  if (trimmedValue.length === 0) {
+    return "";
+  }
+
+  try {
+    return new URL(trimmedValue).origin;
+  } catch {
+    return trimmedValue.replace(/\/$/, "");
+  }
+}
+
+const allowedOrigins = new Set(env.CORS_ALLOWED_ORIGINS.map((origin) => normalizeOrigin(origin)));
+
 export function registerBrokersRoutes(app: FastifyInstance): void {
   app.get("/brokers/catalog", getBrokerCatalog);
   app.get("/brokers/live-quote", getBrokerLiveQuote);
   app.get("/brokers/live-quote/batch", getBrokerLiveQuoteBatch);
   app.get("/brokers/live-quote/stream", (request, reply) => {
     const parsedQuery = parseBrokerLiveQuoteStreamQuery(request.query);
+    const requestOrigin =
+      typeof request.headers.origin === "string" ? normalizeOrigin(request.headers.origin) : "";
+    const originIsAllowed =
+      requestOrigin.length > 0 &&
+      (allowedOrigins.size === 0 || allowedOrigins.has(requestOrigin));
+
+    if (requestOrigin.length > 0 && !originIsAllowed) {
+      void reply.code(403).send({
+        error: "Origin not allowed",
+      });
+      return;
+    }
+
     const streamId = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     let sequence = 0;
     let closed = false;
 
     void reply.hijack();
-    reply.raw.writeHead(200, {
+    const responseHeaders: Record<string, string> = {
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
       "Content-Type": "text/event-stream; charset=utf-8",
       "X-Accel-Buffering": "no",
-    });
+    };
+
+    if (originIsAllowed) {
+      responseHeaders["Access-Control-Allow-Origin"] = requestOrigin;
+      responseHeaders.Vary = "Origin";
+    }
+
+    reply.raw.writeHead(200, responseHeaders);
 
     brokerLiveQuoteStreamMetricsStore.onConnectionOpened({
       broker: parsedQuery.broker,
