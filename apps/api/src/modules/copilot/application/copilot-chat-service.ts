@@ -224,6 +224,14 @@ const copilotBrokerLiveQuoteToolInputSchema = z.object({
 });
 
 const copilotDexScreenerTokenLookupToolInputSchema = z.object({
+  chain: z
+    .enum(["arbitrum", "avalanche", "base", "bsc", "celo", "ethereum", "optimism", "polygon", "solana"])
+    .optional(),
+  contractAddress: z
+    .string()
+    .trim()
+    .regex(/^(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/)
+    .optional(),
   maxResults: z.number().int().min(1).max(8).default(4),
   query: z.string().trim().min(2).max(120),
 });
@@ -2397,6 +2405,15 @@ const copilotTools: OpenRouterToolDefinition[] = [
     parameters: {
       additionalProperties: false,
       properties: {
+        chain: {
+          description: "Chain alvo opcional para priorizar a busca (ex: base, ethereum, solana)",
+          enum: ["arbitrum", "avalanche", "base", "bsc", "celo", "ethereum", "optimism", "polygon", "solana"],
+          type: "string",
+        },
+        contractAddress: {
+          description: "Contract address opcional para resolver holders e venues com maior precisao",
+          type: "string",
+        },
         maxResults: {
           default: 4,
           description: "Quantidade maxima de pares/venues retornados",
@@ -4485,18 +4502,19 @@ export class CopilotChatService {
     const riskScore = input.vampDetected ? 38 : 62;
     const vampStatus = input.vampDetected ? "**<span style=\"color:red\">FAIL</span>**" : "PASS";
     const unknownStatus = "UNKNOWN";
+    const insufficientOnChainData = "Sem dados on-chain suficientes para auditoria no momento.";
 
     return [
       `[RISK SCORE: ${riskScore}/100]`,
       "",
       "| Checklist de Seguranca | Status | Evidencia |",
       "| --- | --- | --- |",
-      `| High concentration (>4%) | ${unknownStatus} | Sem dados on-chain de top holders nesta rodada. |`,
-      `| Symmetric bundle | ${unknownStatus} | Sem dados on-chain de distribuicao top 10 nesta rodada. |`,
-      `| Viewers vs Holders anomaly | ${unknownStatus} | Sem metrica confiavel de holders nesta rodada. |`,
-      `| Coordinated funding ping | ${unknownStatus} | Sem trilha completa de funding por carteira nesta rodada. |`,
-      `| Early dump trap (<10k MC) | ${unknownStatus} | Sem classificacao de sniper/dev wallet nesta rodada. |`,
-      `| Community health | ${unknownStatus} | Sem confirmacao de pinned thesis/moderacao nesta rodada. |`,
+      `| High concentration (>4%) | ${unknownStatus} | ${insufficientOnChainData} |`,
+      `| Symmetric bundle | ${unknownStatus} | ${insufficientOnChainData} |`,
+      `| Viewers vs Holders anomaly | ${unknownStatus} | ${insufficientOnChainData} |`,
+      `| Coordinated funding ping | ${unknownStatus} | ${insufficientOnChainData} |`,
+      `| Early dump trap (<10k MC) | ${unknownStatus} | ${insufficientOnChainData} |`,
+      `| Community health | ${unknownStatus} | ${insufficientOnChainData} |`,
       `| VAMP SCAM (ticker cruzado) | ${vampStatus} | ${input.vampDetected
         ? "Contratos antigos/mortos com mesmo ticker/imagem detectados."
         : "Nenhum marcador forte de copia parasita detectado agora."} |`,
