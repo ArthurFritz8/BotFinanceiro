@@ -140,6 +140,26 @@ function hasRetryableFlag(details: unknown): details is RetryableErrorDetails {
   return typeof detailsRecord.retryable === "boolean";
 }
 
+function toObjectRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function toNonNegativeInt(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  if (value < 0) {
+    return undefined;
+  }
+
+  return Math.trunc(value);
+}
+
 function shouldRetryOpenRouterRequest(error: unknown): boolean {
   if (!(error instanceof AppError)) {
     return true;
@@ -222,6 +242,45 @@ function stringifyToolResult(result: unknown): string {
   }
 }
 
+function buildRequestMessages(
+  input: z.infer<typeof openRouterChatInputSchema>,
+): OpenRouterRequestMessage[] {
+  const messages: OpenRouterRequestMessage[] = [];
+
+  if (input.systemPrompt) {
+    messages.push({
+      content: input.systemPrompt,
+      role: "system",
+    });
+  }
+
+  const conversationMessages: OpenRouterConversationMessage[] =
+    input.messages && input.messages.length > 0
+      ? input.messages
+      : [
+          {
+            content: input.message ?? "",
+            role: "user",
+          },
+        ];
+
+  for (const conversationMessage of conversationMessages) {
+    if (conversationMessage.role === "assistant") {
+      messages.push({
+        content: conversationMessage.content,
+        role: "assistant",
+      });
+    } else {
+      messages.push({
+        content: conversationMessage.content,
+        role: "user",
+      });
+    }
+  }
+
+  return messages;
+}
+
 export interface OpenRouterChatCompletion {
   answer: string;
   fetchedAt: string;
@@ -254,39 +313,7 @@ export class OpenRouterChatAdapter {
     }
 
     const parsedInput = openRouterChatInputSchema.parse(input);
-
-    const messages: OpenRouterRequestMessage[] = [];
-
-    if (parsedInput.systemPrompt) {
-      messages.push({
-        content: parsedInput.systemPrompt,
-        role: "system",
-      });
-    }
-
-    const conversationMessages: OpenRouterConversationMessage[] =
-      parsedInput.messages && parsedInput.messages.length > 0
-        ? parsedInput.messages
-        : [
-            {
-              content: parsedInput.message ?? "",
-              role: "user",
-            },
-          ];
-
-    for (const conversationMessage of conversationMessages) {
-      if (conversationMessage.role === "assistant") {
-        messages.push({
-          content: conversationMessage.content,
-          role: "assistant",
-        });
-      } else {
-        messages.push({
-          content: conversationMessage.content,
-          role: "user",
-        });
-      }
-    }
+    const messages = buildRequestMessages(parsedInput);
 
     const usedTools = new Set<string>();
     const maxToolRounds = tools.length > 0 ? 3 : 0;
@@ -373,6 +400,126 @@ export class OpenRouterChatAdapter {
     });
   }
 
+  public async createCompletionStreamWithTools(
+    input: z.input<typeof openRouterChatInputSchema>,
+    tools: OpenRouterToolDefinition[],
+    onChunk: (chunk: string) => void | Promise<void>,
+  ): Promise<OpenRouterChatCompletion> {
+    if (env.OPENROUTER_API_KEY.length < 20) {
+      throw new AppError({
+        code: "OPENROUTER_NOT_CONFIGURED",
+        message: "OpenRouter API key is not configured",
+        statusCode: 503,
+      });
+    }
+
+    const parsedInput = openRouterChatInputSchema.parse(input);
+    const messages = buildRequestMessages(parsedInput);
+    const usedTools = new Set<string>();
+    const maxToolRounds = tools.length > 0 ? 3 : 0;
+
+    for (let round = 0; round <= maxToolRounds; round += 1) {
+      const response = await this.requestCompletionStream(messages, parsedInput, tools);
+      const streamedCompletion = await this.consumeCompletionStream(response, onChunk);
+      const toolCalls = streamedCompletion.toolCalls;
+
+      if (toolCalls.length === 0) {
+        if (streamedCompletion.answer.length === 0) {
+          throw new AppError({
+            code: "OPENROUTER_EMPTY_RESPONSE",
+            message: "OpenRouter returned an empty streamed completion",
+            statusCode: 502,
+          });
+        }
+
+        return {
+          answer: streamedCompletion.answer,
+          fetchedAt: new Date().toISOString(),
+          model: streamedCompletion.model,
+          provider: "openrouter",
+          responseId: streamedCompletion.responseId,
+          toolCallsUsed: [...usedTools],
+          usage: streamedCompletion.usage,
+        };
+      }
+
+      if (round >= maxToolRounds) {
+        throw new AppError({
+          code: "OPENROUTER_TOOL_LOOP_EXCEEDED",
+          details: {
+            maxToolRounds,
+          },
+          message: "OpenRouter exceeded maximum tool-calling rounds",
+          statusCode: 502,
+        });
+      }
+
+      messages.push({
+        content: streamedCompletion.answer.length > 0 ? streamedCompletion.answer : null,
+        role: "assistant",
+        tool_calls: toolCalls,
+      });
+
+      for (const toolCall of toolCalls) {
+        const toolResult = await this.executeToolCall(toolCall, tools);
+
+        if (toolResult.executedToolName) {
+          usedTools.add(toolResult.executedToolName);
+        }
+
+        messages.push({
+          content: stringifyToolResult(toolResult.payload),
+          name: toolCall.function.name,
+          role: "tool",
+          tool_call_id: toolCall.id,
+        });
+      }
+    }
+
+    throw new AppError({
+      code: "OPENROUTER_TOOL_CALLING_FAILED",
+      message: "OpenRouter tool-calling stream flow failed",
+      statusCode: 502,
+    });
+  }
+
+  public async createCompletionStream(
+    input: z.input<typeof openRouterChatInputSchema>,
+    onChunk: (chunk: string) => void | Promise<void>,
+  ): Promise<OpenRouterChatCompletion> {
+    if (env.OPENROUTER_API_KEY.length < 20) {
+      throw new AppError({
+        code: "OPENROUTER_NOT_CONFIGURED",
+        message: "OpenRouter API key is not configured",
+        statusCode: 503,
+      });
+    }
+
+    const parsedInput = openRouterChatInputSchema.parse(input);
+    const messages = buildRequestMessages(parsedInput);
+
+    const response = await this.requestCompletionStream(messages, parsedInput, []);
+    const streamedCompletion = await this.consumeCompletionStream(response, onChunk);
+
+    if (streamedCompletion.answer.length === 0) {
+      throw new AppError({
+        code: "OPENROUTER_EMPTY_RESPONSE",
+        message: "OpenRouter returned an empty streamed completion",
+        statusCode: 502,
+      });
+    }
+
+    return {
+      answer: streamedCompletion.answer,
+      fetchedAt: new Date().toISOString(),
+      model: streamedCompletion.model,
+      provider: "openrouter",
+      responseId: streamedCompletion.responseId,
+      toolCallsUsed: [],
+      usage: streamedCompletion.usage,
+    };
+  }
+
   private async executeToolCall(
     toolCall: OpenRouterToolCall,
     tools: OpenRouterToolDefinition[],
@@ -428,6 +575,312 @@ export class OpenRouterChatAdapter {
         },
       };
     }
+  }
+
+  private async requestCompletionStream(
+    messages: OpenRouterRequestMessage[],
+    input: z.infer<typeof openRouterChatInputSchema>,
+    tools: OpenRouterToolDefinition[],
+  ): Promise<Response> {
+    return retryWithExponentialBackoff(
+      () => this.requestCompletionStreamOnce(messages, input, tools),
+      {
+        attempts: 3,
+        baseDelayMs: 300,
+        jitterPercent: 20,
+        shouldRetry: shouldRetryOpenRouterRequest,
+      },
+    );
+  }
+
+  private async requestCompletionStreamOnce(
+    messages: OpenRouterRequestMessage[],
+    input: z.infer<typeof openRouterChatInputSchema>,
+    tools: OpenRouterToolDefinition[],
+  ): Promise<Response> {
+    const requestBody: Record<string, unknown> = {
+      max_tokens: input.maxTokens,
+      messages,
+      model: env.OPENROUTER_MODEL,
+      stream: true,
+      stream_options: {
+        include_usage: true,
+      },
+      temperature: input.temperature,
+    };
+
+    if (tools.length > 0) {
+      requestBody.tool_choice = "auto";
+      requestBody.tools = tools.map((tool) => ({
+        function: {
+          description: tool.description,
+          name: tool.name,
+          parameters: tool.parameters,
+        },
+        type: "function",
+      }));
+    }
+
+    const requestHeaders = buildOpenRouterHeaders();
+
+    let response: Response;
+
+    try {
+      response = await fetch(`${env.OPENROUTER_API_BASE_URL}/chat/completions`, {
+        body: JSON.stringify(requestBody),
+        headers: requestHeaders,
+        method: "POST",
+        signal: AbortSignal.timeout(env.OPENROUTER_TIMEOUT_MS),
+      });
+    } catch (error) {
+      throw new AppError({
+        code: "OPENROUTER_UNAVAILABLE",
+        details: {
+          cause: error,
+        },
+        message: "OpenRouter streaming request failed",
+        statusCode: 503,
+      });
+    }
+
+    if (!response.ok) {
+      const responseText = await response.text();
+      const retryable = isRetryableStatusCode(response.status);
+
+      throw new AppError({
+        code: "OPENROUTER_BAD_STATUS",
+        details: {
+          responseBody: responseText.slice(0, 1000),
+          responseStatus: response.status,
+          retryable,
+        },
+        message: "OpenRouter returned a non-success status",
+        statusCode: retryable ? 503 : 502,
+      });
+    }
+
+    return response;
+  }
+
+  private async consumeCompletionStream(
+    response: Response,
+    onChunk: (chunk: string) => void | Promise<void>,
+  ): Promise<{
+    answer: string;
+    model: string;
+    responseId: string;
+    toolCalls: OpenRouterToolCall[];
+    usage: {
+      completionTokens?: number;
+      promptTokens?: number;
+      totalTokens?: number;
+    };
+  }> {
+    if (!response.body) {
+      throw new AppError({
+        code: "OPENROUTER_STREAM_UNAVAILABLE",
+        message: "OpenRouter streaming body is unavailable",
+        statusCode: 502,
+      });
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let streamBuffer = "";
+    let answer = "";
+    let model = env.OPENROUTER_MODEL;
+    let responseId = "";
+    const streamedToolCallsByIndex = new Map<number, {
+      arguments: string;
+      id: string;
+      name: string;
+    }>();
+    const usage: {
+      completionTokens?: number;
+      promptTokens?: number;
+      totalTokens?: number;
+    } = {};
+
+    const processEventBlock = async (eventBlock: string): Promise<boolean> => {
+      const lines = eventBlock
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith("data:"));
+
+      for (const line of lines) {
+        const payload = line.slice(5).trim();
+
+        if (payload.length === 0) {
+          continue;
+        }
+
+        if (payload === "[DONE]") {
+          return true;
+        }
+
+        let parsedPayload: unknown;
+
+        try {
+          parsedPayload = JSON.parse(payload) as unknown;
+        } catch {
+          continue;
+        }
+
+        const payloadRecord = toObjectRecord(parsedPayload);
+
+        if (!payloadRecord) {
+          continue;
+        }
+
+        if (typeof payloadRecord.id === "string" && payloadRecord.id.length > 0) {
+          responseId = payloadRecord.id;
+        }
+
+        if (typeof payloadRecord.model === "string" && payloadRecord.model.length > 0) {
+          model = payloadRecord.model;
+        }
+
+        const usageRecord = toObjectRecord(payloadRecord.usage);
+
+        if (usageRecord) {
+          usage.completionTokens = toNonNegativeInt(usageRecord.completion_tokens) ?? usage.completionTokens;
+          usage.promptTokens = toNonNegativeInt(usageRecord.prompt_tokens) ?? usage.promptTokens;
+          usage.totalTokens = toNonNegativeInt(usageRecord.total_tokens) ?? usage.totalTokens;
+        }
+
+        const choices = Array.isArray(payloadRecord.choices) ? payloadRecord.choices : [];
+        const firstChoiceRecord = toObjectRecord(choices[0]);
+        const deltaRecord = toObjectRecord(firstChoiceRecord?.delta);
+        const chunk = typeof deltaRecord?.content === "string" ? deltaRecord.content : "";
+
+        const deltaToolCalls = Array.isArray(deltaRecord?.tool_calls) ? deltaRecord.tool_calls : [];
+
+        for (const rawToolCall of deltaToolCalls) {
+          const toolCallRecord = toObjectRecord(rawToolCall);
+
+          if (!toolCallRecord) {
+            continue;
+          }
+
+          const toolIndex = toNonNegativeInt(toolCallRecord.index);
+
+          if (toolIndex === undefined) {
+            continue;
+          }
+
+          const currentToolCall = streamedToolCallsByIndex.get(toolIndex) ?? {
+            arguments: "",
+            id: "",
+            name: "",
+          };
+
+          if (typeof toolCallRecord.id === "string" && toolCallRecord.id.length > 0) {
+            currentToolCall.id = toolCallRecord.id;
+          }
+
+          const functionRecord = toObjectRecord(toolCallRecord.function);
+
+          if (typeof functionRecord?.name === "string" && functionRecord.name.length > 0) {
+            currentToolCall.name = functionRecord.name;
+          }
+
+          if (typeof functionRecord?.arguments === "string" && functionRecord.arguments.length > 0) {
+            currentToolCall.arguments += functionRecord.arguments;
+          }
+
+          streamedToolCallsByIndex.set(toolIndex, currentToolCall);
+        }
+
+        if (chunk.length > 0) {
+          answer += chunk;
+          await onChunk(chunk);
+        }
+      }
+
+      return false;
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      streamBuffer += decoder.decode(value, {
+        stream: true,
+      });
+
+      while (true) {
+        const eventDelimiterIndex = streamBuffer.indexOf("\n\n");
+
+        if (eventDelimiterIndex < 0) {
+          break;
+        }
+
+        const eventBlock = streamBuffer.slice(0, eventDelimiterIndex);
+        streamBuffer = streamBuffer.slice(eventDelimiterIndex + 2);
+        const isDone = await processEventBlock(eventBlock);
+
+        if (isDone) {
+          const toolCalls = [...streamedToolCallsByIndex.entries()]
+            .sort((left, right) => left[0] - right[0])
+            .map(([index, item]) => {
+              if (item.name.length === 0) {
+                return null;
+              }
+
+              return {
+                function: {
+                  arguments: item.arguments.length > 0 ? item.arguments : "{}",
+                  name: item.name,
+                },
+                id: item.id.length > 0 ? item.id : `tool_call_${index}_${Date.now()}`,
+                type: "function",
+              } satisfies OpenRouterToolCall;
+            })
+            .filter((item): item is OpenRouterToolCall => item !== null);
+
+          return {
+            answer: answer.trim(),
+            model,
+            responseId: responseId.length > 0 ? responseId : `openrouter-stream-${Date.now()}`,
+            toolCalls,
+            usage,
+          };
+        }
+      }
+    }
+
+    if (streamBuffer.trim().length > 0) {
+      await processEventBlock(streamBuffer);
+    }
+
+    const toolCalls = [...streamedToolCallsByIndex.entries()]
+      .sort((left, right) => left[0] - right[0])
+      .map(([index, item]) => {
+        if (item.name.length === 0) {
+          return null;
+        }
+
+        return {
+          function: {
+            arguments: item.arguments.length > 0 ? item.arguments : "{}",
+            name: item.name,
+          },
+          id: item.id.length > 0 ? item.id : `tool_call_${index}_${Date.now()}`,
+          type: "function",
+        } satisfies OpenRouterToolCall;
+      })
+      .filter((item): item is OpenRouterToolCall => item !== null);
+
+    return {
+      answer: answer.trim(),
+      model,
+      responseId: responseId.length > 0 ? responseId : `openrouter-stream-${Date.now()}`,
+      toolCalls,
+      usage,
+    };
   }
 
   private async requestCompletion(

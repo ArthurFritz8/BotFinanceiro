@@ -1,4 +1,8 @@
 import {
+  BinanceLiveStreamAdapter,
+  type BinanceLiveStreamEvent,
+} from "../../../integrations/market_data/binance-live-stream-adapter.js";
+import {
   BinanceMarketDataAdapter,
   type BinanceChartPoint,
 } from "../../../integrations/market_data/binance-market-data-adapter.js";
@@ -143,6 +147,60 @@ export interface CryptoChartResponse {
 
 const liveChartFreshTtlSeconds = 8;
 const liveChartStaleSeconds = 20;
+const liveRangePointLimitMap: Record<CryptoChartRange, number> = {
+  "1y": 365,
+  "24h": 288,
+  "30d": 180,
+  "7d": 168,
+  "90d": 180,
+};
+
+interface BinanceLiveState {
+  assetId: string;
+  changePercent24h: number | null;
+  lastPrice: number | null;
+  points: CryptoChartPoint[];
+  range: CryptoChartRange;
+  symbol: string;
+  unsubscribe: (() => void) | null;
+  updatedAt: string;
+  volume24h: number | null;
+}
+
+const binanceLiveStreamAdapter = new BinanceLiveStreamAdapter();
+const binanceLiveStates = new Map<string, BinanceLiveState>();
+const binanceLiveStatePromises = new Map<string, Promise<BinanceLiveState | null>>();
+
+function resolveRangePointLimit(range: CryptoChartRange): number {
+  return liveRangePointLimitMap[range] ?? 288;
+}
+
+function buildBinanceLiveStateKey(assetId: string, range: CryptoChartRange): string {
+  return `${assetId}:${range}`;
+}
+
+function upsertRingBufferPoint(
+  points: CryptoChartPoint[],
+  point: CryptoChartPoint,
+  maxPoints: number,
+): CryptoChartPoint[] {
+  const normalizedPoints = points.slice();
+  const existingPointIndex = normalizedPoints.findIndex((candidate) => candidate.timestamp === point.timestamp);
+
+  if (existingPointIndex >= 0) {
+    normalizedPoints[existingPointIndex] = point;
+  } else {
+    normalizedPoints.push(point);
+  }
+
+  normalizedPoints.sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
+
+  if (normalizedPoints.length > maxPoints) {
+    return normalizedPoints.slice(normalizedPoints.length - maxPoints);
+  }
+
+  return normalizedPoints;
+}
 
 function buildCacheKey(
   mode: "delayed" | "live",
@@ -1004,6 +1062,218 @@ export class CryptoChartService {
   private readonly coinGeckoAdapter = new CoinGeckoMarketChartAdapter();
   private readonly binanceAdapter = new BinanceMarketDataAdapter();
   private readonly multiExchangeAdapter = new MultiExchangeMarketDataAdapter();
+
+  private applyBinanceLiveEvent(state: BinanceLiveState, event: BinanceLiveStreamEvent): void {
+    state.updatedAt = event.eventAt;
+
+    if (event.type === "ticker") {
+      state.lastPrice = event.lastPrice;
+      state.changePercent24h = event.changePercent24h;
+      state.volume24h = event.volume24h;
+
+      const latestPoint = state.points[state.points.length - 1];
+
+      if (latestPoint) {
+        const updatedPoint: CryptoChartPoint = {
+          ...latestPoint,
+          close: roundPrice(event.lastPrice),
+          high: roundPrice(Math.max(latestPoint.high, event.lastPrice)),
+          low: roundPrice(Math.min(latestPoint.low, event.lastPrice)),
+        };
+
+        state.points = upsertRingBufferPoint(
+          state.points,
+          updatedPoint,
+          resolveRangePointLimit(state.range),
+        );
+      }
+
+      return;
+    }
+
+    state.lastPrice = event.point.close;
+    state.points = upsertRingBufferPoint(
+      state.points,
+      {
+        close: event.point.close,
+        high: event.point.high,
+        low: event.point.low,
+        open: event.point.open,
+        timestamp: event.point.timestamp,
+        volume: event.point.volume,
+      },
+      resolveRangePointLimit(state.range),
+    );
+  }
+
+  private buildBinanceLivePayloadFromState(
+    state: BinanceLiveState,
+    currency: string,
+  ): CachedChartPayload | null {
+    if (state.points.length < 5) {
+      return null;
+    }
+
+    const normalizedPoints = state.points.slice();
+    const latestPoint = normalizedPoints[normalizedPoints.length - 1];
+
+    if (latestPoint && state.lastPrice !== null) {
+      normalizedPoints[normalizedPoints.length - 1] = {
+        ...latestPoint,
+        close: roundPrice(state.lastPrice),
+        high: roundPrice(Math.max(latestPoint.high, state.lastPrice)),
+        low: roundPrice(Math.min(latestPoint.low, state.lastPrice)),
+      };
+    }
+
+    return {
+      assetId: state.assetId,
+      currency,
+      fetchedAt: state.updatedAt,
+      insights: computeInsights(normalizedPoints, state.range),
+      live: {
+        changePercent24h: state.changePercent24h,
+        source: "binance",
+        symbol: state.symbol,
+        volume24h: state.volume24h,
+      },
+      mode: "live",
+      points: normalizedPoints,
+      provider: "binance",
+      range: state.range,
+    };
+  }
+
+  private async ensureBinanceLiveState(input: {
+    assetId: string;
+    range: CryptoChartRange;
+    subscribe: boolean;
+  }): Promise<BinanceLiveState | null> {
+    const stateKey = buildBinanceLiveStateKey(input.assetId, input.range);
+    const existingState = binanceLiveStates.get(stateKey);
+
+    if (existingState && existingState.points.length >= 5) {
+      return existingState;
+    }
+
+    const pendingState = binanceLiveStatePromises.get(stateKey);
+
+    if (pendingState) {
+      return pendingState;
+    }
+
+    const nextStatePromise = (async () => {
+      const [chartPayload, tickerSnapshot] = await Promise.all([
+        this.binanceAdapter.getMarketChart({
+          assetId: input.assetId,
+          range: input.range,
+        }),
+        this.binanceAdapter.getTickerSnapshot({
+          assetId: input.assetId,
+        }),
+      ]);
+      const nextPoints = chartPayload.points
+        .map((point) => normalizeBinancePoint(point))
+        .slice(-resolveRangePointLimit(chartPayload.range));
+      const previousState = binanceLiveStates.get(stateKey);
+      const nextState: BinanceLiveState = {
+        assetId: chartPayload.assetId,
+        changePercent24h: tickerSnapshot.changePercent24h,
+        lastPrice: tickerSnapshot.lastPrice,
+        points: nextPoints,
+        range: chartPayload.range,
+        symbol: tickerSnapshot.symbol,
+        unsubscribe: previousState?.unsubscribe ?? null,
+        updatedAt: tickerSnapshot.fetchedAt,
+        volume24h: tickerSnapshot.volume24h,
+      };
+
+      if (input.subscribe && !nextState.unsubscribe) {
+        nextState.unsubscribe = binanceLiveStreamAdapter.subscribe(
+          {
+            assetId: chartPayload.assetId,
+            range: chartPayload.range,
+          },
+          (event) => {
+            const currentState = binanceLiveStates.get(stateKey);
+
+            if (!currentState) {
+              return;
+            }
+
+            this.applyBinanceLiveEvent(currentState, event);
+          },
+        );
+      }
+
+      binanceLiveStates.set(stateKey, nextState);
+      return nextState;
+    })()
+      .catch(() => {
+        return null;
+      })
+      .finally(() => {
+        binanceLiveStatePromises.delete(stateKey);
+      });
+
+    binanceLiveStatePromises.set(stateKey, nextStatePromise);
+    return nextStatePromise;
+  }
+
+  private async resolveBinanceLivePayload(input: {
+    assetId: string;
+    currency: string;
+    range: CryptoChartRange;
+    subscribe?: boolean;
+  }): Promise<CachedChartPayload | null> {
+    const state = await this.ensureBinanceLiveState({
+      assetId: input.assetId,
+      range: input.range,
+      subscribe: input.subscribe === true,
+    });
+
+    if (!state) {
+      return null;
+    }
+
+    return this.buildBinanceLivePayloadFromState(state, input.currency);
+  }
+
+  public async getLiveStreamSnapshot(input: {
+    assetId: string;
+    range: CryptoChartRange;
+    broker?: LiveChartBroker;
+  }): Promise<CryptoChartResponse> {
+    const liveBroker = input.broker ?? "binance";
+    const normalizedInput = {
+      assetId: input.assetId.toLowerCase(),
+      broker: liveBroker,
+      currency: "usd",
+      range: input.range,
+    };
+
+    if (normalizedInput.broker === "binance") {
+      const livePayload = await this.resolveBinanceLivePayload({
+        ...normalizedInput,
+        subscribe: true,
+      });
+
+      if (livePayload) {
+        const cacheKey = buildCacheKey(
+          livePayload.mode,
+          livePayload.assetId,
+          livePayload.currency,
+          livePayload.range,
+          normalizedInput.broker,
+        );
+
+        memoryCache.set(cacheKey, livePayload, liveChartFreshTtlSeconds, liveChartStaleSeconds);
+        return toResponse(livePayload, "refreshed", false);
+      }
+    }
+
+    return this.refreshLiveChart(normalizedInput);
+  }
 
   public async refreshChart(input: {
     assetId: string;

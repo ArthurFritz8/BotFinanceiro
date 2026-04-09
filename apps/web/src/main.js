@@ -1385,6 +1385,10 @@ let activeAuthUser = null;
 let conversationItems = [];
 let currentChartSnapshot = null;
 let chartAutoRefreshTimer = null;
+let chartLiveStream = null;
+let chartLiveStreamBackoffTimer = null;
+let chartLiveStreamReconnectAttempt = 0;
+let chartLiveStreamKey = "";
 let isChartLoading = false;
 let chartApi = null;
 let chartBaseSeries = null;
@@ -8046,6 +8050,7 @@ function destroyInteractiveChart() {
     terminalRefreshTimer = null;
   }
 
+  stopChartAutoRefresh();
   stopWatchlistAutoRefresh();
 
   if (chartResizeObserver && chartViewport instanceof HTMLElement) {
@@ -8297,6 +8302,203 @@ async function requestCryptoChart(assetId, range, mode, exchange) {
   }
 }
 
+function buildCryptoLiveStreamUrl(assetId, exchange, range, intervalMs) {
+  const params = new URLSearchParams({
+    assetId,
+    exchange,
+    intervalMs: String(intervalMs),
+    range,
+  });
+
+  return buildApiUrl(`/v1/crypto/live-stream?${params.toString()}`);
+}
+
+function applyChartSnapshot(snapshot, options = {}) {
+  if (!snapshot || !Array.isArray(snapshot.points)) {
+    throw new Error("Resposta de grafico invalida");
+  }
+
+  currentChartSnapshot = snapshot;
+  void loadNewsIntelligence(snapshot.assetId);
+
+  if (chartViewMode === "copilot") {
+    renderInteractiveChart(snapshot);
+  }
+
+  renderChartMetrics(snapshot);
+
+  const forcedModeReason = typeof options.forcedModeReason === "string" ? options.forcedModeReason : "";
+  const fallbackReason = typeof options.fallbackReason === "string" ? options.fallbackReason : "";
+  const combinedFallbackReason = [forcedModeReason, fallbackReason].filter((item) => item.length > 0).join(" | ");
+  const selectedExchange = typeof options.selectedExchange === "string"
+    ? options.selectedExchange
+    : getSelectedTerminalExchange();
+  const transport = options.transport === "stream" ? "stream" : "polling";
+  const cacheLabel = snapshot.cache?.state ? `cache ${snapshot.cache.state}` : "cache n/d";
+  const rangeLabel = CHART_RANGE_LABELS[snapshot.range] ?? snapshot.range;
+  const modeLabel = CHART_MODE_LABELS[snapshot.mode] ?? snapshot.mode;
+  const styleLabel = chartViewMode === "tv"
+    ? CHART_STYLE_LABELS[getSelectedTerminalStyle()] ?? getSelectedTerminalStyle()
+    : CHART_STYLE_LABELS[resolveChartStyle()] ?? resolveChartStyle();
+  const providerLabel = String(snapshot.provider ?? "n/d").toUpperCase();
+  const refreshIntervalMs = resolveAutoRefreshIntervalMs();
+  const refreshLabel =
+    snapshot.mode === "live"
+      ? refreshIntervalMs > 0
+        ? ` • refresh ${Math.round(refreshIntervalMs / 1000)}s`
+        : " • refresh manual"
+      : "";
+  const liveLabel =
+    snapshot.mode === "live"
+      ? ` • 24h ${formatPercent(snapshot.live?.changePercent24h)} • vol ${formatPrice(snapshot.live?.volume24h, "usd")}`
+      : "";
+  const fallbackLabel = combinedFallbackReason.length > 0
+    ? " • live indisponivel, usando delayed"
+    : "";
+  const updatedAtLabel = new Date().toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const transportLabel = transport === "stream" ? " • transporte stream" : "";
+
+  setChartStatus(
+    `Grafico ${snapshot.assetId.toUpperCase()} (${modeLabel}, ${rangeLabel}, ${styleLabel}) • exchange ${selectedExchange} • provider ${providerLabel} • ${cacheLabel}${refreshLabel}${liveLabel}${transportLabel}${fallbackLabel} • atualizado ${updatedAtLabel}`,
+  );
+
+  if (chartViewMode === "tv") {
+    setChartLegend(
+      `Terminal ${buildTradingViewSymbol()} ativo • intervalo ${getSelectedTerminalInterval()} • estilo ${styleLabel}`,
+    );
+  } else if (combinedFallbackReason.length > 0) {
+    setChartLegend(`Fallback ativo: ${combinedFallbackReason}. Exibindo delayed temporariamente.`, "error");
+  }
+}
+
+function stopChartLiveStream() {
+  if (chartLiveStreamBackoffTimer !== null) {
+    window.clearTimeout(chartLiveStreamBackoffTimer);
+    chartLiveStreamBackoffTimer = null;
+  }
+
+  if (chartLiveStream) {
+    chartLiveStream.close();
+    chartLiveStream = null;
+  }
+
+  chartLiveStreamKey = "";
+}
+
+function connectChartLiveStream(intervalMs) {
+  if (typeof EventSource !== "function") {
+    return false;
+  }
+
+  if (!(chartAssetSelect instanceof HTMLSelectElement) || !(chartRangeSelect instanceof HTMLSelectElement)) {
+    return false;
+  }
+
+  if (chartModeSelect?.value !== "live" || !isNativeLiveModeSupported()) {
+    stopChartLiveStream();
+    return false;
+  }
+
+  const assetId = chartAssetSelect.value;
+  const range = chartRangeSelect.value;
+  const exchange = getSelectedBroker();
+  const streamKey = `${assetId}:${exchange}:${range}:${intervalMs}`;
+
+  if (chartLiveStream && chartLiveStreamKey === streamKey) {
+    return true;
+  }
+
+  stopChartLiveStream();
+  chartLiveStreamKey = streamKey;
+
+  const streamUrl = buildCryptoLiveStreamUrl(assetId, exchange, range, intervalMs);
+  const eventSource = new EventSource(streamUrl);
+  chartLiveStream = eventSource;
+
+  eventSource.addEventListener("snapshot", (event) => {
+    let payload = null;
+
+    try {
+      payload = JSON.parse(event.data);
+    } catch {
+      payload = null;
+    }
+
+    const snapshot = payload?.chart ?? null;
+
+    if (!snapshot || !Array.isArray(snapshot.points)) {
+      return;
+    }
+
+    if (chartAssetSelect.value !== snapshot.assetId) {
+      return;
+    }
+
+    if (chartRangeSelect.value !== snapshot.range) {
+      return;
+    }
+
+    chartLiveStreamReconnectAttempt = 0;
+
+    try {
+      applyChartSnapshot(snapshot, {
+        selectedExchange: getSelectedTerminalExchange(),
+        transport: "stream",
+      });
+    } catch {
+      // Keep stream alive even if a malformed snapshot arrives.
+    }
+  });
+
+  eventSource.addEventListener("stream-error", (event) => {
+    let payload = null;
+
+    try {
+      payload = JSON.parse(event.data);
+    } catch {
+      payload = null;
+    }
+
+    const message = typeof payload?.message === "string"
+      ? payload.message
+      : "Stream de chart reportou falha";
+    setChartStatus(message, "error");
+  });
+
+  eventSource.onerror = () => {
+    if (!chartLiveStream || chartLiveStreamKey !== streamKey) {
+      return;
+    }
+
+    stopChartLiveStream();
+    chartLiveStreamReconnectAttempt += 1;
+    const backoffMs = Math.min(30000, 1200 * 2 ** chartLiveStreamReconnectAttempt);
+    setChartStatus(`Reconectando stream live em ${Math.round(backoffMs / 1000)}s...`, "loading");
+
+    chartLiveStreamBackoffTimer = window.setTimeout(() => {
+      chartLiveStreamBackoffTimer = null;
+
+      if (chartModeSelect?.value !== "live") {
+        return;
+      }
+
+      configureChartAutoRefresh();
+
+      if (!chartLiveStream) {
+        void loadChart({
+          silent: true,
+        });
+      }
+    }, backoffMs);
+  };
+
+  return true;
+}
+
 function shouldRefreshNewsIntelligence(assetId, force = false) {
   if (force) {
     return true;
@@ -8478,59 +8680,12 @@ async function loadChart(options = {}) {
 
   try {
     const { fallbackReason, snapshot } = await requestCryptoChart(assetId, range, mode, selectedBroker);
-    const combinedFallbackReason = [forcedModeReason, fallbackReason].filter((item) => item.length > 0).join(" | ");
-
-    if (!snapshot || !Array.isArray(snapshot.points)) {
-      throw new Error("Resposta de grafico invalida");
-    }
-
-    currentChartSnapshot = snapshot;
-    void loadNewsIntelligence(assetId);
-
-    if (chartViewMode === "copilot") {
-      renderInteractiveChart(snapshot);
-    }
-
-    renderChartMetrics(snapshot);
-
-    const cacheLabel = snapshot.cache?.state ? `cache ${snapshot.cache.state}` : "cache n/d";
-    const rangeLabel = CHART_RANGE_LABELS[snapshot.range] ?? snapshot.range;
-    const modeLabel = CHART_MODE_LABELS[snapshot.mode] ?? snapshot.mode;
-    const styleLabel = chartViewMode === "tv"
-      ? CHART_STYLE_LABELS[getSelectedTerminalStyle()] ?? getSelectedTerminalStyle()
-      : CHART_STYLE_LABELS[resolveChartStyle()] ?? resolveChartStyle();
-    const providerLabel = String(snapshot.provider ?? "n/d").toUpperCase();
-    const refreshIntervalMs = resolveAutoRefreshIntervalMs();
-    const refreshLabel =
-      snapshot.mode === "live"
-        ? refreshIntervalMs > 0
-          ? ` • refresh ${Math.round(refreshIntervalMs / 1000)}s`
-          : " • refresh manual"
-        : "";
-    const liveLabel =
-      snapshot.mode === "live"
-        ? ` • 24h ${formatPercent(snapshot.live?.changePercent24h)} • vol ${formatPrice(snapshot.live?.volume24h, "usd")}`
-        : "";
-    const fallbackLabel = combinedFallbackReason.length > 0
-      ? " • live indisponivel, usando delayed"
-      : "";
-    const updatedAtLabel = new Date().toLocaleTimeString("pt-BR", {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
+    applyChartSnapshot(snapshot, {
+      fallbackReason,
+      forcedModeReason,
+      selectedExchange,
+      transport: "polling",
     });
-
-    setChartStatus(
-      `Grafico ${assetId.toUpperCase()} (${modeLabel}, ${rangeLabel}, ${styleLabel}) • exchange ${selectedExchange} • provider ${providerLabel} • ${cacheLabel}${refreshLabel}${liveLabel}${fallbackLabel} • atualizado ${updatedAtLabel}`,
-    );
-
-    if (chartViewMode === "tv") {
-      setChartLegend(
-        `Terminal ${buildTradingViewSymbol()} ativo • intervalo ${getSelectedTerminalInterval()} • estilo ${styleLabel}`,
-      );
-    } else if (combinedFallbackReason.length > 0) {
-      setChartLegend(`Fallback ativo: ${combinedFallbackReason}. Exibindo delayed temporariamente.`, "error");
-    }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Erro ao carregar grafico";
     let spotQuote = null;
@@ -8586,6 +8741,8 @@ async function loadChart(options = {}) {
 }
 
 function stopChartAutoRefresh() {
+  stopChartLiveStream();
+
   if (chartAutoRefreshTimer !== null) {
     window.clearInterval(chartAutoRefreshTimer);
     chartAutoRefreshTimer = null;
@@ -8602,6 +8759,10 @@ function configureChartAutoRefresh() {
   const refreshIntervalMs = resolveAutoRefreshIntervalMs();
 
   if (refreshIntervalMs <= 0) {
+    return;
+  }
+
+  if (chartModeSelect.value === "live" && connectChartLiveStream(refreshIntervalMs)) {
     return;
   }
 
@@ -8658,6 +8819,37 @@ function pushMessage(role, content, options = {}) {
   saveMessagesToLocalStorage();
   renderMessages();
   renderRecentHistory();
+
+  return messages.length - 1;
+}
+
+function updateMessageAt(index, options = {}) {
+  const targetMessage = messages[index];
+
+  if (!targetMessage) {
+    return;
+  }
+
+  if (typeof options.content === "string") {
+    targetMessage.content = options.content;
+  }
+
+  if (typeof options.error === "boolean") {
+    targetMessage.error = options.error;
+  }
+
+  if (options.meta) {
+    targetMessage.meta = options.meta;
+  }
+
+  const persist = options.persist !== false;
+
+  if (persist) {
+    saveMessagesToLocalStorage();
+    renderRecentHistory();
+  }
+
+  renderMessages();
 }
 
 function setSendingState(nextValue) {
@@ -8676,22 +8868,7 @@ function setSendingState(nextValue) {
 }
 
 async function requestCopilotCompletion(message) {
-  const headers = {
-    "Content-Type": "application/json",
-  };
-
-  if (isCloudHistoryEnabled() && supabase) {
-    try {
-      const { data } = await supabase.auth.getSession();
-      const accessToken = data?.session?.access_token;
-
-      if (typeof accessToken === "string" && accessToken.length > 20) {
-        headers.Authorization = `Bearer ${accessToken}`;
-      }
-    } catch {
-      // Keep request running even if session retrieval fails.
-    }
-  }
+  const headers = await buildCopilotRequestHeaders();
 
   const requestSessionId = isCloudHistoryEnabled() && activeConversationId.length > 0
     ? activeConversationId
@@ -8722,6 +8899,136 @@ async function requestCopilotCompletion(message) {
   }
 
   return payload;
+}
+
+async function buildCopilotRequestHeaders() {
+  const headers = {
+    "Content-Type": "application/json",
+  };
+
+  if (isCloudHistoryEnabled() && supabase) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const accessToken = data?.session?.access_token;
+
+      if (typeof accessToken === "string" && accessToken.length > 20) {
+        headers.Authorization = `Bearer ${accessToken}`;
+      }
+    } catch {
+      // Keep request running even if session retrieval fails.
+    }
+  }
+
+  return headers;
+}
+
+async function requestCopilotCompletionStream(message, options = {}) {
+  const headers = await buildCopilotRequestHeaders();
+  const requestSessionId = isCloudHistoryEnabled() && activeConversationId.length > 0
+    ? activeConversationId
+    : chatSessionId;
+  const response = await fetch(buildApiUrl("/v1/copilot/chat/stream"), {
+    body: JSON.stringify({
+      maxTokens: 350,
+      message,
+      sessionId: requestSessionId,
+      temperature: 0.1,
+    }),
+    headers,
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    let errorPayload = null;
+
+    try {
+      errorPayload = await response.json();
+    } catch {
+      errorPayload = null;
+    }
+
+    const apiMessage = errorPayload?.error?.message;
+    throw new Error(typeof apiMessage === "string" ? apiMessage : "Falha ao consultar o Copiloto");
+  }
+
+  if (!response.body) {
+    throw new Error("Stream da IA indisponivel");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let streamBuffer = "";
+  const streamMeta = {
+    answer: "",
+    model: "",
+    toolCallsUsed: [],
+    usage: null,
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    streamBuffer += decoder.decode(value, {
+      stream: true,
+    });
+
+    while (true) {
+      const lineBreakIndex = streamBuffer.indexOf("\n");
+
+      if (lineBreakIndex < 0) {
+        break;
+      }
+
+      const line = streamBuffer.slice(0, lineBreakIndex).trim();
+      streamBuffer = streamBuffer.slice(lineBreakIndex + 1);
+
+      if (line.length === 0) {
+        continue;
+      }
+
+      let eventPayload = null;
+
+      try {
+        eventPayload = JSON.parse(line);
+      } catch {
+        eventPayload = null;
+      }
+
+      if (!eventPayload || typeof eventPayload !== "object") {
+        continue;
+      }
+
+      if (eventPayload.type === "chunk" && typeof eventPayload.data === "string") {
+        if (typeof options.onChunk === "function") {
+          options.onChunk(eventPayload.data);
+        }
+        continue;
+      }
+
+      if (eventPayload.type === "done") {
+        streamMeta.answer = typeof eventPayload?.data?.answer === "string" ? eventPayload.data.answer : "";
+        streamMeta.model = typeof eventPayload?.data?.model === "string" ? eventPayload.data.model : "";
+        streamMeta.toolCallsUsed = Array.isArray(eventPayload?.data?.toolCallsUsed)
+          ? eventPayload.data.toolCallsUsed
+          : [];
+        streamMeta.usage = eventPayload?.data?.usage ?? null;
+        continue;
+      }
+
+      if (eventPayload.type === "error") {
+        const messageText = typeof eventPayload?.data?.message === "string"
+          ? eventPayload.data.message
+          : "Falha ao consultar o Copiloto";
+        throw new Error(messageText);
+      }
+    }
+  }
+
+  return streamMeta;
 }
 
 async function loadMessagesFromBackend() {
@@ -8835,38 +9142,79 @@ async function handleSubmit(event) {
 
   chatInput.value = "";
   setSendingState(true);
+  let assistantMessageIndex = -1;
 
   try {
-    const payload = await requestCopilotCompletion(prompt);
-    const aiData = payload?.data;
-
-    if (!aiData || typeof aiData.answer !== "string") {
-      throw new Error("Resposta da IA sem formato esperado");
-    }
-
-    if (activeModelElement && typeof aiData.model === "string") {
-      activeModelElement.textContent = aiData.model;
-    }
-
     const assistantTime = new Date().toLocaleTimeString("pt-BR", {
       hour: "2-digit",
       minute: "2-digit",
     });
+    let assistantAnswer = "";
+    let assistantModel = "";
+    let assistantUsage = null;
+
+    assistantMessageIndex = pushMessage("assistant", "", {
+      meta: {
+        time: assistantTime,
+      },
+    });
+
+    try {
+      const streamMeta = await requestCopilotCompletionStream(prompt, {
+        onChunk: (chunk) => {
+          assistantAnswer += chunk;
+          updateMessageAt(assistantMessageIndex, {
+            content: assistantAnswer,
+            persist: false,
+          });
+        },
+      });
+
+      const finalStreamAnswer = typeof streamMeta.answer === "string" ? streamMeta.answer.trim() : "";
+
+      if (assistantAnswer.trim().length === 0 && finalStreamAnswer.length === 0) {
+        throw new Error("Stream da IA sem conteudo util");
+      }
+
+      if (finalStreamAnswer.length > 0) {
+        assistantAnswer = streamMeta.answer;
+      }
+
+      assistantModel = typeof streamMeta.model === "string" ? streamMeta.model : "";
+      assistantUsage = streamMeta.usage;
+    } catch {
+      const payload = await requestCopilotCompletion(prompt);
+      const aiData = payload?.data;
+
+      if (!aiData || typeof aiData.answer !== "string") {
+        throw new Error("Resposta da IA sem formato esperado");
+      }
+
+      assistantAnswer = aiData.answer;
+      assistantModel = typeof aiData.model === "string" ? aiData.model : "";
+      assistantUsage = aiData.usage ?? null;
+    }
+
+    if (assistantModel.length > 0 && activeModelElement) {
+      activeModelElement.textContent = assistantModel;
+    }
 
     const assistantMessageMeta = {
-      model: aiData.model,
+      model: assistantModel,
       time: assistantTime,
-      totalTokens: aiData.usage?.totalTokens,
+      totalTokens: assistantUsage?.totalTokens,
     };
 
-    pushMessage("assistant", aiData.answer, {
+    updateMessageAt(assistantMessageIndex, {
+      content: assistantAnswer,
       meta: assistantMessageMeta,
+      persist: true,
     });
 
     if (isCloudHistoryEnabled() && activeConversationId.length > 0) {
       try {
         await persistCloudMessage(activeConversationId, {
-          content: aiData.answer,
+          content: assistantAnswer,
           error: false,
           meta: assistantMessageMeta,
           role: "assistant",
@@ -8892,12 +9240,22 @@ async function handleSubmit(event) {
       minute: "2-digit",
     });
 
-    pushMessage("assistant", message, {
-      error: true,
-      meta: {
-        time: assistantErrorTime,
-      },
-    });
+    if (assistantMessageIndex >= 0) {
+      updateMessageAt(assistantMessageIndex, {
+        content: message,
+        error: true,
+        meta: {
+          time: assistantErrorTime,
+        },
+      });
+    } else {
+      pushMessage("assistant", message, {
+        error: true,
+        meta: {
+          time: assistantErrorTime,
+        },
+      });
+    }
 
     if (isCloudHistoryEnabled() && activeConversationId.length > 0) {
       try {
@@ -9201,6 +9559,7 @@ function setupChartLab() {
 
   chartControlsForm.addEventListener("submit", (event) => {
     event.preventDefault();
+    configureChartAutoRefresh();
     void loadChart();
     void refreshWatchlistMarket({
       silent: true,
@@ -9218,6 +9577,7 @@ function setupChartLab() {
     chartSymbolSourceModule = "crypto";
     syncTerminalSymbolWithAsset();
     renderWatchlist();
+    configureChartAutoRefresh();
     void loadChart();
     void refreshWatchlistMarket({
       silent: true,
@@ -9232,6 +9592,7 @@ function setupChartLab() {
 
   chartRangeSelect.addEventListener("change", () => {
     chartHasInitialFit = false;
+    configureChartAutoRefresh();
     void loadChart();
     saveChartPreferences();
   });
@@ -9445,6 +9806,7 @@ function setupChartLab() {
 
       renderWatchlist();
       chartHasInitialFit = false;
+      configureChartAutoRefresh();
       void loadChart();
       void refreshWatchlistMarket({
         silent: true,

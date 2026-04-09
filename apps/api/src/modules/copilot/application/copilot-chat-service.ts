@@ -3154,6 +3154,52 @@ export class CopilotChatService {
     return completionWithFallback;
   }
 
+  public async chatStream(
+    input: CopilotChatInput,
+    onChunk: (chunk: string) => void | Promise<void>,
+  ): Promise<OpenRouterChatCompletion> {
+    const preparedInput = this.withDefaultSystemPrompt(input);
+    const conversationMessages = await this.buildConversationMessages(preparedInput, input.sessionId);
+    const intentContextMessage = this.buildIntentContextMessage(preparedInput.message, conversationMessages);
+    const latestUserMessage = this.resolveLatestUserMessage(intentContextMessage, conversationMessages);
+    const scopedTools = this.resolveToolsForMessage(latestUserMessage);
+    const completion = await openRouterChatAdapter.createCompletionStreamWithTools(
+      {
+        maxTokens: preparedInput.maxTokens,
+        messages: conversationMessages,
+        systemPrompt: preparedInput.systemPrompt,
+        temperature: preparedInput.temperature,
+      },
+      scopedTools,
+      onChunk,
+    );
+    const completionWithFallback = await this.applyIntentFallback(
+      {
+        ...preparedInput,
+        message: latestUserMessage,
+      },
+      completion,
+      conversationMessages,
+    );
+
+    try {
+      await copilotChatAuditStore.append({
+        completion: completionWithFallback,
+        input: preparedInput,
+        sessionId: input.sessionId,
+      });
+    } catch (error) {
+      logger.warn(
+        {
+          err: error,
+        },
+        "Failed to append copilot streaming chat audit record",
+      );
+    }
+
+    return completionWithFallback;
+  }
+
   public async getSessionHistory(input: {
     limit?: number;
     sessionId: string;

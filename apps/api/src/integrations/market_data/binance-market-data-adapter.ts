@@ -4,7 +4,7 @@ import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
 import { retryWithExponentialBackoff } from "../../shared/resilience/retry-with-backoff.js";
 
-const supportedRangeSchema = z.enum(["24h", "7d", "30d", "90d", "1y"]);
+export const supportedRangeSchema = z.enum(["24h", "7d", "30d", "90d", "1y"]);
 
 const chartInputSchema = z.object({
   assetId: z.string().trim().min(1).transform((value) => value.toLowerCase()),
@@ -18,7 +18,8 @@ const tickerSchema = z.object({
   volume: z.string().optional(),
 });
 
-type SupportedRange = z.infer<typeof supportedRangeSchema>;
+export type BinanceSupportedRange = z.infer<typeof supportedRangeSchema>;
+type SupportedRange = BinanceSupportedRange;
 
 interface RetryableErrorDetails {
   retryable?: boolean;
@@ -74,7 +75,7 @@ function roundPrice(value: number): number {
   return Number(value.toFixed(8));
 }
 
-function mapRangeToKlineConfig(range: SupportedRange): { interval: string; limit: number } {
+export function mapRangeToKlineConfig(range: SupportedRange): { interval: string; limit: number } {
   if (range === "24h") {
     return {
       interval: "5m",
@@ -128,7 +129,7 @@ const assetIdToBinanceSymbol = new Map<string, string>([
   ["xrp", "XRPUSDT"],
 ]);
 
-function resolveBinanceSymbol(assetId: string): string {
+export function resolveBinanceSymbol(assetId: string): string {
   return assetIdToBinanceSymbol.get(assetId) ?? `${assetId.replace(/[^a-z0-9]/g, "").toUpperCase()}USDT`;
 }
 

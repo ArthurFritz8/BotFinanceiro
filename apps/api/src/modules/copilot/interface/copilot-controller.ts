@@ -25,11 +25,90 @@ const copilotHistoryQuerySchema = z.object({
 
 const copilotChatService = new CopilotChatService();
 
+function writeNdjsonEvent(reply: FastifyReply, payload: unknown): void {
+  reply.raw.write(`${JSON.stringify(payload)}\n`);
+}
+
 export async function postCopilotChat(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const parsedBody = copilotChatBodySchema.parse(request.body);
   const data = await copilotChatService.chat(parsedBody);
 
   void reply.send(buildSuccessResponse(request.id, data));
+}
+
+export async function postCopilotChatStream(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const parsedBody = copilotChatBodySchema.parse(request.body);
+
+  reply.raw.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+  reply.raw.setHeader("Cache-Control", "no-cache, no-transform");
+  reply.raw.setHeader("Connection", "keep-alive");
+  reply.hijack();
+
+  if (typeof reply.raw.flushHeaders === "function") {
+    reply.raw.flushHeaders();
+  }
+
+  let isClosed = false;
+  const closeStream = (): void => {
+    if (isClosed) {
+      return;
+    }
+
+    isClosed = true;
+
+    if (!reply.raw.writableEnded) {
+      reply.raw.end();
+    }
+  };
+
+  request.raw.on("close", closeStream);
+  request.raw.on("aborted", closeStream);
+
+  writeNdjsonEvent(reply, {
+    data: {
+      requestId: request.id,
+      startedAt: new Date().toISOString(),
+    },
+    type: "meta",
+  });
+
+  try {
+    const completion = await copilotChatService.chatStream(parsedBody, async (chunk) => {
+      if (isClosed || chunk.length === 0) {
+        return;
+      }
+
+      writeNdjsonEvent(reply, {
+        data: chunk,
+        type: "chunk",
+      });
+    });
+
+    if (!isClosed) {
+      writeNdjsonEvent(reply, {
+        data: {
+          answer: completion.answer,
+          fetchedAt: completion.fetchedAt,
+          model: completion.model,
+          responseId: completion.responseId,
+          toolCallsUsed: completion.toolCallsUsed,
+          usage: completion.usage,
+        },
+        type: "done",
+      });
+    }
+  } catch (error) {
+    if (!isClosed) {
+      writeNdjsonEvent(reply, {
+        data: {
+          message: error instanceof Error ? error.message : "Falha ao consultar o Copiloto",
+        },
+        type: "error",
+      });
+    }
+  } finally {
+    closeStream();
+  }
 }
 
 export async function getCopilotHistory(request: FastifyRequest, reply: FastifyReply): Promise<void> {

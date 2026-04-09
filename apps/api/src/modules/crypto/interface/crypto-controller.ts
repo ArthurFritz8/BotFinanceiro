@@ -60,6 +60,13 @@ const liveChartQuerySchema = z.object({
   range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("24h"),
 });
 
+const liveStreamQuerySchema = z.object({
+  assetId: z.string().trim().min(1).default("bitcoin"),
+  exchange: liveChartExchangeSchema.default("binance"),
+  intervalMs: z.coerce.number().int().min(500).max(15000).default(1000),
+  range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("24h"),
+});
+
 const marketOverviewQuerySchema = z.object({
   limit: z.coerce.number().int().min(3).max(25).default(10),
 });
@@ -74,6 +81,11 @@ const cryptoSpotPriceService = new CryptoSpotPriceService();
 const cryptoChartService = new CryptoChartService();
 const cryptoNewsIntelligenceService = new CryptoNewsIntelligenceService();
 const cryptoMarketOverviewService = new CryptoMarketOverviewService();
+
+function writeSseEvent(reply: FastifyReply, eventName: string, payload: unknown): void {
+  reply.raw.write(`event: ${eventName}\n`);
+  reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
 
 export function getSyncPolicy(request: FastifyRequest, reply: FastifyReply): void {
   const parsedQuery = syncPolicyQuerySchema.parse(request.query);
@@ -114,6 +126,91 @@ export async function getLiveChart(request: FastifyRequest, reply: FastifyReply)
   });
 
   void reply.send(buildSuccessResponse(request.id, chart));
+}
+
+export async function streamLiveChart(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const parsedQuery = liveStreamQuerySchema.parse(request.query);
+
+  reply.raw.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  reply.raw.setHeader("Cache-Control", "no-cache, no-transform");
+  reply.raw.setHeader("Connection", "keep-alive");
+  reply.raw.setHeader("X-Accel-Buffering", "no");
+  reply.hijack();
+
+  if (typeof reply.raw.flushHeaders === "function") {
+    reply.raw.flushHeaders();
+  }
+
+  let isClosed = false;
+  let isInFlight = false;
+  let streamTimer: NodeJS.Timeout | null = null;
+
+  const cleanup = (): void => {
+    if (isClosed) {
+      return;
+    }
+
+    isClosed = true;
+
+    if (streamTimer) {
+      clearInterval(streamTimer);
+      streamTimer = null;
+    }
+
+    if (!reply.raw.writableEnded) {
+      reply.raw.end();
+    }
+  };
+
+  request.raw.on("close", cleanup);
+  request.raw.on("aborted", cleanup);
+
+  const pushSnapshot = async (): Promise<void> => {
+    if (isClosed || isInFlight) {
+      return;
+    }
+
+    isInFlight = true;
+
+    try {
+      const chart = await cryptoChartService.getLiveStreamSnapshot({
+        assetId: parsedQuery.assetId,
+        broker: parsedQuery.exchange,
+        range: parsedQuery.range,
+      });
+
+      if (isClosed) {
+        return;
+      }
+
+      writeSseEvent(reply, "snapshot", {
+        chart,
+        generatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      if (isClosed) {
+        return;
+      }
+
+      writeSseEvent(reply, "stream-error", {
+        generatedAt: new Date().toISOString(),
+        message: error instanceof Error ? error.message : "Falha no stream de chart ao vivo",
+      });
+    } finally {
+      isInFlight = false;
+    }
+  };
+
+  writeSseEvent(reply, "meta", {
+    generatedAt: new Date().toISOString(),
+    mode: "live",
+    requestId: request.id,
+  });
+  void pushSnapshot();
+
+  streamTimer = setInterval(() => {
+    void pushSnapshot();
+  }, parsedQuery.intervalMs);
 }
 
 export async function getMarketOverview(request: FastifyRequest, reply: FastifyReply): Promise<void> {

@@ -149,6 +149,7 @@ const environmentSchema = z
     YAHOO_FINANCE_API_BASE_URL: z.string().url(),
     YAHOO_FINANCE_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
     BINANCE_API_BASE_URL: z.string().url().default("https://api.binance.com"),
+    BINANCE_WS_BASE_URL: z.string().url().default("wss://stream.binance.com:9443"),
     BINANCE_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
     BINANCE_FUTURES_API_BASE_URL: z.string().url().default("https://fapi.binance.com"),
     BINANCE_FUTURES_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
