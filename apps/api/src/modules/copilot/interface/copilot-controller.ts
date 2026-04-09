@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
+import { env } from "../../../shared/config/env.js";
 import { buildSuccessResponse } from "../../../shared/http/api-response.js";
 import { CopilotChatService } from "../application/copilot-chat-service.js";
 
@@ -25,6 +26,22 @@ const copilotHistoryQuerySchema = z.object({
 
 const copilotChatService = new CopilotChatService();
 
+function normalizeOrigin(value: string): string {
+  const trimmedValue = value.trim();
+
+  if (trimmedValue.length === 0) {
+    return "";
+  }
+
+  try {
+    return new URL(trimmedValue).origin;
+  } catch {
+    return trimmedValue.replace(/\/$/, "");
+  }
+}
+
+const allowedOrigins = new Set(env.CORS_ALLOWED_ORIGINS.map((origin) => normalizeOrigin(origin)));
+
 function writeNdjsonEvent(reply: FastifyReply, payload: unknown): void {
   reply.raw.write(`${JSON.stringify(payload)}\n`);
 }
@@ -38,10 +55,28 @@ export async function postCopilotChat(request: FastifyRequest, reply: FastifyRep
 
 export async function postCopilotChatStream(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const parsedBody = copilotChatBodySchema.parse(request.body);
+  const requestOrigin =
+    typeof request.headers.origin === "string" ? normalizeOrigin(request.headers.origin) : "";
+  const originIsAllowed =
+    requestOrigin.length > 0 &&
+    (allowedOrigins.size === 0 || allowedOrigins.has(requestOrigin));
+
+  if (requestOrigin.length > 0 && !originIsAllowed) {
+    void reply.code(403).send({
+      error: "Origin not allowed",
+    });
+    return;
+  }
 
   reply.raw.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
   reply.raw.setHeader("Cache-Control", "no-cache, no-transform");
   reply.raw.setHeader("Connection", "keep-alive");
+
+  if (originIsAllowed) {
+    reply.raw.setHeader("Access-Control-Allow-Origin", requestOrigin);
+    reply.raw.setHeader("Vary", "Origin");
+  }
+
   reply.hijack();
 
   if (typeof reply.raw.flushHeaders === "function") {

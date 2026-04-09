@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
+import { env } from "../../../shared/config/env.js";
 import { buildSuccessResponse } from "../../../shared/http/api-response.js";
 import {
   CryptoChartService,
@@ -82,6 +83,22 @@ const cryptoChartService = new CryptoChartService();
 const cryptoNewsIntelligenceService = new CryptoNewsIntelligenceService();
 const cryptoMarketOverviewService = new CryptoMarketOverviewService();
 
+function normalizeOrigin(value: string): string {
+  const trimmedValue = value.trim();
+
+  if (trimmedValue.length === 0) {
+    return "";
+  }
+
+  try {
+    return new URL(trimmedValue).origin;
+  } catch {
+    return trimmedValue.replace(/\/$/, "");
+  }
+}
+
+const allowedOrigins = new Set(env.CORS_ALLOWED_ORIGINS.map((origin) => normalizeOrigin(origin)));
+
 function writeSseEvent(reply: FastifyReply, eventName: string, payload: unknown): void {
   reply.raw.write(`event: ${eventName}\n`);
   reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
@@ -130,11 +147,29 @@ export async function getLiveChart(request: FastifyRequest, reply: FastifyReply)
 
 export async function streamLiveChart(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const parsedQuery = liveStreamQuerySchema.parse(request.query);
+  const requestOrigin =
+    typeof request.headers.origin === "string" ? normalizeOrigin(request.headers.origin) : "";
+  const originIsAllowed =
+    requestOrigin.length > 0 &&
+    (allowedOrigins.size === 0 || allowedOrigins.has(requestOrigin));
+
+  if (requestOrigin.length > 0 && !originIsAllowed) {
+    void reply.code(403).send({
+      error: "Origin not allowed",
+    });
+    return;
+  }
 
   reply.raw.setHeader("Content-Type", "text/event-stream; charset=utf-8");
   reply.raw.setHeader("Cache-Control", "no-cache, no-transform");
   reply.raw.setHeader("Connection", "keep-alive");
   reply.raw.setHeader("X-Accel-Buffering", "no");
+
+  if (originIsAllowed) {
+    reply.raw.setHeader("Access-Control-Allow-Origin", requestOrigin);
+    reply.raw.setHeader("Vary", "Origin");
+  }
+
   reply.hijack();
 
   if (typeof reply.raw.flushHeaders === "function") {
