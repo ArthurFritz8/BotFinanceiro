@@ -128,6 +128,8 @@ function isRetryableStatusCode(statusCode: number): boolean {
 }
 
 interface RetryableErrorDetails {
+  affordableMaxTokens?: number;
+  maxTokensLimitExceeded?: boolean;
   promptTokensLimitExceeded?: boolean;
   retryable?: boolean;
 }
@@ -148,6 +150,24 @@ function hasPromptTokensLimitFlag(details: unknown): details is RetryableErrorDe
 
   const detailsRecord = details as Record<string, unknown>;
   return typeof detailsRecord.promptTokensLimitExceeded === "boolean";
+}
+
+function hasMaxTokensLimitFlag(details: unknown): details is RetryableErrorDetails {
+  if (typeof details !== "object" || details === null) {
+    return false;
+  }
+
+  const detailsRecord = details as Record<string, unknown>;
+  return typeof detailsRecord.maxTokensLimitExceeded === "boolean";
+}
+
+function hasAffordableMaxTokensFlag(details: unknown): details is RetryableErrorDetails {
+  if (typeof details !== "object" || details === null) {
+    return false;
+  }
+
+  const detailsRecord = details as Record<string, unknown>;
+  return typeof detailsRecord.affordableMaxTokens === "number";
 }
 
 function toObjectRecord(value: unknown): Record<string, unknown> | null {
@@ -179,6 +199,10 @@ function shouldRetryOpenRouterRequest(error: unknown): boolean {
     return true;
   }
 
+  if (error.code === "OPENROUTER_INVALID_JSON") {
+    return true;
+  }
+
   if (error.code === "OPENROUTER_BAD_STATUS" && hasRetryableFlag(error.details)) {
     return error.details.retryable === true;
   }
@@ -200,6 +224,71 @@ function shouldFallbackToPromptBudgetMode(error: unknown): boolean {
   }
 
   return error.details.promptTokensLimitExceeded === true;
+}
+
+function resolveAffordableMaxTokensForFallback(
+  error: unknown,
+  currentMaxTokens: number,
+): number | null {
+  if (!(error instanceof AppError)) {
+    return null;
+  }
+
+  if (error.code !== "OPENROUTER_BAD_STATUS") {
+    return null;
+  }
+
+  if (!hasMaxTokensLimitFlag(error.details) || error.details.maxTokensLimitExceeded !== true) {
+    return null;
+  }
+
+  if (!hasAffordableMaxTokensFlag(error.details)) {
+    return null;
+  }
+
+  const affordableMaxTokensRaw = error.details.affordableMaxTokens;
+
+  if (typeof affordableMaxTokensRaw !== "number" || !Number.isFinite(affordableMaxTokensRaw)) {
+    return null;
+  }
+
+  const affordableMaxTokens = Math.max(1, Math.trunc(affordableMaxTokensRaw));
+
+  if (affordableMaxTokens >= currentMaxTokens) {
+    return null;
+  }
+
+  return affordableMaxTokens;
+}
+
+function parseAffordableMaxTokens(responseText: string): number | null {
+  const affordabilityMatch = responseText.match(/can\s+only\s+afford\s+([0-9]+)/i);
+
+  if (!affordabilityMatch?.[1]) {
+    return null;
+  }
+
+  const parsedAffordableMaxTokens = Number.parseInt(affordabilityMatch[1], 10);
+
+  if (!Number.isFinite(parsedAffordableMaxTokens) || parsedAffordableMaxTokens < 1) {
+    return null;
+  }
+
+  return parsedAffordableMaxTokens;
+}
+
+function isMaxTokensLimitExceededStatus(responseStatus: number, responseText: string): boolean {
+  if (responseStatus !== 402) {
+    return false;
+  }
+
+  const normalizedResponseText = responseText.toLowerCase();
+
+  return (
+    normalizedResponseText.includes("fewer max_tokens")
+    || normalizedResponseText.includes("can only afford")
+    || normalizedResponseText.includes("requires more credits")
+  );
 }
 
 function isPromptTokensLimitExceededStatus(responseStatus: number, responseText: string): boolean {
@@ -354,6 +443,7 @@ export class OpenRouterChatAdapter {
     const usedTools = new Set<string>();
     const maxToolRounds = tools.length > 0 ? 3 : 0;
     let warnedPromptBudgetFallback = false;
+    let warnedMaxTokensFallback = false;
 
     for (let round = 0; round <= maxToolRounds; round += 1) {
       const parsedPayload = await this.requestCompletionWithPromptBudgetFallback(
@@ -366,6 +456,13 @@ export class OpenRouterChatAdapter {
           }
 
           warnedPromptBudgetFallback = true;
+        },
+        () => {
+          if (warnedMaxTokensFallback) {
+            return;
+          }
+
+          warnedMaxTokensFallback = true;
         },
       );
 
@@ -466,6 +563,7 @@ export class OpenRouterChatAdapter {
     const usedTools = new Set<string>();
     const maxToolRounds = tools.length > 0 ? 3 : 0;
     let warnedPromptBudgetFallback = false;
+    let warnedMaxTokensFallback = false;
 
     for (let round = 0; round <= maxToolRounds; round += 1) {
       const response = await this.requestCompletionStreamWithPromptBudgetFallback(
@@ -478,6 +576,13 @@ export class OpenRouterChatAdapter {
           }
 
           warnedPromptBudgetFallback = true;
+        },
+        () => {
+          if (warnedMaxTokensFallback) {
+            return;
+          }
+
+          warnedMaxTokensFallback = true;
         },
       );
       const streamedCompletion = await this.consumeCompletionStream(response, onChunk);
@@ -658,18 +763,41 @@ export class OpenRouterChatAdapter {
     input: z.infer<typeof openRouterChatInputSchema>,
     tools: OpenRouterToolDefinition[],
     onFallbackActivated: () => void,
+    onMaxTokensFallbackActivated: () => void,
   ): Promise<Response> {
-    try {
-      return await this.requestCompletionStream(messages, input, tools);
-    } catch (error) {
-      if (!shouldFallbackToPromptBudgetMode(error) || tools.length === 0) {
+    let currentInput = input;
+    let currentTools = tools;
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        return await this.requestCompletionStream(messages, currentInput, currentTools);
+      } catch (error) {
+        if (shouldFallbackToPromptBudgetMode(error) && currentTools.length > 0) {
+          onFallbackActivated();
+          currentTools = [];
+          continue;
+        }
+
+        const affordableMaxTokens = resolveAffordableMaxTokensForFallback(error, currentInput.maxTokens);
+
+        if (affordableMaxTokens !== null) {
+          onMaxTokensFallbackActivated();
+          currentInput = {
+            ...currentInput,
+            maxTokens: affordableMaxTokens,
+          };
+          continue;
+        }
+
         throw error;
       }
-
-      onFallbackActivated();
-
-      return this.requestCompletionStream(messages, input, []);
     }
+
+    throw new AppError({
+      code: "OPENROUTER_DEGRADATION_EXHAUSTED",
+      message: "OpenRouter fallback strategies exhausted",
+      statusCode: 502,
+    });
   }
 
   private async requestCompletionStreamOnce(
@@ -725,11 +853,15 @@ export class OpenRouterChatAdapter {
     if (!response.ok) {
       const responseText = await response.text();
       const retryable = isRetryableStatusCode(response.status);
+      const affordableMaxTokens = parseAffordableMaxTokens(responseText);
+      const maxTokensLimitExceeded = isMaxTokensLimitExceededStatus(response.status, responseText);
       const promptTokensLimitExceeded = isPromptTokensLimitExceededStatus(response.status, responseText);
 
       throw new AppError({
         code: "OPENROUTER_BAD_STATUS",
         details: {
+          affordableMaxTokens,
+          maxTokensLimitExceeded,
           promptTokensLimitExceeded,
           responseBody: responseText.slice(0, 1000),
           responseStatus: response.status,
@@ -985,18 +1117,41 @@ export class OpenRouterChatAdapter {
     input: z.infer<typeof openRouterChatInputSchema>,
     tools: OpenRouterToolDefinition[],
     onFallbackActivated: () => void,
+    onMaxTokensFallbackActivated: () => void,
   ): Promise<z.infer<typeof openRouterResponseSchema>> {
-    try {
-      return await this.requestCompletion(messages, input, tools);
-    } catch (error) {
-      if (!shouldFallbackToPromptBudgetMode(error) || tools.length === 0) {
+    let currentInput = input;
+    let currentTools = tools;
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        return await this.requestCompletion(messages, currentInput, currentTools);
+      } catch (error) {
+        if (shouldFallbackToPromptBudgetMode(error) && currentTools.length > 0) {
+          onFallbackActivated();
+          currentTools = [];
+          continue;
+        }
+
+        const affordableMaxTokens = resolveAffordableMaxTokensForFallback(error, currentInput.maxTokens);
+
+        if (affordableMaxTokens !== null) {
+          onMaxTokensFallbackActivated();
+          currentInput = {
+            ...currentInput,
+            maxTokens: affordableMaxTokens,
+          };
+          continue;
+        }
+
         throw error;
       }
-
-      onFallbackActivated();
-
-      return this.requestCompletion(messages, input, []);
     }
+
+    throw new AppError({
+      code: "OPENROUTER_DEGRADATION_EXHAUSTED",
+      message: "OpenRouter fallback strategies exhausted",
+      statusCode: 502,
+    });
   }
 
   private async requestCompletionOnce(
@@ -1048,11 +1203,15 @@ export class OpenRouterChatAdapter {
     if (!response.ok) {
       const responseText = await response.text();
       const retryable = isRetryableStatusCode(response.status);
+      const affordableMaxTokens = parseAffordableMaxTokens(responseText);
+      const maxTokensLimitExceeded = isMaxTokensLimitExceededStatus(response.status, responseText);
       const promptTokensLimitExceeded = isPromptTokensLimitExceededStatus(response.status, responseText);
 
       throw new AppError({
         code: "OPENROUTER_BAD_STATUS",
         details: {
+          affordableMaxTokens,
+          maxTokensLimitExceeded,
           promptTokensLimitExceeded,
           responseBody: responseText.slice(0, 1000),
           responseStatus: response.status,
@@ -1063,13 +1222,35 @@ export class OpenRouterChatAdapter {
       });
     }
 
-    let payload: unknown;
+    let responseText = "";
 
     try {
-      payload = await response.json();
+      responseText = await response.text();
     } catch {
       throw new AppError({
         code: "OPENROUTER_INVALID_JSON",
+        details: {
+          contentType: response.headers.get("content-type") ?? "",
+          responseBody: "",
+          responseStatus: response.status,
+        },
+        message: "OpenRouter returned invalid JSON",
+        statusCode: 502,
+      });
+    }
+
+    let payload: unknown;
+
+    try {
+      payload = JSON.parse(responseText) as unknown;
+    } catch {
+      throw new AppError({
+        code: "OPENROUTER_INVALID_JSON",
+        details: {
+          contentType: response.headers.get("content-type") ?? "",
+          responseBody: responseText.slice(0, 1000),
+          responseStatus: response.status,
+        },
         message: "OpenRouter returned invalid JSON",
         statusCode: 502,
       });
