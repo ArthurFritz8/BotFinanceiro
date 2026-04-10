@@ -89,6 +89,7 @@ Politica de retencao:
 3. ADR 031: `docs/ADR/ADR-031-resiliencia-mercado-coincap-e-copiloto.md`
 4. ADR 032: `docs/ADR/ADR-032-inteligencia-noticias-cripto-e-analise-profunda.md`
 5. ADR 033: `docs/ADR/ADR-033-memecoin-radar-social-sentiment.md`
+6. ADR 034: `docs/ADR/ADR-034-hardening-cotacao-fx-copiloto.md`
 
 ## Relatorio completo desta entrega
 

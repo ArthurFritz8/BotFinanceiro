@@ -36,6 +36,13 @@
 3. Toda chamada externa deve aplicar timeout, retry com backoff e circuit breaker.
 4. Cache em camadas antes de novas chamadas externas.
 
+## Diretrizes de resiliencia do Copiloto (IA)
+1. Roteamento por intencao deve priorizar tools read-only antes de resposta livre para perguntas de mercado.
+2. Perguntas de cambio/FX (ex.: dolar, EURUSD, USDBRL) devem usar tool dedicada de forex ou snapshot financeiro antes da resposta final.
+3. Respostas de cotacao em tempo real devem citar fonte e timestamp da coleta.
+4. Quando o modelo nao usar tool obrigatoria por intencao critica, o backend deve aplicar fallback deterministico anti-alucinacao.
+5. Regras de fallback por intencao critica devem ter teste de regressao de rota.
+
 ## Camadas por modulo (referencia)
 1. domain: entidades, regras e contratos.
 2. application: casos de uso e orquestracao.
