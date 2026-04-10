@@ -1,8 +1,12 @@
+import WebSocket, { type RawData } from "ws";
 import { z } from "zod";
 
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
+import { logger } from "../../shared/logger/logger.js";
 import { retryWithExponentialBackoff } from "../../shared/resilience/retry-with-backoff.js";
+
+const FUTURES_STREAM_STALE_MS = 20_000;
 
 const symbolSchema = z
   .string()
@@ -38,6 +42,33 @@ const openInterestSchema = z.object({
   time: z.coerce.number().int().nullable().optional(),
 });
 
+const tickerStreamItemSchema = z.object({
+  P: z.string().optional(),
+  c: z.string(),
+  h: z.string().optional(),
+  l: z.string().optional(),
+  q: z.string().optional(),
+  s: z.string().trim().min(1),
+  v: z.string().optional(),
+});
+
+interface FuturesTickerCacheItem {
+  changePercent24h: number | null;
+  high24h: number | null;
+  lastPrice: number;
+  low24h: number | null;
+  quoteVolume24h: number | null;
+  updatedAtMs: number;
+  volume24h: number | null;
+}
+
+interface FuturesTickerStreamState {
+  closedByClient: boolean;
+  reconnectAttempt: number;
+  reconnectTimer: NodeJS.Timeout | null;
+  websocket: WebSocket | null;
+}
+
 function normalizeNumeric(value: string | undefined): number | null {
   if (typeof value !== "string") {
     return null;
@@ -61,6 +92,72 @@ function roundNumber(value: number): number {
 
 function isRetryableStatusCode(statusCode: number): boolean {
   return statusCode === 408 || statusCode === 425 || statusCode === 429 || statusCode >= 500;
+}
+
+function toRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function toRawText(rawData: RawData): string {
+  if (typeof rawData === "string") {
+    return rawData;
+  }
+
+  if (Array.isArray(rawData)) {
+    return Buffer.concat(rawData).toString("utf8");
+  }
+
+  return rawData.toString("utf8");
+}
+
+function normalizeStreamSymbol(value: string): string {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function computeBackoffMs(attempt: number): number {
+  const baseDelayMs = Math.min(30_000, 900 * 2 ** attempt);
+  const jitterMs = Math.round(baseDelayMs * 0.2 * Math.random());
+  return baseDelayMs + jitterMs;
+}
+
+function buildFuturesTickerWsUrl(): string {
+  const normalizedBaseUrl = env.BINANCE_FUTURES_WS_BASE_URL.replace(/\/$/, "");
+
+  if (normalizedBaseUrl.endsWith("/ws")) {
+    return `${normalizedBaseUrl}/!ticker@arr`;
+  }
+
+  if (normalizedBaseUrl.endsWith("/stream")) {
+    return `${normalizedBaseUrl}?streams=!ticker@arr`;
+  }
+
+  return `${normalizedBaseUrl}/ws/!ticker@arr`;
+}
+
+function extractTickerRecordsFromPayload(payload: unknown): unknown[] {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  const payloadRecord = toRecord(payload);
+
+  if (!payloadRecord) {
+    return [];
+  }
+
+  if (Array.isArray(payloadRecord.data)) {
+    return payloadRecord.data;
+  }
+
+  if (toRecord(payloadRecord.data)) {
+    return [payloadRecord.data];
+  }
+
+  return [payloadRecord];
 }
 
 interface RetryableErrorDetails {
@@ -113,7 +210,31 @@ export interface BinanceFuturesContractSnapshot {
   venue: "binance_futures";
 }
 
+export interface BinanceFuturesTickerStreamHealth {
+  cacheSize: number;
+  connected: boolean;
+  connecting: boolean;
+  enabled: boolean;
+  freshSymbols: number;
+  freshestTickerAt: string | null;
+  reconnectAttempt: number;
+  staleSymbols: number;
+  stalenessThresholdMs: number;
+  streamUrl: string;
+}
+
 export class BinanceFuturesMarketDataAdapter {
+  private readonly streamEnabled = env.BINANCE_FUTURES_WS_ENABLED && env.NODE_ENV !== "test";
+
+  private readonly tickerCacheBySymbol = new Map<string, FuturesTickerCacheItem>();
+
+  private readonly tickerStreamState: FuturesTickerStreamState = {
+    closedByClient: false,
+    reconnectAttempt: 0,
+    reconnectTimer: null,
+    websocket: null,
+  };
+
   public async getContractSnapshot(input: {
     symbol: string;
   }): Promise<BinanceFuturesContractSnapshot> {
@@ -121,17 +242,13 @@ export class BinanceFuturesMarketDataAdapter {
     const query = new URLSearchParams({
       symbol,
     }).toString();
+    this.ensureTickerStreamStarted();
+    const tickerFromStream = this.readTickerFromStream(symbol);
 
-    const [tickerPayload, premiumPayload, openInterestPayload] = await Promise.all([
-      retryWithExponentialBackoff(
-        () => this.requestJson(`/fapi/v1/ticker/24hr?${query}`),
-        {
-          attempts: 3,
-          baseDelayMs: 200,
-          jitterPercent: 20,
-          shouldRetry: shouldRetryFuturesRequest,
-        },
-      ),
+    const [tickerData, premiumPayload, openInterestPayload] = await Promise.all([
+      tickerFromStream
+        ? Promise.resolve(tickerFromStream)
+        : this.loadTickerViaRest(symbol),
       retryWithExponentialBackoff(
         () => this.requestJson(`/fapi/v1/premiumIndex?${query}`),
         {
@@ -151,18 +268,112 @@ export class BinanceFuturesMarketDataAdapter {
         },
       ),
     ]);
-
-    const parsedTicker = tickerSchema.safeParse(tickerPayload);
     const parsedPremium = premiumIndexSchema.safeParse(premiumPayload);
     const parsedOpenInterest = openInterestSchema.safeParse(openInterestPayload);
 
-    if (!parsedTicker.success || !parsedPremium.success || !parsedOpenInterest.success) {
+    if (!parsedPremium.success || !parsedOpenInterest.success) {
       throw new AppError({
         code: "BINANCE_FUTURES_SCHEMA_MISMATCH",
         details: {
           openInterestIssues: parsedOpenInterest.success ? [] : parsedOpenInterest.error.issues,
           premiumIssues: parsedPremium.success ? [] : parsedPremium.error.issues,
-          tickerIssues: parsedTicker.success ? [] : parsedTicker.error.issues,
+          tickerIssues: [],
+        },
+        message: "Binance futures payload schema mismatch",
+        statusCode: 502,
+      });
+    }
+
+    const nextFundingTimeMs = parsedPremium.data.nextFundingTime;
+
+    return {
+      derivatives: {
+        indexPrice: normalizeNumeric(parsedPremium.data.indexPrice),
+        lastFundingRate: normalizeNumeric(parsedPremium.data.lastFundingRate),
+        markPrice: normalizeNumeric(parsedPremium.data.markPrice),
+        nextFundingTime:
+          typeof nextFundingTimeMs === "number" && Number.isFinite(nextFundingTimeMs) && nextFundingTimeMs > 0
+            ? new Date(nextFundingTimeMs).toISOString()
+            : null,
+        openInterest: normalizeNumeric(parsedOpenInterest.data.openInterest),
+      },
+      fetchedAt: new Date().toISOString(),
+      market: {
+        changePercent24h: tickerData.changePercent24h,
+        high24h: tickerData.high24h,
+        lastPrice: tickerData.lastPrice,
+        low24h: tickerData.low24h,
+        quoteVolume24h: tickerData.quoteVolume24h,
+        volume24h: tickerData.volume24h,
+      },
+      symbol,
+      venue: "binance_futures",
+    };
+  }
+
+  public shutdown(): void {
+    this.teardownTickerStream();
+  }
+
+  public getTickerStreamHealth(): BinanceFuturesTickerStreamHealth {
+    const websocket = this.tickerStreamState.websocket;
+    const streamUrl = buildFuturesTickerWsUrl();
+    const nowMs = Date.now();
+    let freshSymbols = 0;
+    let staleSymbols = 0;
+    let freshestTickerAtMs: number | null = null;
+
+    for (const cachedTicker of this.tickerCacheBySymbol.values()) {
+      if (freshestTickerAtMs === null || cachedTicker.updatedAtMs > freshestTickerAtMs) {
+        freshestTickerAtMs = cachedTicker.updatedAtMs;
+      }
+
+      if (nowMs - cachedTicker.updatedAtMs <= FUTURES_STREAM_STALE_MS) {
+        freshSymbols += 1;
+      } else {
+        staleSymbols += 1;
+      }
+    }
+
+    return {
+      cacheSize: this.tickerCacheBySymbol.size,
+      connected: websocket?.readyState === WebSocket.OPEN,
+      connecting: websocket?.readyState === WebSocket.CONNECTING,
+      enabled: this.streamEnabled,
+      freshSymbols,
+      freshestTickerAt:
+        freshestTickerAtMs !== null
+          ? new Date(freshestTickerAtMs).toISOString()
+          : null,
+      reconnectAttempt: this.tickerStreamState.reconnectAttempt,
+      staleSymbols,
+      stalenessThresholdMs: FUTURES_STREAM_STALE_MS,
+      streamUrl,
+    };
+  }
+
+  private async loadTickerViaRest(symbol: string): Promise<FuturesTickerCacheItem> {
+    const query = new URLSearchParams({
+      symbol,
+    }).toString();
+    const tickerPayload = await retryWithExponentialBackoff(
+      () => this.requestJson(`/fapi/v1/ticker/24hr?${query}`),
+      {
+        attempts: 3,
+        baseDelayMs: 200,
+        jitterPercent: 20,
+        shouldRetry: shouldRetryFuturesRequest,
+      },
+    );
+    const parsedTicker = tickerSchema.safeParse(tickerPayload);
+
+    if (!parsedTicker.success) {
+      throw new AppError({
+        code: "BINANCE_FUTURES_SCHEMA_MISMATCH",
+        details: {
+          openInterestIssues: [],
+          premiumIssues: [],
+          tickerIssues: parsedTicker.error.issues,
         },
         message: "Binance futures payload schema mismatch",
         statusCode: 502,
@@ -182,31 +393,174 @@ export class BinanceFuturesMarketDataAdapter {
       });
     }
 
-    const nextFundingTimeMs = parsedPremium.data.nextFundingTime;
-
-    return {
-      derivatives: {
-        indexPrice: normalizeNumeric(parsedPremium.data.indexPrice),
-        lastFundingRate: normalizeNumeric(parsedPremium.data.lastFundingRate),
-        markPrice: normalizeNumeric(parsedPremium.data.markPrice),
-        nextFundingTime:
-          typeof nextFundingTimeMs === "number" && Number.isFinite(nextFundingTimeMs) && nextFundingTimeMs > 0
-            ? new Date(nextFundingTimeMs).toISOString()
-            : null,
-        openInterest: normalizeNumeric(parsedOpenInterest.data.openInterest),
-      },
-      fetchedAt: new Date().toISOString(),
-      market: {
-        changePercent24h: normalizeNumeric(parsedTicker.data.priceChangePercent),
-        high24h: normalizeNumeric(parsedTicker.data.highPrice),
-        lastPrice: roundNumber(lastPrice),
-        low24h: normalizeNumeric(parsedTicker.data.lowPrice),
-        quoteVolume24h: normalizeNumeric(parsedTicker.data.quoteVolume),
-        volume24h: normalizeNumeric(parsedTicker.data.volume),
-      },
-      symbol,
-      venue: "binance_futures",
+    const tickerData: FuturesTickerCacheItem = {
+      changePercent24h: normalizeNumeric(parsedTicker.data.priceChangePercent),
+      high24h: normalizeNumeric(parsedTicker.data.highPrice),
+      lastPrice: roundNumber(lastPrice),
+      low24h: normalizeNumeric(parsedTicker.data.lowPrice),
+      quoteVolume24h: normalizeNumeric(parsedTicker.data.quoteVolume),
+      updatedAtMs: Date.now(),
+      volume24h: normalizeNumeric(parsedTicker.data.volume),
     };
+
+    this.tickerCacheBySymbol.set(symbol, tickerData);
+    return tickerData;
+  }
+
+  private readTickerFromStream(symbol: string): FuturesTickerCacheItem | null {
+    const cachedTicker = this.tickerCacheBySymbol.get(symbol);
+
+    if (!cachedTicker) {
+      return null;
+    }
+
+    if (Date.now() - cachedTicker.updatedAtMs > FUTURES_STREAM_STALE_MS) {
+      return null;
+    }
+
+    return cachedTicker;
+  }
+
+  private ensureTickerStreamStarted(): void {
+    if (!this.streamEnabled) {
+      return;
+    }
+
+    if (this.tickerStreamState.reconnectTimer) {
+      return;
+    }
+
+    const websocket = this.tickerStreamState.websocket;
+
+    if (websocket && (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
+    this.connectTickerStream();
+  }
+
+  private connectTickerStream(): void {
+    if (!this.streamEnabled) {
+      return;
+    }
+
+    const wsUrl = buildFuturesTickerWsUrl();
+    const websocket = new WebSocket(wsUrl, {
+      handshakeTimeout: env.BINANCE_FUTURES_TIMEOUT_MS,
+    });
+
+    this.tickerStreamState.closedByClient = false;
+    this.tickerStreamState.websocket = websocket;
+
+    websocket.on("open", () => {
+      this.tickerStreamState.reconnectAttempt = 0;
+      logger.info({ wsUrl }, "Binance futures ticker stream connected");
+    });
+
+    websocket.on("message", (rawData) => {
+      this.handleTickerStreamMessage(rawData);
+    });
+
+    websocket.on("error", (error) => {
+      logger.warn({ err: error }, "Binance futures ticker stream error");
+    });
+
+    websocket.on("close", (code, reasonBuffer) => {
+      const reason = reasonBuffer.toString("utf8");
+      this.tickerStreamState.websocket = null;
+
+      if (!this.streamEnabled || this.tickerStreamState.closedByClient) {
+        return;
+      }
+
+      this.scheduleTickerReconnect(code, reason);
+    });
+  }
+
+  private scheduleTickerReconnect(code: number, reason: string): void {
+    if (this.tickerStreamState.closedByClient || this.tickerStreamState.reconnectTimer) {
+      return;
+    }
+
+    this.tickerStreamState.reconnectAttempt += 1;
+    const backoffMs = computeBackoffMs(this.tickerStreamState.reconnectAttempt);
+
+    logger.warn(
+      {
+        backoffMs,
+        code,
+        reason,
+      },
+      "Binance futures ticker stream disconnected; scheduling reconnect",
+    );
+
+    this.tickerStreamState.reconnectTimer = setTimeout(() => {
+      this.tickerStreamState.reconnectTimer = null;
+
+      if (this.tickerStreamState.closedByClient || !this.streamEnabled) {
+        return;
+      }
+
+      this.connectTickerStream();
+    }, backoffMs);
+  }
+
+  private handleTickerStreamMessage(rawData: RawData): void {
+    let payload: unknown;
+
+    try {
+      payload = JSON.parse(toRawText(rawData)) as unknown;
+    } catch {
+      return;
+    }
+
+    const tickerRecords = extractTickerRecordsFromPayload(payload);
+
+    for (const tickerRecordRaw of tickerRecords) {
+      const parsedTickerRecord = tickerStreamItemSchema.safeParse(tickerRecordRaw);
+
+      if (!parsedTickerRecord.success) {
+        continue;
+      }
+
+      const symbol = normalizeStreamSymbol(parsedTickerRecord.data.s);
+      const lastPrice = normalizeNumeric(parsedTickerRecord.data.c);
+
+      if (symbol.length < 4 || lastPrice === null) {
+        continue;
+      }
+
+      this.tickerCacheBySymbol.set(symbol, {
+        changePercent24h: normalizeNumeric(parsedTickerRecord.data.P),
+        high24h: normalizeNumeric(parsedTickerRecord.data.h),
+        lastPrice: roundNumber(lastPrice),
+        low24h: normalizeNumeric(parsedTickerRecord.data.l),
+        quoteVolume24h: normalizeNumeric(parsedTickerRecord.data.q),
+        updatedAtMs: Date.now(),
+        volume24h: normalizeNumeric(parsedTickerRecord.data.v),
+      });
+    }
+  }
+
+  private teardownTickerStream(): void {
+    this.tickerStreamState.closedByClient = true;
+
+    if (this.tickerStreamState.reconnectTimer) {
+      clearTimeout(this.tickerStreamState.reconnectTimer);
+      this.tickerStreamState.reconnectTimer = null;
+    }
+
+    const websocket = this.tickerStreamState.websocket;
+
+    if (!websocket) {
+      return;
+    }
+
+    if (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING) {
+      websocket.close();
+    }
+
+    this.tickerStreamState.websocket = null;
   }
 
   private async requestJson(path: string): Promise<unknown> {

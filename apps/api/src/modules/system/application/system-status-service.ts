@@ -20,6 +20,12 @@ import {
   operationalHealthHistoryStore,
   type PersistedOperationalHealthRecord,
 } from "../../../shared/observability/operational-health-history-store.js";
+import {
+  FuturesMarketService,
+  type FuturesMarketDataHealth,
+} from "../../futures/application/futures-market-service.js";
+
+const futuresMarketService = new FuturesMarketService();
 
 export interface HealthStatus {
   service: string;
@@ -37,6 +43,8 @@ export interface BrokerLiveQuoteStreamHealth extends BrokerLiveQuoteStreamMetric
 export interface CryptoLiveChartHealth extends CryptoLiveChartMetricsSnapshot {}
 
 export interface AirdropsIntelligenceHealth extends AirdropsIntelligenceMetricsSnapshot {}
+
+export interface FuturesMarketStreamHealth extends FuturesMarketDataHealth {}
 
 type OperationalSeverity = "critical" | "warning";
 
@@ -402,6 +410,10 @@ export class SystemStatusService {
 
   public getAirdropsIntelligenceHealth(): AirdropsIntelligenceHealth {
     return airdropsIntelligenceMetricsStore.getSnapshot();
+  }
+
+  public getFuturesMarketStreamHealth(): FuturesMarketStreamHealth {
+    return futuresMarketService.getMarketDataHealth();
   }
 
   public getOperationalHealth(): OperationalHealthStatus {

@@ -4,8 +4,13 @@ import {
   YahooMarketDataAdapter,
   type YahooMarketQuote,
 } from "../../../integrations/market_data/yahoo-market-data-adapter.js";
+import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
+import { logger } from "../../../shared/logger/logger.js";
 
+// Simple in-memory cache with TTL
+const equitiesCache = new Map<string, { value: EquitiesSnapshotBatchResponse; expiresAt: number }>();
+const EQUITIES_CACHE_TTL_MS = env.MARKET_OVERVIEW_CACHE_TTL_SECONDS * 1000;
 const equitiesSymbolSchema = z
   .string()
   .trim()
@@ -134,6 +139,13 @@ function toSnapshot(quote: YahooMarketQuote, fetchedAt: string): EquitiesQuoteSn
 }
 
 export class EquitiesMarketService {
+  /**
+   * Retorna um snapshot de mercado de ações, usando cache in-memory com TTL.
+   * O cache é por preset/símbolos.
+   */
+  private getCacheKey(symbols: string[]): string {
+    return [...symbols].sort().join(",");
+  }
   public async getSnapshot(input: { symbol: string }): Promise<EquitiesQuoteSnapshot> {
     const symbol = equitiesSymbolSchema.parse(input.symbol);
     const batch = await this.getSnapshotBatch({
@@ -155,18 +167,24 @@ export class EquitiesMarketService {
     return first.quote;
   }
 
-  public async getSnapshotBatch(input: { symbols: string[] }): Promise<EquitiesSnapshotBatchResponse> {
+  public async getSnapshotBatch(input: { symbols: string[] }): Promise<EquitiesSnapshotBatchResponse & { fromCache?: boolean }> {
     const symbols = equitiesSymbolsSchema.parse(input.symbols);
-    const snapshot = await yahooMarketDataAdapter.getMarketSnapshot({
-      symbols,
-    });
+    const cacheKey = this.getCacheKey(symbols);
+    const now = Date.now();
+    const cached = equitiesCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      logger.info({ service: "equities", type: "cache", hit: true, symbols }, "Equities cache hit");
+      return { ...cached.value, fromCache: true };
+    }
+    logger.info({ service: "equities", type: "cache", hit: false, symbols }, "Equities cache miss");
+
+    const snapshot = await yahooMarketDataAdapter.getMarketSnapshot({ symbols });
     const quotesBySymbol = new Map<string, EquitiesQuoteSnapshot>(
       snapshot.quotes.map((quote) => [quote.symbol, toSnapshot(quote, snapshot.fetchedAt)] as const),
     );
 
     const snapshots = symbols.map((symbol) => {
       const foundQuote = quotesBySymbol.get(symbol);
-
       if (foundQuote) {
         return {
           quote: foundQuote,
@@ -174,7 +192,6 @@ export class EquitiesMarketService {
           symbol,
         };
       }
-
       return {
         error: {
           code: "EQUITIES_SYMBOL_NOT_AVAILABLE" as const,
@@ -186,21 +203,22 @@ export class EquitiesMarketService {
     });
 
     const successCount = snapshots.filter((item) => item.status === "ok").length;
-
-    return {
+    const result: EquitiesSnapshotBatchResponse = {
       failureCount: snapshots.length - successCount,
       fetchedAt: snapshot.fetchedAt,
       requestedSymbols: symbols,
       snapshots,
       successCount,
     };
+    equitiesCache.set(cacheKey, { value: result, expiresAt: now + EQUITIES_CACHE_TTL_MS });
+    return { ...result, fromCache: false };
   }
 
   public async getMarketOverview(input?: {
     limit?: number;
     preset?: EquitiesMarketOverviewPreset;
     symbols?: string[];
-  }): Promise<EquitiesMarketOverviewResponse> {
+  }): Promise<EquitiesMarketOverviewResponse & { fromCache?: boolean }> {
     const preset = equitiesMarketOverviewPresetSchema.parse(input?.preset ?? "us_mega_caps");
     const sourceSymbols =
       input?.symbols && input.symbols.length > 0
@@ -208,10 +226,7 @@ export class EquitiesMarketService {
         : equitiesPresetSymbols[preset];
     const limit = Math.max(1, Math.min(20, Math.floor(input?.limit ?? sourceSymbols.length)));
     const selectedSymbols = sourceSymbols.slice(0, limit);
-    const batch = await this.getSnapshotBatch({
-      symbols: selectedSymbols,
-    });
-
+    const batch = await this.getSnapshotBatch({ symbols: selectedSymbols });
     return {
       failureCount: batch.failureCount,
       fetchedAt: batch.fetchedAt,
@@ -220,6 +235,7 @@ export class EquitiesMarketService {
       snapshots: batch.snapshots,
       successCount: batch.successCount,
       tableMarkdown: buildTableMarkdown(batch.snapshots),
+      fromCache: batch.fromCache,
     };
   }
 }

@@ -18,6 +18,7 @@ import {
   getBrokerLiveQuoteStreamHealth,
   getCryptoLiveChartHealth,
   getCopilotAuditHistory,
+  getFuturesMarketStreamHealth,
   getHealth,
   getOperationalHealthHistoryAggregated,
   getOperationalHealth,
@@ -46,6 +47,7 @@ export function registerSystemRoutes(app: FastifyInstance): void {
   app.get("/ready", getReady);
   app.get("/internal/scheduler/crypto-metrics", internalRouteOptions, getSchedulerMetrics);
   app.get("/internal/health/streams/brokers", internalRouteOptions, getBrokerLiveQuoteStreamHealth);
+  app.get("/internal/health/streams/futures", internalRouteOptions, getFuturesMarketStreamHealth);
   app.get("/internal/health/streams/brokers.csv", internalRouteOptions, exportBrokerLiveQuoteStreamHealthCsv);
   app.get("/internal/health/live-chart/crypto", internalRouteOptions, getCryptoLiveChartHealth);
   app.get("/internal/health/live-chart/crypto.csv", internalRouteOptions, exportCryptoLiveChartHealthCsv);

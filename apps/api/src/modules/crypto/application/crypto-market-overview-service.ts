@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
+import { logger } from "../../../shared/logger/logger.js";
 import { retryWithExponentialBackoff } from "../../../shared/resilience/retry-with-backoff.js";
 import {
   BinanceMarketDataAdapter,
@@ -105,54 +106,79 @@ function toLeader(asset: CoinCapMarketAsset | null): MarketLeader | null {
   };
 }
 
+// Simple in-memory cache with TTL
+const cryptoCache = new Map<string, { value: { assets: CoinCapMarketAsset[]; fetchedAt: string; provider: "coincap" | "coingecko" | "binance" }; expiresAt: number }>();
+const CRYPTO_CACHE_TTL_MS = env.MARKET_OVERVIEW_CACHE_TTL_SECONDS * 1000;
+
+function buildOverviewResponse(
+  marketOverview: { assets: CoinCapMarketAsset[]; fetchedAt: string; provider: "coincap" | "coingecko" | "binance" },
+  limit: number,
+  fromCache: boolean,
+): CryptoMarketOverviewResponse & { fromCache: boolean } {
+  const assets = marketOverview.assets;
+  const assetsWithChange = assets.filter(
+    (asset): asset is CoinCapMarketAsset & { changePercent24h: number } =>
+      isFiniteNumber(asset.changePercent24h),
+  );
+  const advancers24h = assetsWithChange.filter((asset) => asset.changePercent24h > 0).length;
+  const decliners24h = assetsWithChange.filter((asset) => asset.changePercent24h < 0).length;
+  const unchanged24h = assetsWithChange.length - advancers24h - decliners24h;
+  const topMarketCapUsd = assets.reduce((accumulator, asset) => accumulator + (asset.marketCapUsd ?? 0), 0);
+  const topVolumeUsd24h = assets.reduce((accumulator, asset) => accumulator + (asset.volumeUsd24h ?? 0), 0);
+  const averageChangePercent24h =
+    assetsWithChange.length === 0
+      ? null
+      : roundPercent(
+          assetsWithChange.reduce((accumulator, asset) => accumulator + asset.changePercent24h, 0)
+            / assetsWithChange.length,
+        );
+  const strongest24hAsset = [...assetsWithChange].sort(
+    (left, right) => right.changePercent24h - left.changePercent24h,
+  )[0] ?? null;
+  const weakest24hAsset = [...assetsWithChange].sort(
+    (left, right) => left.changePercent24h - right.changePercent24h,
+  )[0] ?? null;
+
+  return {
+    assets,
+    fetchedAt: marketOverview.fetchedAt,
+    limit,
+    provider: marketOverview.provider,
+    summary: {
+      advancers24h,
+      assetsTracked: assets.length,
+      averageChangePercent24h,
+      decliners24h,
+      strongest24h: toLeader(strongest24hAsset),
+      topMarketCapUsd,
+      topVolumeUsd24h,
+      unchanged24h,
+      weakest24h: toLeader(weakest24hAsset),
+    },
+    fromCache,
+  };
+}
+
 export class CryptoMarketOverviewService {
   private readonly coinCapAdapter = new CoinCapMarketDataAdapter();
   private readonly binanceAdapter = new BinanceMarketDataAdapter();
 
-  public async getOverview(input?: { limit?: number }): Promise<CryptoMarketOverviewResponse> {
+  public async getOverview(input?: { limit?: number }): Promise<CryptoMarketOverviewResponse & { fromCache: boolean }> {
     const parsedInput = marketOverviewInputSchema.parse(input ?? {});
-    const marketOverview = await this.loadOverviewWithFallback(parsedInput.limit);
-    const assets = marketOverview.assets;
-    const assetsWithChange = assets.filter(
-      (asset): asset is CoinCapMarketAsset & { changePercent24h: number } =>
-        isFiniteNumber(asset.changePercent24h),
-    );
-    const advancers24h = assetsWithChange.filter((asset) => asset.changePercent24h > 0).length;
-    const decliners24h = assetsWithChange.filter((asset) => asset.changePercent24h < 0).length;
-    const unchanged24h = assetsWithChange.length - advancers24h - decliners24h;
-    const topMarketCapUsd = assets.reduce((accumulator, asset) => accumulator + (asset.marketCapUsd ?? 0), 0);
-    const topVolumeUsd24h = assets.reduce((accumulator, asset) => accumulator + (asset.volumeUsd24h ?? 0), 0);
-    const averageChangePercent24h =
-      assetsWithChange.length === 0
-        ? null
-        : roundPercent(
-            assetsWithChange.reduce((accumulator, asset) => accumulator + asset.changePercent24h, 0)
-              / assetsWithChange.length,
-          );
-    const strongest24hAsset = [...assetsWithChange].sort(
-      (left, right) => right.changePercent24h - left.changePercent24h,
-    )[0] ?? null;
-    const weakest24hAsset = [...assetsWithChange].sort(
-      (left, right) => left.changePercent24h - right.changePercent24h,
-    )[0] ?? null;
+    const cacheKey = String(parsedInput.limit ?? 10);
+    const now = Date.now();
+    const cached = cryptoCache.get(cacheKey);
 
-    return {
-      assets,
-      fetchedAt: marketOverview.fetchedAt,
-      limit: parsedInput.limit,
-      provider: marketOverview.provider,
-      summary: {
-        advancers24h,
-        assetsTracked: assets.length,
-        averageChangePercent24h,
-        decliners24h,
-        strongest24h: toLeader(strongest24hAsset),
-        topMarketCapUsd,
-        topVolumeUsd24h,
-        unchanged24h,
-        weakest24h: toLeader(weakest24hAsset),
-      },
-    };
+    if (cached && cached.expiresAt > now) {
+      logger.info({ service: "crypto", type: "cache", hit: true, limit: parsedInput.limit }, "Crypto cache hit");
+      return buildOverviewResponse(cached.value, parsedInput.limit, true);
+    }
+
+    logger.info({ service: "crypto", type: "cache", hit: false, limit: parsedInput.limit }, "Crypto cache miss");
+    const marketOverview = await this.loadOverviewWithFallback(parsedInput.limit);
+    cryptoCache.set(cacheKey, { value: marketOverview, expiresAt: now + CRYPTO_CACHE_TTL_MS });
+
+    return buildOverviewResponse(marketOverview, parsedInput.limit, false);
   }
 
   private async loadOverviewWithFallback(limit: number): Promise<{

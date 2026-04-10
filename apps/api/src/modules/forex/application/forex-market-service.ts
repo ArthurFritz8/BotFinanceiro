@@ -4,8 +4,13 @@ import {
   YahooMarketDataAdapter,
   type YahooMarketQuote,
 } from "../../../integrations/market_data/yahoo-market-data-adapter.js";
+import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
+import { logger } from "../../../shared/logger/logger.js";
 
+// Simple in-memory cache with TTL
+const forexCache = new Map<string, { value: ForexRateBatchResponse; expiresAt: number }>();
+const FOREX_CACHE_TTL_MS = env.MARKET_OVERVIEW_CACHE_TTL_SECONDS * 1000;
 const forexPairSchema = z
   .string()
   .trim()
@@ -149,6 +154,13 @@ function toSnapshot(quote: YahooMarketQuote, fetchedAt: string): ForexRateSnapsh
 }
 
 export class ForexMarketService {
+  /**
+   * Retorna um snapshot de mercado de forex, usando cache in-memory com TTL.
+   * O cache é por preset/pares.
+   */
+  private getCacheKey(pairs: string[]): string {
+    return [...pairs].sort().join(",");
+  }
   public async getSpotRate(input: { pair: string }): Promise<ForexRateSnapshot> {
     const pair = forexPairSchema.parse(input.pair);
     const batch = await this.getSpotRateBatch({
@@ -170,12 +182,19 @@ export class ForexMarketService {
     return first.quote;
   }
 
-  public async getSpotRateBatch(input: { pairs: string[] }): Promise<ForexRateBatchResponse> {
+  public async getSpotRateBatch(input: { pairs: string[] }): Promise<ForexRateBatchResponse & { fromCache?: boolean }> {
     const pairs = forexPairsSchema.parse(input.pairs);
+    const cacheKey = this.getCacheKey(pairs);
+    const now = Date.now();
+    const cached = forexCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      logger.info({ service: "forex", type: "cache", hit: true, pairs }, "Forex cache hit");
+      return { ...cached.value, fromCache: true };
+    }
+    logger.info({ service: "forex", type: "cache", hit: false, pairs }, "Forex cache miss");
+
     const requestedSymbols = pairs.map((pair) => toYahooSymbol(pair));
-    const snapshot = await yahooMarketDataAdapter.getMarketSnapshot({
-      symbols: requestedSymbols,
-    });
+    const snapshot = await yahooMarketDataAdapter.getMarketSnapshot({ symbols: requestedSymbols });
     const quotesByPair = new Map<string, ForexRateSnapshot>(
       snapshot.quotes
         .filter((quote) => quote.symbol.endsWith("=X"))
@@ -187,7 +206,6 @@ export class ForexMarketService {
 
     const quotes = pairs.map((pair) => {
       const foundQuote = quotesByPair.get(pair);
-
       if (foundQuote) {
         return {
           pair,
@@ -195,7 +213,6 @@ export class ForexMarketService {
           status: "ok" as const,
         };
       }
-
       return {
         error: {
           code: "FOREX_PAIR_NOT_AVAILABLE" as const,
@@ -207,8 +224,7 @@ export class ForexMarketService {
     });
 
     const successCount = quotes.filter((item) => item.status === "ok").length;
-
-    return {
+    const result: ForexRateBatchResponse = {
       failureCount: quotes.length - successCount,
       fetchedAt: snapshot.fetchedAt,
       pairs,
@@ -216,13 +232,15 @@ export class ForexMarketService {
       requestedPairs: pairs,
       successCount,
     };
+    forexCache.set(cacheKey, { value: result, expiresAt: now + FOREX_CACHE_TTL_MS });
+    return { ...result, fromCache: false };
   }
 
   public async getMarketOverview(input?: {
     limit?: number;
     pairs?: string[];
     preset?: ForexMarketOverviewPreset;
-  }): Promise<ForexMarketOverviewResponse> {
+  }): Promise<ForexMarketOverviewResponse & { fromCache?: boolean }> {
     const preset = forexMarketOverviewPresetSchema.parse(input?.preset ?? "majors");
     const sourcePairs =
       input?.pairs && input.pairs.length > 0
@@ -230,10 +248,7 @@ export class ForexMarketService {
         : forexPresetPairs[preset];
     const limit = Math.max(1, Math.min(20, Math.floor(input?.limit ?? sourcePairs.length)));
     const selectedPairs = sourcePairs.slice(0, limit);
-    const batch = await this.getSpotRateBatch({
-      pairs: selectedPairs,
-    });
-
+    const batch = await this.getSpotRateBatch({ pairs: selectedPairs });
     return {
       failureCount: batch.failureCount,
       fetchedAt: batch.fetchedAt,
@@ -242,6 +257,7 @@ export class ForexMarketService {
       quotes: batch.quotes,
       successCount: batch.successCount,
       tableMarkdown: buildTableMarkdown(batch.quotes),
+      fromCache: batch.fromCache,
     };
   }
 }

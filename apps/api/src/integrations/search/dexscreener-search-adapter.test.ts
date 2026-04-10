@@ -6,6 +6,7 @@ process.env.COINGECKO_API_BASE_URL ??= "https://api.coingecko.com/api/v3";
 process.env.YAHOO_FINANCE_API_BASE_URL ??= "https://query1.finance.yahoo.com";
 
 const { env } = await import("../../shared/config/env.js");
+const { AppError } = await import("../../shared/errors/app-error.js");
 const { DexScreenerSearchAdapter } = await import("./dexscreener-search-adapter.js");
 
 type MutableEnv = {
@@ -276,11 +277,13 @@ void it("Dex adapter aceita contractAddress sem query e executa busca por contra
   mutableEnv.ONCHAIN_BIRDSEYE_API_KEY = "";
 
   let capturedSearchQuery = "";
+  let callCount = 0;
 
   globalThis.fetch = ((input) => {
     const requestUrl = String(input);
 
     if (requestUrl.startsWith("https://api.dexscreener.com/latest/dex/search/")) {
+      callCount += 1;
       const parsedUrl = new URL(requestUrl);
       capturedSearchQuery = parsedUrl.searchParams.get("q") ?? "";
 
@@ -302,14 +305,20 @@ void it("Dex adapter aceita contractAddress sem query e executa busca por contra
     return Promise.reject(new Error(`Unexpected URL: ${requestUrl}`));
   }) as typeof fetch;
 
-  const response = await adapter.searchTokenListings({
-    contractAddress,
-    maxResults: 3,
-  });
-
-  assert.equal(capturedSearchQuery, contractAddress);
-  assert.equal(response.query, contractAddress);
-  assert.equal(response.resolvedContractAddress, contractAddress);
-  assert.equal(response.holderDistribution.status, "unavailable");
-  assert.equal(response.holderDistribution.error?.code, "ONCHAIN_BIRDSEYE_NOT_CONFIGURED");
+  await assert.rejects(
+    () =>
+      adapter.searchTokenListings({
+        contractAddress,
+        maxResults: 3,
+      }),
+    (error: unknown) => {
+      assert.equal(capturedSearchQuery, contractAddress);
+      assert.equal(callCount, 3);
+      assert.ok(error instanceof AppError);
+      assert.equal(error.code, "WEB_SEARCH_EMPTY_RESULTS");
+      assert.equal(error.statusCode, 503);
+      assert.equal(error.message.includes("payload vazio"), true);
+      return true;
+    },
+  );
 });

@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   BinanceFuturesMarketDataAdapter,
   type BinanceFuturesContractSnapshot,
+  type BinanceFuturesTickerStreamHealth,
 } from "../../../integrations/market_data/binance-futures-market-data-adapter.js";
 
 const futuresSymbolSchema = z
@@ -57,12 +58,17 @@ export interface FuturesSnapshotBatchResponse {
 }
 
 export interface FuturesMarketOverviewResponse {
+  failureCount: number;
   fetchedAt: string;
   preset: FuturesMarketPreset;
   requestedSymbols: string[];
   snapshots: FuturesBatchItem[];
   successCount: number;
   tableMarkdown: string;
+}
+
+export interface FuturesMarketDataHealth {
+  stream: BinanceFuturesTickerStreamHealth;
 }
 
 const presetSymbols: Record<FuturesMarketPreset, string[]> = {
@@ -106,6 +112,12 @@ function buildTableMarkdown(items: FuturesBatchItem[]): string {
 }
 
 export class FuturesMarketService {
+  public getMarketDataHealth(): FuturesMarketDataHealth {
+    return {
+      stream: binanceFuturesMarketDataAdapter.getTickerStreamHealth(),
+    };
+  }
+
   public async getSnapshot(input: { symbol: string }): Promise<BinanceFuturesContractSnapshot> {
     const symbol = futuresSymbolSchema.parse(input.symbol);
     return binanceFuturesMarketDataAdapter.getContractSnapshot({
@@ -168,6 +180,7 @@ export class FuturesMarketService {
     });
 
     return {
+      failureCount: batch.failureCount,
       fetchedAt: batch.fetchedAt,
       preset,
       requestedSymbols: selectedSymbols,

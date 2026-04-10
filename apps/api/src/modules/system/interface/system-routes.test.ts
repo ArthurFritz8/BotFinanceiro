@@ -194,6 +194,21 @@ interface BrokerStreamHealthResponse {
   };
 }
 
+interface FuturesStreamHealthResponse {
+  stream: {
+    cacheSize: number;
+    connected: boolean;
+    connecting: boolean;
+    enabled: boolean;
+    freshSymbols: number;
+    freshestTickerAt: string | null;
+    reconnectAttempt: number;
+    staleSymbols: number;
+    stalenessThresholdMs: number;
+    streamUrl: string;
+  };
+}
+
 interface CryptoLiveChartHealthResponse {
   brokers: Record<
     "binance" | "bybit" | "coinbase" | "kraken" | "okx",
@@ -514,6 +529,29 @@ void it("GET /internal/health/streams/brokers retorna metricas do stream com tok
   assert.equal(body.data.brokers.okx.snapshotsPublished, 1);
   assert.equal(body.data.brokers.okx.snapshotErrors, 1);
   assert.equal(body.data.brokers.okx.lastErrorMessage, "upstream timeout");
+});
+
+void it("GET /internal/health/streams/futures retorna estado do stream com token valido", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/health/streams/futures",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<FuturesStreamHealthResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(typeof body.data.stream.enabled, "boolean");
+  assert.equal(typeof body.data.stream.connected, "boolean");
+  assert.equal(typeof body.data.stream.cacheSize, "number");
+  assert.equal(typeof body.data.stream.freshSymbols, "number");
+  assert.equal(typeof body.data.stream.staleSymbols, "number");
+  assert.equal(typeof body.data.stream.reconnectAttempt, "number");
+  assert.equal(typeof body.data.stream.streamUrl, "string");
+  assert.equal(typeof body.data.stream.stalenessThresholdMs, "number");
 });
 
 void it("GET /internal/health/streams/brokers.csv retorna 401 sem token", async () => {

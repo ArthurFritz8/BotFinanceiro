@@ -4278,8 +4278,6 @@ function renderMarketNavigatorFromState() {
   });
   const visibleItems = filteredItems.slice(0, isSearchMode ? 24 : 16);
 
-  renderMarketNavigatorFeed(visibleItems, activeView);
-
   const viewStats = marketNavigatorViewStats.get(activeView.id);
   const baseStatusLabel = typeof viewStats?.statusLabel === "string"
     ? viewStats.statusLabel
@@ -4290,10 +4288,15 @@ function renderMarketNavigatorFromState() {
   const baseMeta = typeof viewStats?.meta === "string" && viewStats.meta.length > 0
     ? viewStats.meta
     : "Selecione uma visao para carregar ativos.";
+  const baseEmptyStateMessage = typeof viewStats?.emptyStateMessage === "string"
+    ? viewStats.emptyStateMessage
+    : "";
   const regionSuffix = marketNavigatorRegionFilter !== "all"
     ? ` • regiao ${formatMarketNavigatorRegionLabel(marketNavigatorRegionFilter)}`
     : "";
   const favoritesSuffix = marketNavigatorFavoritesOnly ? " • somente favoritos" : "";
+
+  renderMarketNavigatorFeed(visibleItems, activeView, isSearchMode ? "" : baseEmptyStateMessage);
 
   if (isSearchMode) {
     const queryLabel = marketNavigatorSearchQuery.trim();
@@ -5203,7 +5206,7 @@ function renderMarketNavigatorViews() {
   }
 }
 
-function renderMarketNavigatorFeed(items, view) {
+function renderMarketNavigatorFeed(items, view, emptyStateMessage = "") {
   if (!(marketFeedListElement instanceof HTMLElement)) {
     return;
   }
@@ -5219,6 +5222,8 @@ function renderMarketNavigatorFeed(items, view) {
 
     if (hasSearch) {
       empty.textContent = "Nenhum resultado encontrado para a busca atual.";
+    } else if (typeof emptyStateMessage === "string" && emptyStateMessage.trim().length > 0) {
+      empty.textContent = emptyStateMessage;
     } else if (hasSecondaryFilters) {
       empty.textContent = "Nenhum ativo atende aos filtros selecionados.";
     } else {
@@ -5332,6 +5337,85 @@ function renderMarketNavigatorFeed(items, view) {
   }
 }
 
+function resolveMarketNavigatorProviderLabel(view, payloadData) {
+  const providerCode = typeof payloadData?.provider === "string"
+    ? payloadData.provider.trim().toLowerCase()
+    : "";
+  const providerByCode = {
+    binance: "Binance",
+    coincap: "CoinCap",
+    coingecko: "CoinGecko",
+    dexscreener: "DexScreener",
+    yahoo: "Yahoo Finance",
+    yahoo_finance: "Yahoo Finance",
+  };
+
+  if (providerCode.length > 0 && providerByCode[providerCode]) {
+    return providerByCode[providerCode];
+  }
+
+  const moduleName = typeof view?.module === "string" ? view.module : "";
+  const providerByModule = {
+    b3: "Yahoo Finance",
+    commodities: "Yahoo Finance",
+    crypto: "CoinCap / CoinGecko / Binance",
+    defi: "DeFiLlama / Yahoo Finance",
+    equities: "Yahoo Finance",
+    etfs: "Yahoo Finance",
+    fiis: "Yahoo Finance",
+    "fixed-income": "Yahoo Finance",
+    forex: "Yahoo Finance",
+    futures: "Binance Futures",
+    "global-sectors": "Yahoo Finance",
+    "macro-rates": "Yahoo Finance",
+    options: "Yahoo Finance",
+    portfolios: "Yahoo Finance",
+    "wall-street": "Yahoo Finance",
+  };
+
+  return providerByModule[moduleName] ?? "fonte externa";
+}
+
+function inspectMarketNavigatorFailures(payloadData) {
+  const bucket = [];
+
+  if (Array.isArray(payloadData?.quotes)) {
+    bucket.push(...payloadData.quotes);
+  }
+
+  if (Array.isArray(payloadData?.snapshots)) {
+    bucket.push(...payloadData.snapshots);
+  }
+
+  let errorItemCount = 0;
+  const errorCodes = [];
+
+  for (const entry of bucket) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+
+    if (entry.status !== "error") {
+      continue;
+    }
+
+    errorItemCount += 1;
+
+    if (
+      typeof entry.error?.code === "string"
+      && entry.error.code.length > 0
+      && !errorCodes.includes(entry.error.code)
+    ) {
+      errorCodes.push(entry.error.code);
+    }
+  }
+
+  return {
+    errorCodes: errorCodes.slice(0, 3),
+    errorItemCount,
+  };
+}
+
 function renderMarketNavigatorPayload(view, payloadData) {
   if (!view || typeof view.id !== "string" || view.id.length === 0) {
     return;
@@ -5340,6 +5424,7 @@ function renderMarketNavigatorPayload(view, payloadData) {
   if (!payloadData || typeof payloadData !== "object") {
     marketNavigatorViewCache.set(view.id, []);
     marketNavigatorViewStats.set(view.id, {
+      emptyStateMessage: "Falha ao interpretar a resposta da API desta visao. Tente atualizar para reconectar.",
       meta: "Nao foi possivel interpretar a resposta da API para esta visao.",
       statusLabel: "Erro",
       statusMode: "error",
@@ -5355,6 +5440,7 @@ function renderMarketNavigatorPayload(view, payloadData) {
 
     marketNavigatorViewCache.set(view.id, newsItems);
     marketNavigatorViewStats.set(view.id, {
+      emptyStateMessage: "",
       meta: `Cobertura ${summary.sourcesHealthy ?? 0}/${summary.totalSources ?? 0} • impacto medio ${summary.averageImpactScore ?? 0} • relevancia media ${summary.averageRelevanceScore ?? 0} • atualizado ${fetchedAt}`,
       statusLabel: newsItems.length > 0 ? "Noticias" : "Sem dados",
       statusMode: newsItems.length > 0 ? "" : "error",
@@ -5364,18 +5450,37 @@ function renderMarketNavigatorPayload(view, payloadData) {
   }
 
   const normalizedItems = normalizeOverviewItems(view, payloadData);
+  const failureSignals = inspectMarketNavigatorFailures(payloadData);
   const successCount = typeof payloadData.successCount === "number"
     ? payloadData.successCount
     : normalizedItems.length;
-  const failureCount = typeof payloadData.failureCount === "number" ? payloadData.failureCount : 0;
+  const declaredFailureCount = typeof payloadData.failureCount === "number" ? payloadData.failureCount : 0;
+  const failureCount = Math.max(declaredFailureCount, failureSignals.errorItemCount);
   const fetchedAt = formatShortTime(payloadData.fetchedAt);
-  const statusLabel = failureCount > 0 ? "Parcial" : "Carregado";
+  const hasProviderFailure = failureCount > 0;
+  const providerLabel = resolveMarketNavigatorProviderLabel(view, payloadData);
+  const errorCodesLabel = failureSignals.errorCodes.length > 0
+    ? ` • codigos ${failureSignals.errorCodes.join(", ")}`
+    : "";
+  const providerAlertMessage = hasProviderFailure
+    ? `Falha na comunicacao com o provedor ${providerLabel}. Tentando reconectar...${errorCodesLabel}`
+    : "";
+  const statusLabel = hasProviderFailure
+    ? (normalizedItems.length === 0 ? "Erro de provedor" : "Falha parcial")
+    : "Carregado";
+  const statusMode = hasProviderFailure
+    ? (normalizedItems.length === 0 ? "error" : "loading")
+    : "";
+  const metaMessage = hasProviderFailure
+    ? `${providerAlertMessage} • ativos ${normalizedItems.length} • ok ${successCount} • falhas ${failureCount} • atualizado ${fetchedAt}`
+    : `Ativos ${normalizedItems.length} • ok ${successCount} • falhas ${failureCount} • atualizado ${fetchedAt}`;
 
   marketNavigatorViewCache.set(view.id, normalizedItems);
   marketNavigatorViewStats.set(view.id, {
-    meta: `Ativos ${normalizedItems.length} • ok ${successCount} • falhas ${failureCount} • atualizado ${fetchedAt}`,
+    emptyStateMessage: hasProviderFailure ? providerAlertMessage : "",
+    meta: metaMessage,
     statusLabel,
-    statusMode: failureCount > 0 ? "loading" : "",
+    statusMode,
   });
   renderMarketNavigatorFromState();
 }
@@ -5415,6 +5520,9 @@ async function loadMarketNavigator() {
     }
 
     marketNavigatorViewStats.set(activeView.id, {
+      emptyStateMessage: cachedItems.length === 0
+        ? `Falha na comunicacao com o provedor desta visao. ${message}. Tentando reconectar...`
+        : "",
       meta: message,
       statusLabel: "Erro",
       statusMode: "error",

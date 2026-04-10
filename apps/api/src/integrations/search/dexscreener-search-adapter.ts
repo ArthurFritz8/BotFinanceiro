@@ -339,6 +339,10 @@ function shouldRetryWebSearchRequest(error: unknown): boolean {
     return true;
   }
 
+  if (hasRetryableFlag(error.details)) {
+    return error.details.retryable === true;
+  }
+
   if (error.code === "WEB_SEARCH_UNAVAILABLE") {
     return true;
   }
@@ -1458,6 +1462,23 @@ export class DexScreenerSearchAdapter {
         },
         message: "Web search payload schema mismatch",
         statusCode: 502,
+      });
+    }
+
+    const isContractQuery = isSupportedContractAddress(query);
+    const pairCount = parsedPayload.data.pairs?.length ?? 0;
+
+    if (isContractQuery && pairCount === 0) {
+      throw new AppError({
+        code: "WEB_SEARCH_EMPTY_RESULTS",
+        details: {
+          provider: "dexscreener",
+          query,
+          retryable: true,
+        },
+        message:
+          "DexScreener retornou payload vazio para o contrato informado (possivel rate limit ou instabilidade temporaria).",
+        statusCode: 503,
       });
     }
 

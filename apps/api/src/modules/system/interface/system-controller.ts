@@ -104,6 +104,11 @@ export function getBrokerLiveQuoteStreamHealth(request: FastifyRequest, reply: F
   void reply.send(buildSuccessResponse(request.id, data));
 }
 
+export function getFuturesMarketStreamHealth(request: FastifyRequest, reply: FastifyReply): void {
+  const data = systemStatusService.getFuturesMarketStreamHealth();
+  void reply.send(buildSuccessResponse(request.id, data));
+}
+
 export function exportBrokerLiveQuoteStreamHealthCsv(
   _request: FastifyRequest,
   reply: FastifyReply,
