@@ -116,7 +116,7 @@ const environmentSchema = z
           .filter((ip) => ip.length > 0),
       ),
     OPENROUTER_API_KEY: z.string().trim().default(""),
-    OPENROUTER_MODEL: z.string().trim().min(1).default("anthropic/claude-3-5-haiku-20241022"),
+    OPENROUTER_MODEL: z.string().trim().min(1).default("anthropic/claude-3.5-haiku"),
     OPENROUTER_API_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
     OPENROUTER_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
     OPENROUTER_APP_NAME: z.string().trim().default("BotFinanceiro"),
