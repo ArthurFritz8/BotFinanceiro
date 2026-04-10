@@ -8,13 +8,21 @@ const dexScreenerLookupInputSchema = z.object({
   chain: z.string().trim().min(2).max(24).optional(),
   contractAddress: z.string().trim().min(20).max(96).optional(),
   maxResults: z.number().int().min(1).max(10).default(5),
-  query: z.string().trim().min(2).max(120),
+  query: z.string().trim().min(2).max(120).optional(),
 }).superRefine((value, ctx) => {
   if (value.contractAddress && !isSupportedContractAddress(value.contractAddress)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: "contractAddress must be a valid EVM or Solana contract address",
       path: ["contractAddress"],
+    });
+  }
+
+  if (!value.query && !value.contractAddress) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "query or contractAddress is required",
+      path: ["query"],
     });
   }
 });
@@ -480,6 +488,13 @@ export class DexScreenerSearchAdapter {
       parsedInput.maxResults,
       resolvedInput.chainId,
     );
+    const inferredContractAddress = resolvedInput.contractAddress
+      ?? this.resolveContractAddressFromVenues(resolvedInput.chainId, parsedVenues);
+    const inferredChainCandidates = this.resolveBirdseyeChainCandidates(
+      resolvedInput.chainId,
+      inferredContractAddress,
+      parsedVenues,
+    );
     const holderDistribution = await this.resolveHolderDistribution(resolvedInput, parsedVenues);
 
     return {
@@ -488,14 +503,14 @@ export class DexScreenerSearchAdapter {
       holderDistribution,
       provider: "dexscreener",
       query: resolvedInput.query,
-      resolvedChainId: resolvedInput.chainId,
-      resolvedContractAddress: resolvedInput.contractAddress,
+      resolvedChainId: resolvedInput.chainId ?? inferredChainCandidates[0] ?? null,
+      resolvedContractAddress: inferredContractAddress,
       venues: parsedVenues,
     };
   }
 
   private resolveLookupInput(input: z.output<typeof dexScreenerLookupInputSchema>): ResolvedDexLookupInput {
-    const normalizedQuery = collapseWhitespace(input.query);
+    const normalizedQuery = collapseWhitespace(input.query ?? "");
     const contractFromInput = normalizeContractAddressCandidate(input.contractAddress ?? "");
     const contractFromQuery = extractContractAddressFromText(normalizedQuery);
     const resolvedContract = contractFromInput ?? contractFromQuery;
@@ -657,7 +672,15 @@ export class DexScreenerSearchAdapter {
     resolvedInput: ResolvedDexLookupInput,
     venues: DexScreenerVenue[],
   ): Promise<DexHolderDistributionSnapshot> {
-    if (resolvedInput.contractAddress === null) {
+    const effectiveContractAddress = resolvedInput.contractAddress
+      ?? this.resolveContractAddressFromVenues(resolvedInput.chainId, venues);
+    const effectiveChainCandidates = this.resolveBirdseyeChainCandidates(
+      resolvedInput.chainId,
+      effectiveContractAddress,
+      venues,
+    );
+
+    if (effectiveContractAddress === null) {
       return buildUnavailableHolderDistribution(
         toHolderError(
           "ONCHAIN_HOLDER_CONTRACT_UNRESOLVED",
@@ -669,7 +692,7 @@ export class DexScreenerSearchAdapter {
     }
 
     const dexSnapshot = await this.tryResolveHolderDistributionFromDexScreener(
-      resolvedInput.contractAddress,
+      effectiveContractAddress,
       resolvedInput.chainId,
       venues,
     );
@@ -679,8 +702,8 @@ export class DexScreenerSearchAdapter {
     }
 
     const birdseyeSnapshot = await this.tryResolveHolderDistributionFromBirdseye(
-      resolvedInput.contractAddress,
-      resolvedInput.chainId,
+      effectiveContractAddress,
+      effectiveChainCandidates,
     );
 
     if (birdseyeSnapshot.status === "ok") {
@@ -697,6 +720,83 @@ export class DexScreenerSearchAdapter {
         "No on-chain holder distribution available from configured providers",
       ),
     );
+  }
+
+  private resolveContractAddressFromVenues(
+    preferredChainId: string | null,
+    venues: DexScreenerVenue[],
+  ): string | null {
+    const validVenues = venues.filter((venue) => typeof venue.baseTokenAddress === "string" && venue.baseTokenAddress.length > 0);
+
+    if (validVenues.length === 0) {
+      return null;
+    }
+
+    const sortedVenues = [...validVenues].sort((left, right) => {
+      const leftPreferred = preferredChainId !== null && normalizeToken(left.chainId) === preferredChainId ? 1 : 0;
+      const rightPreferred = preferredChainId !== null && normalizeToken(right.chainId) === preferredChainId ? 1 : 0;
+
+      if (rightPreferred !== leftPreferred) {
+        return rightPreferred - leftPreferred;
+      }
+
+      const rightLiquidity = right.liquidityUsd ?? -1;
+      const leftLiquidity = left.liquidityUsd ?? -1;
+
+      if (rightLiquidity !== leftLiquidity) {
+        return rightLiquidity - leftLiquidity;
+      }
+
+      return (right.volume24hUsd ?? -1) - (left.volume24hUsd ?? -1);
+    });
+
+    return sortedVenues[0]?.baseTokenAddress ?? null;
+  }
+
+  private resolveBirdseyeChainCandidates(
+    preferredChainId: string | null,
+    contractAddress: string | null,
+    venues: DexScreenerVenue[],
+  ): string[] {
+    const candidates: string[] = [];
+
+    if (preferredChainId) {
+      candidates.push(preferredChainId);
+    }
+
+    for (const venue of venues) {
+      if (
+        contractAddress
+        && venue.baseTokenAddress
+        && normalizeText(venue.baseTokenAddress) !== normalizeText(contractAddress)
+      ) {
+        continue;
+      }
+
+      if (venue.chainId.length > 0) {
+        candidates.push(normalizeToken(venue.chainId));
+      }
+    }
+
+    if (contractAddress && solanaContractAddressPattern.test(contractAddress)) {
+      candidates.push("solana");
+    }
+
+    const dedupe = new Set<string>();
+    const normalizedCandidates: string[] = [];
+
+    for (const candidate of candidates) {
+      const normalizedCandidate = normalizeToken(candidate);
+
+      if (normalizedCandidate.length === 0 || dedupe.has(normalizedCandidate)) {
+        continue;
+      }
+
+      dedupe.add(normalizedCandidate);
+      normalizedCandidates.push(normalizedCandidate);
+    }
+
+    return normalizedCandidates;
   }
 
   private async tryResolveHolderDistributionFromDexScreener(
@@ -877,7 +977,7 @@ export class DexScreenerSearchAdapter {
 
   private async tryResolveHolderDistributionFromBirdseye(
     contractAddress: string,
-    preferredChainId: string | null,
+    chainCandidates: string[],
   ): Promise<DexHolderDistributionSnapshot> {
     if (env.ONCHAIN_BIRDSEYE_API_KEY.length < 10) {
       return buildUnavailableHolderDistribution(
@@ -890,44 +990,64 @@ export class DexScreenerSearchAdapter {
       );
     }
 
-    const birdseyeChainId = birdseyeChainAliasByChainId[preferredChainId ?? "base"];
+    const supportedChainCandidates = chainCandidates
+      .map((chainId) => birdseyeChainAliasByChainId[chainId])
+      .filter((chainId): chainId is string => typeof chainId === "string" && chainId.length > 0);
 
-    if (!birdseyeChainId) {
+    if (supportedChainCandidates.length === 0) {
       return buildUnavailableHolderDistribution(
         toHolderError(
-          "ONCHAIN_BIRDSEYE_CHAIN_UNSUPPORTED",
+          "ONCHAIN_BIRDSEYE_CHAIN_UNRESOLVED",
           "birdseye",
           false,
-          "BirdEye holder endpoint does not support this chain",
+          "Unable to resolve a supported BirdEye chain for holder lookup",
         ),
       );
     }
 
-    try {
-      const payload = await this.requestBirdseyeHolders(contractAddress, birdseyeChainId);
-      const parsedHolderDistribution = this.parseBirdseyeHolderDistribution(payload);
+    let firstError: DexHolderDistributionError | null = null;
 
-      if (!parsedHolderDistribution) {
-        return buildUnavailableHolderDistribution(
-          toHolderError(
-            "ONCHAIN_BIRDSEYE_HOLDER_DATA_MISSING",
-            "birdseye",
-            false,
-            "BirdEye response did not include holder distribution",
-          ),
-        );
+    for (const birdseyeChainId of supportedChainCandidates) {
+      try {
+        const payload = await this.requestBirdseyeHolders(contractAddress, birdseyeChainId);
+        const parsedHolderDistribution = this.parseBirdseyeHolderDistribution(payload);
+
+        if (!parsedHolderDistribution) {
+          if (!firstError) {
+            firstError = toHolderError(
+              "ONCHAIN_BIRDSEYE_HOLDER_DATA_MISSING",
+              "birdseye",
+              false,
+              "BirdEye response did not include holder distribution",
+            );
+          }
+
+          continue;
+        }
+
+        return {
+          error: null,
+          holders: parsedHolderDistribution.holders,
+          source: "birdseye",
+          status: "ok",
+          totalHolders: parsedHolderDistribution.totalHolders,
+        };
+      } catch (error) {
+        if (!firstError) {
+          firstError = this.toHolderError(error, "birdseye");
+        }
       }
-
-      return {
-        error: null,
-        holders: parsedHolderDistribution.holders,
-        source: "birdseye",
-        status: "ok",
-        totalHolders: parsedHolderDistribution.totalHolders,
-      };
-    } catch (error) {
-      return buildUnavailableHolderDistribution(this.toHolderError(error, "birdseye"));
     }
+
+    return buildUnavailableHolderDistribution(
+      firstError
+      ?? toHolderError(
+        "ONCHAIN_BIRDSEYE_HOLDER_DATA_MISSING",
+        "birdseye",
+        false,
+        "BirdEye response did not include holder distribution",
+      ),
+    );
   }
 
   private parseBirdseyeHolderDistribution(

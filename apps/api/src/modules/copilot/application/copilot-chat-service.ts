@@ -233,7 +233,15 @@ const copilotDexScreenerTokenLookupToolInputSchema = z.object({
     .regex(/^(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/)
     .optional(),
   maxResults: z.number().int().min(1).max(8).default(4),
-  query: z.string().trim().min(2).max(120),
+  query: z.string().trim().min(2).max(120).optional(),
+}).superRefine((value, ctx) => {
+  if (!value.query && !value.contractAddress) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "query or contractAddress is required",
+      path: ["query"],
+    });
+  }
 });
 
 const copilotWebSearchToolInputSchema = z.object({
@@ -2422,11 +2430,10 @@ const copilotTools: OpenRouterToolDefinition[] = [
           type: "number",
         },
         query: {
-          description: "Ticker, nome do token ou endereco de contrato",
+          description: "Ticker ou nome do token (opcional quando contractAddress for informado)",
           type: "string",
         },
       },
-      required: ["query"],
       type: "object",
     },
     run: async (input: z.infer<typeof copilotDexScreenerTokenLookupToolInputSchema>) => {
