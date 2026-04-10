@@ -11,6 +11,7 @@ import { logger } from "../../../shared/logger/logger.js";
 // Simple in-memory cache with TTL
 const forexCache = new Map<string, { value: ForexRateBatchResponse; expiresAt: number }>();
 const FOREX_CACHE_TTL_MS = env.MARKET_OVERVIEW_CACHE_TTL_SECONDS * 1000;
+const FOREX_CACHE_STALE_MS = env.CACHE_STALE_SECONDS * 1000;
 const forexPairSchema = z
   .string()
   .trim()
@@ -193,47 +194,62 @@ export class ForexMarketService {
     }
     logger.info({ service: "forex", type: "cache", hit: false, pairs }, "Forex cache miss");
 
-    const requestedSymbols = pairs.map((pair) => toYahooSymbol(pair));
-    const snapshot = await yahooMarketDataAdapter.getMarketSnapshot({ symbols: requestedSymbols });
-    const quotesByPair = new Map<string, ForexRateSnapshot>(
-      snapshot.quotes
-        .filter((quote) => quote.symbol.endsWith("=X"))
-        .map((quote) => {
-          const normalizedPair = fromYahooSymbol(quote.symbol);
-          return [normalizedPair, toSnapshot(quote, snapshot.fetchedAt)] as const;
-        }),
-    );
+    try {
+      const requestedSymbols = pairs.map((pair) => toYahooSymbol(pair));
+      const snapshot = await yahooMarketDataAdapter.getMarketSnapshot({ symbols: requestedSymbols });
+      const quotesByPair = new Map<string, ForexRateSnapshot>(
+        snapshot.quotes
+          .filter((quote) => quote.symbol.endsWith("=X"))
+          .map((quote) => {
+            const normalizedPair = fromYahooSymbol(quote.symbol);
+            return [normalizedPair, toSnapshot(quote, snapshot.fetchedAt)] as const;
+          }),
+      );
 
-    const quotes = pairs.map((pair) => {
-      const foundQuote = quotesByPair.get(pair);
-      if (foundQuote) {
+      const quotes = pairs.map((pair) => {
+        const foundQuote = quotesByPair.get(pair);
+        if (foundQuote) {
+          return {
+            pair,
+            quote: foundQuote,
+            status: "ok" as const,
+          };
+        }
         return {
+          error: {
+            code: "FOREX_PAIR_NOT_AVAILABLE" as const,
+            message: "Forex pair was not returned by market provider",
+          },
           pair,
-          quote: foundQuote,
-          status: "ok" as const,
+          status: "error" as const,
         };
-      }
-      return {
-        error: {
-          code: "FOREX_PAIR_NOT_AVAILABLE" as const,
-          message: "Forex pair was not returned by market provider",
-        },
-        pair,
-        status: "error" as const,
-      };
-    });
+      });
 
-    const successCount = quotes.filter((item) => item.status === "ok").length;
-    const result: ForexRateBatchResponse = {
-      failureCount: quotes.length - successCount,
-      fetchedAt: snapshot.fetchedAt,
-      pairs,
-      quotes,
-      requestedPairs: pairs,
-      successCount,
-    };
-    forexCache.set(cacheKey, { value: result, expiresAt: now + FOREX_CACHE_TTL_MS });
-    return { ...result, fromCache: false };
+      const successCount = quotes.filter((item) => item.status === "ok").length;
+      const result: ForexRateBatchResponse = {
+        failureCount: quotes.length - successCount,
+        fetchedAt: snapshot.fetchedAt,
+        pairs,
+        quotes,
+        requestedPairs: pairs,
+        successCount,
+      };
+      forexCache.set(cacheKey, { value: result, expiresAt: Date.now() + FOREX_CACHE_TTL_MS });
+      return { ...result, fromCache: false };
+    } catch (error) {
+      if (cached && now <= cached.expiresAt + FOREX_CACHE_STALE_MS) {
+        logger.warn(
+          {
+            err: error,
+            pairs,
+          },
+          "Forex provider unavailable; serving stale cache",
+        );
+        return { ...cached.value, fromCache: true };
+      }
+
+      throw error;
+    }
   }
 
   public async getMarketOverview(input?: {

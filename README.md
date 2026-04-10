@@ -91,6 +91,7 @@ Politica de retencao:
 5. ADR 033: `docs/ADR/ADR-033-memecoin-radar-social-sentiment.md`
 6. ADR 034: `docs/ADR/ADR-034-hardening-cotacao-fx-copiloto.md`
 7. ADR 035: `docs/ADR/ADR-035-hardening-market-navigator-e-stream-futures.md`
+8. ADR 036: `docs/ADR/ADR-036-resiliencia-overview-e-chart-simbolo-externo.md`
 
 ## Relatorio completo desta entrega
 

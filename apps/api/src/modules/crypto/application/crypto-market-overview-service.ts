@@ -109,6 +109,7 @@ function toLeader(asset: CoinCapMarketAsset | null): MarketLeader | null {
 // Simple in-memory cache with TTL
 const cryptoCache = new Map<string, { value: { assets: CoinCapMarketAsset[]; fetchedAt: string; provider: "coincap" | "coingecko" | "binance" }; expiresAt: number }>();
 const CRYPTO_CACHE_TTL_MS = env.MARKET_OVERVIEW_CACHE_TTL_SECONDS * 1000;
+const CRYPTO_CACHE_STALE_MS = env.CACHE_STALE_SECONDS * 1000;
 
 function buildOverviewResponse(
   marketOverview: { assets: CoinCapMarketAsset[]; fetchedAt: string; provider: "coincap" | "coingecko" | "binance" },
@@ -175,10 +176,27 @@ export class CryptoMarketOverviewService {
     }
 
     logger.info({ service: "crypto", type: "cache", hit: false, limit: parsedInput.limit }, "Crypto cache miss");
-    const marketOverview = await this.loadOverviewWithFallback(parsedInput.limit);
-    cryptoCache.set(cacheKey, { value: marketOverview, expiresAt: now + CRYPTO_CACHE_TTL_MS });
 
-    return buildOverviewResponse(marketOverview, parsedInput.limit, false);
+    try {
+      const marketOverview = await this.loadOverviewWithFallback(parsedInput.limit);
+      cryptoCache.set(cacheKey, { value: marketOverview, expiresAt: Date.now() + CRYPTO_CACHE_TTL_MS });
+
+      return buildOverviewResponse(marketOverview, parsedInput.limit, false);
+    } catch (error) {
+      if (cached && now <= cached.expiresAt + CRYPTO_CACHE_STALE_MS) {
+        logger.warn(
+          {
+            err: error,
+            limit: parsedInput.limit,
+          },
+          "Crypto providers unavailable; serving stale overview cache",
+        );
+
+        return buildOverviewResponse(cached.value, parsedInput.limit, true);
+      }
+
+      throw error;
+    }
   }
 
   private async loadOverviewWithFallback(limit: number): Promise<{

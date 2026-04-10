@@ -130,6 +130,85 @@ void it("GET /v1/futures/snapshot retorna snapshot consolidado", async () => {
   assert.equal(body.data.derivatives.openInterest, 55482.92);
 });
 
+void it("GET /v1/futures/snapshot degrada derivativos para null quando endpoints oscilam", async () => {
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/fapi/v1/ticker/24hr") && requestUrl.includes("symbol=SOLUSDT")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            highPrice: "169.2",
+            lastPrice: "165.4",
+            lowPrice: "160.7",
+            priceChangePercent: "1.48",
+            quoteVolume: "480000000",
+            symbol: "SOLUSDT",
+            volume: "990000.4",
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("symbol=SOLUSDT") && requestUrl.includes("/fapi/v1/premiumIndex")) {
+      return Promise.resolve(
+        new Response("service unavailable", {
+          status: 503,
+        }),
+      );
+    }
+
+    if (requestUrl.includes("symbol=SOLUSDT") && requestUrl.includes("/fapi/v1/openInterest")) {
+      return Promise.resolve(
+        new Response("service unavailable", {
+          status: 503,
+        }),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/futures/snapshot?symbol=sol",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<{
+    data: {
+      derivatives: {
+        indexPrice: number | null;
+        lastFundingRate: number | null;
+        markPrice: number | null;
+        nextFundingTime: string | null;
+        openInterest: number | null;
+      };
+      market: {
+        lastPrice: number;
+      };
+      symbol: string;
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.symbol, "SOLUSDT");
+  assert.equal(body.data.market.lastPrice, 165.4);
+  assert.equal(body.data.derivatives.indexPrice, null);
+  assert.equal(body.data.derivatives.markPrice, null);
+  assert.equal(body.data.derivatives.lastFundingRate, null);
+  assert.equal(body.data.derivatives.openInterest, null);
+  assert.equal(body.data.derivatives.nextFundingTime, null);
+});
+
 void it("GET /v1/futures/snapshot/batch retorna sucesso parcial", async () => {
   globalThis.fetch = ((input) => {
     const requestUrl = String(input);

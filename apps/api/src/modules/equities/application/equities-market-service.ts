@@ -11,6 +11,7 @@ import { logger } from "../../../shared/logger/logger.js";
 // Simple in-memory cache with TTL
 const equitiesCache = new Map<string, { value: EquitiesSnapshotBatchResponse; expiresAt: number }>();
 const EQUITIES_CACHE_TTL_MS = env.MARKET_OVERVIEW_CACHE_TTL_SECONDS * 1000;
+const EQUITIES_CACHE_STALE_MS = env.CACHE_STALE_SECONDS * 1000;
 const equitiesSymbolSchema = z
   .string()
   .trim()
@@ -178,40 +179,55 @@ export class EquitiesMarketService {
     }
     logger.info({ service: "equities", type: "cache", hit: false, symbols }, "Equities cache miss");
 
-    const snapshot = await yahooMarketDataAdapter.getMarketSnapshot({ symbols });
-    const quotesBySymbol = new Map<string, EquitiesQuoteSnapshot>(
-      snapshot.quotes.map((quote) => [quote.symbol, toSnapshot(quote, snapshot.fetchedAt)] as const),
-    );
+    try {
+      const snapshot = await yahooMarketDataAdapter.getMarketSnapshot({ symbols });
+      const quotesBySymbol = new Map<string, EquitiesQuoteSnapshot>(
+        snapshot.quotes.map((quote) => [quote.symbol, toSnapshot(quote, snapshot.fetchedAt)] as const),
+      );
 
-    const snapshots = symbols.map((symbol) => {
-      const foundQuote = quotesBySymbol.get(symbol);
-      if (foundQuote) {
+      const snapshots = symbols.map((symbol) => {
+        const foundQuote = quotesBySymbol.get(symbol);
+        if (foundQuote) {
+          return {
+            quote: foundQuote,
+            status: "ok" as const,
+            symbol,
+          };
+        }
         return {
-          quote: foundQuote,
-          status: "ok" as const,
+          error: {
+            code: "EQUITIES_SYMBOL_NOT_AVAILABLE" as const,
+            message: "Equities symbol was not returned by market provider",
+          },
+          status: "error" as const,
           symbol,
         };
-      }
-      return {
-        error: {
-          code: "EQUITIES_SYMBOL_NOT_AVAILABLE" as const,
-          message: "Equities symbol was not returned by market provider",
-        },
-        status: "error" as const,
-        symbol,
-      };
-    });
+      });
 
-    const successCount = snapshots.filter((item) => item.status === "ok").length;
-    const result: EquitiesSnapshotBatchResponse = {
-      failureCount: snapshots.length - successCount,
-      fetchedAt: snapshot.fetchedAt,
-      requestedSymbols: symbols,
-      snapshots,
-      successCount,
-    };
-    equitiesCache.set(cacheKey, { value: result, expiresAt: now + EQUITIES_CACHE_TTL_MS });
-    return { ...result, fromCache: false };
+      const successCount = snapshots.filter((item) => item.status === "ok").length;
+      const result: EquitiesSnapshotBatchResponse = {
+        failureCount: snapshots.length - successCount,
+        fetchedAt: snapshot.fetchedAt,
+        requestedSymbols: symbols,
+        snapshots,
+        successCount,
+      };
+      equitiesCache.set(cacheKey, { value: result, expiresAt: Date.now() + EQUITIES_CACHE_TTL_MS });
+      return { ...result, fromCache: false };
+    } catch (error) {
+      if (cached && now <= cached.expiresAt + EQUITIES_CACHE_STALE_MS) {
+        logger.warn(
+          {
+            err: error,
+            symbols,
+          },
+          "Equities provider unavailable; serving stale cache",
+        );
+        return { ...cached.value, fromCache: true };
+      }
+
+      throw error;
+    }
   }
 
   public async getMarketOverview(input?: {

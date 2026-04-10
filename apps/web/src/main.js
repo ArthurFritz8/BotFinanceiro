@@ -1500,6 +1500,58 @@ function isLikelyCryptoTerminalSymbol(symbol) {
   return false;
 }
 
+function shouldUseCryptoChartPipeline(symbol) {
+  const normalizedSymbol = sanitizeTerminalSymbol(symbol);
+
+  if (normalizedSymbol.length === 0) {
+    return true;
+  }
+
+  if (isLikelyCryptoTerminalSymbol(normalizedSymbol)) {
+    return true;
+  }
+
+  if (chartSymbolSourceModule === "crypto" || chartSymbolSourceModule === "defi") {
+    return true;
+  }
+
+  if (
+    chartSymbolSourceModule === "futures"
+    && /(?:USDT|BUSD|USD)$/.test(normalizedSymbol)
+    && !isLikelyForexPairSymbol(normalizedSymbol)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function applyExternalSymbolChartState(symbol, options = {}) {
+  const normalizedSymbol = sanitizeTerminalSymbol(symbol);
+  const silent = options.silent === true;
+
+  currentChartSnapshot = null;
+
+  if (chartViewMode === "copilot") {
+    clearChartSurface();
+  }
+
+  renderChartMetrics(null);
+
+  if (silent) {
+    return;
+  }
+
+  const exchangePrefix = resolveTradingViewExchangePrefix(normalizedSymbol);
+  setChartStatus("Modo simbolo externo ativo no Terminal PRO.", "");
+  setChartLegend(
+    normalizedSymbol.length > 0
+      ? `Sem snapshot IA para ${exchangePrefix}:${normalizedSymbol}. Use a leitura do Terminal PRO para este ativo.`
+      : "Sem snapshot IA para este simbolo. Use a leitura do Terminal PRO para este ativo.",
+    "",
+  );
+}
+
 function getSelectedBroker() {
   const exchange = getSelectedTerminalExchange();
   return EXCHANGE_TO_BROKER[exchange] ?? "binance";
@@ -5034,6 +5086,10 @@ function openMarketItemInChart(item) {
 
   if (chartSymbolInput instanceof HTMLInputElement && target.symbol.length > 0) {
     chartSymbolInput.value = mapSymbolToExchange(target.symbol, getSelectedTerminalExchange());
+  }
+
+  if (!shouldUseCryptoChartPipeline(target.symbol)) {
+    applyExternalSymbolChartState(target.symbol);
   }
 
   if (!target.hasNativeAsset && chartViewMode !== "tv") {
@@ -8853,6 +8909,15 @@ async function loadChart(options = {}) {
   }
 
   try {
+    const selectedTerminalSymbol = getSelectedTerminalSymbol();
+
+    if (!shouldUseCryptoChartPipeline(selectedTerminalSymbol)) {
+      applyExternalSymbolChartState(selectedTerminalSymbol, {
+        silent,
+      });
+      return;
+    }
+
     const { fallbackReason, snapshot } = await requestCryptoChart(assetId, range, mode, selectedBroker);
     applyChartSnapshot(snapshot, {
       fallbackReason,

@@ -5,6 +5,8 @@ import {
   type BinanceFuturesContractSnapshot,
   type BinanceFuturesTickerStreamHealth,
 } from "../../../integrations/market_data/binance-futures-market-data-adapter.js";
+import { env } from "../../../shared/config/env.js";
+import { logger } from "../../../shared/logger/logger.js";
 
 const futuresSymbolSchema = z
   .string()
@@ -78,6 +80,9 @@ const presetSymbols: Record<FuturesMarketPreset, string[]> = {
 };
 
 const binanceFuturesMarketDataAdapter = new BinanceFuturesMarketDataAdapter();
+const futuresSnapshotCache = new Map<string, { expiresAt: number; value: BinanceFuturesContractSnapshot }>();
+const FUTURES_SNAPSHOT_CACHE_TTL_MS = env.MARKET_OVERVIEW_CACHE_TTL_SECONDS * 1000;
+const FUTURES_SNAPSHOT_CACHE_STALE_MS = env.CACHE_STALE_SECONDS * 1000;
 
 function buildTableMarkdown(items: FuturesBatchItem[]): string {
   const headers = ["Contrato", "Preco", "Funding", "OI", "Var 24h", "Status"];
@@ -120,9 +125,36 @@ export class FuturesMarketService {
 
   public async getSnapshot(input: { symbol: string }): Promise<BinanceFuturesContractSnapshot> {
     const symbol = futuresSymbolSchema.parse(input.symbol);
-    return binanceFuturesMarketDataAdapter.getContractSnapshot({
-      symbol,
-    });
+    const now = Date.now();
+    const cached = futuresSnapshotCache.get(symbol);
+
+    if (cached && cached.expiresAt > now) {
+      return cached.value;
+    }
+
+    try {
+      const snapshot = await binanceFuturesMarketDataAdapter.getContractSnapshot({
+        symbol,
+      });
+      futuresSnapshotCache.set(symbol, {
+        expiresAt: Date.now() + FUTURES_SNAPSHOT_CACHE_TTL_MS,
+        value: snapshot,
+      });
+
+      return snapshot;
+    } catch (error) {
+      if (cached && now <= cached.expiresAt + FUTURES_SNAPSHOT_CACHE_STALE_MS) {
+        logger.warn(
+          {
+            symbol,
+          },
+          "Futures snapshot provider unavailable; serving stale cache",
+        );
+        return cached.value;
+      }
+
+      throw error;
+    }
   }
 
   public async getSnapshotBatch(input: { symbols: string[] }): Promise<FuturesSnapshotBatchResponse> {

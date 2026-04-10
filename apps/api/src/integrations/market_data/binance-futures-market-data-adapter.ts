@@ -7,6 +7,7 @@ import { logger } from "../../shared/logger/logger.js";
 import { retryWithExponentialBackoff } from "../../shared/resilience/retry-with-backoff.js";
 
 const FUTURES_STREAM_STALE_MS = 20_000;
+const FUTURES_STREAM_STALE_GRACE_MS = Math.max(FUTURES_STREAM_STALE_MS, env.CACHE_STALE_SECONDS * 1000);
 
 const symbolSchema = z
   .string()
@@ -41,6 +42,9 @@ const openInterestSchema = z.object({
   symbol: z.string().trim().min(1),
   time: z.coerce.number().int().nullable().optional(),
 });
+
+type PremiumIndexPayload = z.infer<typeof premiumIndexSchema>;
+type OpenInterestPayload = z.infer<typeof openInterestSchema>;
 
 const tickerStreamItemSchema = z.object({
   P: z.string().optional(),
@@ -239,63 +243,24 @@ export class BinanceFuturesMarketDataAdapter {
     symbol: string;
   }): Promise<BinanceFuturesContractSnapshot> {
     const symbol = symbolSchema.parse(input.symbol);
-    const query = new URLSearchParams({
-      symbol,
-    }).toString();
     this.ensureTickerStreamStarted();
-    const tickerFromStream = this.readTickerFromStream(symbol);
-
-    const [tickerData, premiumPayload, openInterestPayload] = await Promise.all([
-      tickerFromStream
-        ? Promise.resolve(tickerFromStream)
-        : this.loadTickerViaRest(symbol),
-      retryWithExponentialBackoff(
-        () => this.requestJson(`/fapi/v1/premiumIndex?${query}`),
-        {
-          attempts: 3,
-          baseDelayMs: 200,
-          jitterPercent: 20,
-          shouldRetry: shouldRetryFuturesRequest,
-        },
-      ),
-      retryWithExponentialBackoff(
-        () => this.requestJson(`/fapi/v1/openInterest?${query}`),
-        {
-          attempts: 3,
-          baseDelayMs: 200,
-          jitterPercent: 20,
-          shouldRetry: shouldRetryFuturesRequest,
-        },
-      ),
+    const [tickerData, premiumData, openInterestData] = await Promise.all([
+      this.loadTickerWithFallback(symbol),
+      this.loadPremiumIndexSafe(symbol),
+      this.loadOpenInterestSafe(symbol),
     ]);
-    const parsedPremium = premiumIndexSchema.safeParse(premiumPayload);
-    const parsedOpenInterest = openInterestSchema.safeParse(openInterestPayload);
-
-    if (!parsedPremium.success || !parsedOpenInterest.success) {
-      throw new AppError({
-        code: "BINANCE_FUTURES_SCHEMA_MISMATCH",
-        details: {
-          openInterestIssues: parsedOpenInterest.success ? [] : parsedOpenInterest.error.issues,
-          premiumIssues: parsedPremium.success ? [] : parsedPremium.error.issues,
-          tickerIssues: [],
-        },
-        message: "Binance futures payload schema mismatch",
-        statusCode: 502,
-      });
-    }
-
-    const nextFundingTimeMs = parsedPremium.data.nextFundingTime;
+    const nextFundingTimeMs = premiumData?.nextFundingTime;
 
     return {
       derivatives: {
-        indexPrice: normalizeNumeric(parsedPremium.data.indexPrice),
-        lastFundingRate: normalizeNumeric(parsedPremium.data.lastFundingRate),
-        markPrice: normalizeNumeric(parsedPremium.data.markPrice),
+        indexPrice: normalizeNumeric(premiumData?.indexPrice),
+        lastFundingRate: normalizeNumeric(premiumData?.lastFundingRate),
+        markPrice: normalizeNumeric(premiumData?.markPrice),
         nextFundingTime:
           typeof nextFundingTimeMs === "number" && Number.isFinite(nextFundingTimeMs) && nextFundingTimeMs > 0
             ? new Date(nextFundingTimeMs).toISOString()
             : null,
-        openInterest: normalizeNumeric(parsedOpenInterest.data.openInterest),
+        openInterest: normalizeNumeric(openInterestData?.openInterest),
       },
       fetchedAt: new Date().toISOString(),
       market: {
@@ -407,6 +372,114 @@ export class BinanceFuturesMarketDataAdapter {
     return tickerData;
   }
 
+  private async loadTickerWithFallback(symbol: string): Promise<FuturesTickerCacheItem> {
+    const tickerFromStream = this.readTickerFromStream(symbol);
+
+    if (tickerFromStream) {
+      return tickerFromStream;
+    }
+
+    try {
+      return await this.loadTickerViaRest(symbol);
+    } catch (error) {
+      const staleTicker = this.readStaleTickerFromCache(symbol);
+
+      if (staleTicker) {
+        logger.warn(
+          {
+            symbol,
+          },
+          "Binance futures ticker unavailable; serving stale ticker cache",
+        );
+        return staleTicker;
+      }
+
+      throw error;
+    }
+  }
+
+  private async loadPremiumIndexSafe(symbol: string): Promise<PremiumIndexPayload | null> {
+    const query = new URLSearchParams({
+      symbol,
+    }).toString();
+
+    try {
+      const payload = await retryWithExponentialBackoff(
+        () => this.requestJson(`/fapi/v1/premiumIndex?${query}`),
+        {
+          attempts: 3,
+          baseDelayMs: 200,
+          jitterPercent: 20,
+          shouldRetry: shouldRetryFuturesRequest,
+        },
+      );
+      const parsedPayload = premiumIndexSchema.safeParse(payload);
+
+      if (!parsedPayload.success) {
+        logger.warn(
+          {
+            issues: parsedPayload.error.issues,
+            symbol,
+          },
+          "Binance futures premium index schema mismatch; setting derivatives fields to null",
+        );
+        return null;
+      }
+
+      return parsedPayload.data;
+    } catch (error) {
+      logger.warn(
+        {
+          err: error,
+          symbol,
+        },
+        "Binance futures premium index unavailable; setting derivatives fields to null",
+      );
+      return null;
+    }
+  }
+
+  private async loadOpenInterestSafe(symbol: string): Promise<OpenInterestPayload | null> {
+    const query = new URLSearchParams({
+      symbol,
+    }).toString();
+
+    try {
+      const payload = await retryWithExponentialBackoff(
+        () => this.requestJson(`/fapi/v1/openInterest?${query}`),
+        {
+          attempts: 3,
+          baseDelayMs: 200,
+          jitterPercent: 20,
+          shouldRetry: shouldRetryFuturesRequest,
+        },
+      );
+      const parsedPayload = openInterestSchema.safeParse(payload);
+
+      if (!parsedPayload.success) {
+        logger.warn(
+          {
+            issues: parsedPayload.error.issues,
+            symbol,
+          },
+          "Binance futures open interest schema mismatch; setting derivatives fields to null",
+        );
+        return null;
+      }
+
+      return parsedPayload.data;
+    } catch (error) {
+      logger.warn(
+        {
+          err: error,
+          symbol,
+        },
+        "Binance futures open interest unavailable; setting derivatives fields to null",
+      );
+      return null;
+    }
+  }
+
   private readTickerFromStream(symbol: string): FuturesTickerCacheItem | null {
     const cachedTicker = this.tickerCacheBySymbol.get(symbol);
 
@@ -415,6 +488,20 @@ export class BinanceFuturesMarketDataAdapter {
     }
 
     if (Date.now() - cachedTicker.updatedAtMs > FUTURES_STREAM_STALE_MS) {
+      return null;
+    }
+
+    return cachedTicker;
+  }
+
+  private readStaleTickerFromCache(symbol: string): FuturesTickerCacheItem | null {
+    const cachedTicker = this.tickerCacheBySymbol.get(symbol);
+
+    if (!cachedTicker) {
+      return null;
+    }
+
+    if (Date.now() - cachedTicker.updatedAtMs > FUTURES_STREAM_STALE_GRACE_MS) {
       return null;
     }
 
