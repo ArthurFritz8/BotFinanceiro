@@ -136,8 +136,10 @@ const wallStreetMarketService = new WallStreetMarketService();
 
 const copilotDefaultSystemPrompt = [
   "Voce e um assistente geral util, com especialidade em dados objetivos de mercado e operacao.",
+  "Persona de resposta: analista quant institucional, objetivo, metrico e rastreavel.",
   "Se a pergunta for geral e nao envolver mercado financeiro, responda normalmente de forma clara e direta, sem forcar contexto de mercado ou uso de tools.",
   "Regra de roteamento: use tools de cotacao/grafico somente com pedido explicito de preco, cotacao, grafico, analise tecnica ou vies.",
+  "Diretiva de preco em cambio/FX: para dolar/euro/libra/iene ou par cambial, use get_forex_market_snapshot (ou get_financial_market_snapshot/get_macro_rates_market_snapshot) antes da resposta final e inclua fonte + timestamp.",
   "Para resumo de mercado cripto, use get_crypto_market_overview; para preco/comparacao use get_crypto_spot_price ou get_crypto_multi_spot_price; para grafico/TA/SMC use get_crypto_chart_insights.",
   "Framework institucional para grafico (obrigatorio): entregue SEMPRE Cenario Bull e Cenario Bear com probabilidades complementares somando 100%, gatilho de ativacao e alvos TP1/TP2.",
   "Formato obrigatorio para resposta de grafico: inclua explicitamente os blocos 'Cenario Bull:', 'Cenario Bear:' e 'Gestao de risco dinamica'.",
@@ -158,9 +160,7 @@ const copilotDefaultSystemPrompt = [
   "Checklist institucional PASS/FAIL: HIGH_CONCENTRATION_RISK, SYMMETRIC_BUNDLE_DETECTED, FAKE_HOLDERS_WARNING, COORDINATED_BUNDLE, EARLY_DUMP_TRAP, COMMUNITY_HEALTH_FAILURE.",
   "Regras: viewers menor que 30% de holders => FAKE_HOLDERS_WARNING; funding comum no Top 10 => COORDINATED_BUNDLE; market cap menor que 10000 com 2+ snipers/dev/fresh => EARLY_DUMP_TRAP com alerta de risco extremo.",
   "Formato: inclua tabela Markdown 'Checklist de Seguranca' com Status PASS/FAIL; para falhas criticas use destaque visual.",
-  "Melhoria adicional: ao chamar search_web_realtime, use somente um ticker oficial ou um contract address na query; nunca envie a frase completa do usuario.",
-  "Melhoria adicional: se nao houver ticker/contract address valido, solicite explicitamente essa entidade ao usuario antes de concluir a investigacao.",
-  "Melhoria adicional: gere o Checklist institucional apenas depois de receber e validar as evidencias retornadas pelas tools.",
+  "Melhoria adicional: em search_web_realtime use apenas ticker ou contract address; se faltar entidade valida, solicite antes de concluir e gere checklist so apos validar evidencias das tools.",
 ].join(" ");
 
 const copilotGeneralAssistantSystemPrompt = [
@@ -408,6 +408,11 @@ const copilotInstitutionalRiskToolNames = new Set([
   "search_token_listings_dexscreener",
   "search_web_realtime",
 ]);
+const copilotFiatFxQuoteToolNames = new Set([
+  "get_forex_market_snapshot",
+  "get_financial_market_snapshot",
+  "get_macro_rates_market_snapshot",
+]);
 
 interface MultiSpotPriceSuccessResult {
   assetId: string;
@@ -607,6 +612,28 @@ const airdropNoiseTokens = new Set([
   "testnet",
 ]);
 
+const fiatCurrencyCodes = new Set([
+  "USD",
+  "BRL",
+  "EUR",
+  "GBP",
+  "JPY",
+  "CHF",
+  "CAD",
+  "AUD",
+  "NZD",
+  "MXN",
+  "CNY",
+  "HKD",
+  "CLP",
+  "COP",
+  "ARS",
+  "PEN",
+  "INR",
+  "KRW",
+  "THB",
+]);
+
 function normalizeText(value: string): string {
   return value
     .toLowerCase()
@@ -647,6 +674,166 @@ function hasExplicitPriceOrChartIntent(message: string): boolean {
     normalizedMessage.includes("tendencia");
 
   return asksPrice || asksChart;
+}
+
+function extractFiatPairFromMessage(message: string): string | null {
+  const upperCasedMessage = message.toUpperCase();
+  const explicitPairMatches = upperCasedMessage.matchAll(/\b([A-Z]{3})\s*\/?\s*([A-Z]{3})\b/g);
+
+  for (const pairMatch of explicitPairMatches) {
+    const baseCode = pairMatch[1] ?? "";
+    const quoteCode = pairMatch[2] ?? "";
+
+    if (fiatCurrencyCodes.has(baseCode) && fiatCurrencyCodes.has(quoteCode)) {
+      return `${baseCode}${quoteCode}`;
+    }
+  }
+
+  const yahooSymbolMatch = upperCasedMessage.match(/\b([A-Z]{3})([A-Z]{3})=X\b/);
+
+  if (yahooSymbolMatch) {
+    const baseCode = yahooSymbolMatch[1] ?? "";
+    const quoteCode = yahooSymbolMatch[2] ?? "";
+
+    if (fiatCurrencyCodes.has(baseCode) && fiatCurrencyCodes.has(quoteCode)) {
+      return `${baseCode}${quoteCode}`;
+    }
+  }
+
+  return null;
+}
+
+function hasKnownCryptoAssetMention(message: string): boolean {
+  const normalizedMessage = normalizeText(message);
+
+  return riskAssetAliases.some((assetAlias) =>
+    assetAlias.aliases.some((alias) => hasExactAlias(normalizedMessage, alias)),
+  );
+}
+
+function hasFiatFxPriceIntent(message: string): boolean {
+  const normalizedMessage = normalizeText(message);
+  const hasExplicitFiatPair = extractFiatPairFromMessage(message) !== null;
+  const asksQuoteOrPrice =
+    hasExplicitPriceOrChartIntent(message) ||
+    normalizedMessage.includes("quanto") ||
+    normalizedMessage.includes("taxa") ||
+    normalizedMessage.includes("hoje") ||
+    normalizedMessage.includes("agora") ||
+    normalizedMessage.includes("cambio") ||
+    normalizedMessage.includes("forex") ||
+    normalizedMessage.includes("fx");
+
+  if (!asksQuoteOrPrice) {
+    return false;
+  }
+
+  if (hasExplicitFiatPair) {
+    return true;
+  }
+
+  const mentionsFxContext =
+    normalizedMessage.includes("cambio") ||
+    normalizedMessage.includes("forex") ||
+    normalizedMessage.includes("par cambial") ||
+    normalizedMessage.includes("dolar") ||
+    normalizedMessage.includes("euro") ||
+    normalizedMessage.includes("libra") ||
+    normalizedMessage.includes("iene") ||
+    normalizedMessage.includes("yen") ||
+    normalizedMessage.includes("usd") ||
+    normalizedMessage.includes("eur") ||
+    normalizedMessage.includes("gbp") ||
+    normalizedMessage.includes("jpy") ||
+    normalizedMessage.includes("brl");
+
+  if (!mentionsFxContext) {
+    return false;
+  }
+
+  const hasCryptoMention = hasKnownCryptoAssetMention(message);
+
+  if (
+    hasCryptoMention &&
+    !normalizedMessage.includes("cambio") &&
+    !normalizedMessage.includes("forex") &&
+    !normalizedMessage.includes("par cambial")
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function resolveForexPairFromMessage(message: string): string {
+  const explicitFiatPair = extractFiatPairFromMessage(message);
+
+  if (explicitFiatPair) {
+    return explicitFiatPair;
+  }
+
+  const normalizedMessage = normalizeText(message);
+
+  if (
+    normalizedMessage.includes("dolar") &&
+    (normalizedMessage.includes("iene") ||
+      normalizedMessage.includes("yen") ||
+      normalizedMessage.includes("jpy") ||
+      normalizedMessage.includes("japao"))
+  ) {
+    return "USDJPY";
+  }
+
+  if (
+    normalizedMessage.includes("dolar") &&
+    (normalizedMessage.includes("peso mexicano") ||
+      normalizedMessage.includes("mxn") ||
+      normalizedMessage.includes("mexico"))
+  ) {
+    return "USDMXN";
+  }
+
+  if (
+    normalizedMessage.includes("euro") &&
+    (normalizedMessage.includes("real") || normalizedMessage.includes("brl") || normalizedMessage.includes("brasil"))
+  ) {
+    return "EURBRL";
+  }
+
+  if (
+    normalizedMessage.includes("euro") &&
+    (normalizedMessage.includes("dolar") || normalizedMessage.includes("usd"))
+  ) {
+    return "EURUSD";
+  }
+
+  if (
+    normalizedMessage.includes("libra") &&
+    (normalizedMessage.includes("dolar") || normalizedMessage.includes("usd"))
+  ) {
+    return "GBPUSD";
+  }
+
+  if (
+    normalizedMessage.includes("dolar canadense") ||
+    (normalizedMessage.includes("dolar") && normalizedMessage.includes("canadense")) ||
+    (normalizedMessage.includes("usd") && normalizedMessage.includes("cad"))
+  ) {
+    return "USDCAD";
+  }
+
+  if (
+    (normalizedMessage.includes("dolar") || normalizedMessage.includes("usd")) &&
+    (normalizedMessage.includes("real") || normalizedMessage.includes("brl") || normalizedMessage.includes("brasil"))
+  ) {
+    return "USDBRL";
+  }
+
+  if (normalizedMessage.includes("euro") || normalizedMessage.includes("eur")) {
+    return "EURUSD";
+  }
+
+  return "USDBRL";
 }
 
 function hasMemeAlertPayloadIntent(message: string): boolean {
@@ -1781,6 +1968,22 @@ function shouldForceChartFallback(message: string, completion: OpenRouterChatCom
   );
 }
 
+function shouldForceFiatFxFallback(message: string, completion: OpenRouterChatCompletion): boolean {
+  if (!hasFiatFxPriceIntent(message)) {
+    return false;
+  }
+
+  const usedFiatFxQuoteTool = completion.toolCallsUsed.some((toolName) =>
+    copilotFiatFxQuoteToolNames.has(toolName),
+  );
+
+  if (usedFiatFxQuoteTool && !hasGenericLimitationAnswer(completion.answer)) {
+    return false;
+  }
+
+  return true;
+}
+
 function hasInstitutionalRiskChecklistAnswer(answer: string): boolean {
   const normalizedAnswer = normalizeText(answer);
 
@@ -1861,6 +2064,25 @@ function formatQuotePrice(price: number, currency: string | null): string {
   }
 
   return `${formattedPrice} ${currency.toUpperCase()}`;
+}
+
+function formatFallbackTimestampLabel(value: string | null): string {
+  if (!value) {
+    return "n/d";
+  }
+
+  const parsedValue = new Date(value);
+
+  if (Number.isNaN(parsedValue.getTime())) {
+    return value;
+  }
+
+  return parsedValue.toLocaleString("pt-BR", {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "2-digit",
+  });
 }
 
 function classifyVolatility(changePercent: number | null): string {
@@ -2546,7 +2768,7 @@ const copilotTools: OpenRouterToolDefinition[] = [
   },
   {
     description:
-      "Executa busca web global em tempo real para descobrir informacoes fora da base local, incluindo listagem de tokens, onde comprar e contexto de projetos desconhecidos.",
+      "Executa busca web global em tempo real para descobrir informacoes fora da base local, incluindo listagem de tokens, onde comprar e contexto de projetos desconhecidos. Nao use para cotacao de cambio quando get_forex_market_snapshot estiver disponivel.",
     inputSchema: copilotWebSearchToolInputSchema,
     name: "search_web_realtime",
     parameters: {
@@ -2603,7 +2825,7 @@ const copilotTools: OpenRouterToolDefinition[] = [
   },
   {
     description:
-      "Retorna snapshot de forex (pares de moedas) com cotacao, variacao 24h e estado de mercado. Use para perguntas de cambio, pares FX e dolar/real.",
+      "Retorna snapshot de forex (pares de moedas) com cotacao, variacao 24h e estado de mercado. Tool obrigatoria para perguntas de cambio, pares FX e dolar/real em tempo real.",
     inputSchema: copilotForexMarketSnapshotToolInputSchema,
     name: "get_forex_market_snapshot",
     parameters: {
@@ -3440,6 +3662,10 @@ export class CopilotChatService {
         return await this.buildBrokerIntegrationFallback(operativeMessage, conversationMessages);
       }
 
+      if (hasFiatFxPriceIntent(operativeMessage)) {
+        return await this.buildFiatFxPriceFallback(operativeMessage);
+      }
+
       if (hasAirdropIntent(operativeMessage)) {
         return await this.buildAirdropIntelligenceFallback(operativeMessage);
       }
@@ -3756,6 +3982,24 @@ export class CopilotChatService {
       }
     }
 
+    if (shouldForceFiatFxFallback(operativeMessage, completion)) {
+      try {
+        const fallbackAnswer = await this.buildFiatFxPriceFallback(operativeMessage);
+
+        return {
+          ...completion,
+          answer: fallbackAnswer,
+        };
+      } catch (error) {
+        logger.warn(
+          {
+            err: error,
+          },
+          "Failed to force fiat FX fallback",
+        );
+      }
+    }
+
     if (shouldForceGeneralAssistantFallback(operativeMessage, completion)) {
       try {
         const fallbackAnswer = await this.buildGeneralAssistantFallback(input, conversationMessages);
@@ -3922,6 +4166,65 @@ export class CopilotChatService {
     }
 
     return this.buildSpotSnapshotSummaryFallback();
+  }
+
+  private async buildFiatFxPriceFallback(message: string): Promise<string> {
+    const targetPair = resolveForexPairFromMessage(message);
+
+    try {
+      const quote = await forexMarketService.getSpotRate({
+        pair: targetPair,
+      });
+
+      return [
+        "Cotacao FX em tempo real (fallback deterministico anti-alucinacao).",
+        `Par monitorado: ${quote.pair} (${quote.baseCurrency}/${quote.quoteCurrency}).`,
+        `Taxa atual: ${formatQuotePrice(quote.rate, null)}.`,
+        `Variacao 24h: ${formatPercent(quote.changePercent24h)} | estado de mercado: ${quote.marketState ?? "n/d"}.`,
+        `Fonte: Yahoo Finance via get_forex_market_snapshot | atualizado em ${formatFallbackTimestampLabel(quote.regularMarketTime ?? quote.fetchedAt)}.`,
+        "Se quiser, comparo com EURUSD, USDJPY e USDMXN com leitura operacional no mesmo formato.",
+      ].join("\n");
+    } catch (error) {
+      logger.warn(
+        {
+          err: error,
+          pair: targetPair,
+        },
+        "Failed to fetch direct forex pair for fiat FX fallback",
+      );
+    }
+
+    try {
+      const overview = await forexMarketService.getMarketOverview({
+        limit: 6,
+        preset: targetPair === "USDBRL" ? "latam" : "majors",
+      });
+      const firstAvailableQuote = overview.quotes.find((quoteItem) => quoteItem.status === "ok");
+
+      if (firstAvailableQuote && firstAvailableQuote.status === "ok") {
+        return [
+          "Cotacao FX com fallback de panorama (par especifico indisponivel no instante).",
+          `Par solicitado: ${targetPair}. Proxy disponivel: ${firstAvailableQuote.quote.pair} em ${formatQuotePrice(firstAvailableQuote.quote.rate, null)}.`,
+          `Variacao 24h do proxy: ${formatPercent(firstAvailableQuote.quote.changePercent24h)}.`,
+          `Fonte: Yahoo Finance | atualizado em ${formatFallbackTimestampLabel(overview.fetchedAt)}.`,
+          `Tabela resumida:\n${overview.tableMarkdown}`,
+        ].join("\n");
+      }
+    } catch (error) {
+      logger.warn(
+        {
+          err: error,
+          pair: targetPair,
+        },
+        "Failed to fetch forex overview fallback",
+      );
+    }
+
+    return [
+      "Nao foi possivel coletar cotacao FX em tempo real neste instante.",
+      `Par solicitado: ${targetPair}.`,
+      "Tente novamente em alguns segundos ou informe o par explicitamente (ex.: USDBRL, EURUSD, USDJPY).",
+    ].join("\n");
   }
 
   private buildCoinCapSummaryFallback(marketOverview: CoinCapMarketOverview): string {

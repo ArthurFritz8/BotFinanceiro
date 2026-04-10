@@ -2683,7 +2683,7 @@ function buildAirdropChatPrompt(input) {
   const sourceUrl = typeof input.url === "string" ? input.url : "";
 
   return [
-    "Analise esta oportunidade de airdrop e monte um plano de execucao objetivo.",
+    "Atue como analista institucional de airdrops e entregue tese operacional sem recomendacao financeira.",
     `Projeto: ${project}`,
     `Chain: ${chain}`,
     `Score: ${score}`,
@@ -2692,7 +2692,8 @@ function buildAirdropChatPrompt(input) {
     `Tarefas iniciais: ${tasks}`,
     `Fontes: ${sources}`,
     sourceUrl.length > 0 ? `Link: ${sourceUrl}` : "Link: n/d",
-    "Quero retorno em 4 blocos: elegibilidade, risco operacional/gas, checklist por prioridade e red flags de golpe.",
+    "Formato obrigatorio: 1) Tese e assimetria (score 0-100) 2) Elegibilidade verificavel e lacunas 3) Estrutura de risco (gas, bridge, sybil, custodia) 4) Plano D0/D1/D7 com prioridade e custo 5) Red flags e gatilho de abortar.",
+    "Feche com checklist PASS/FAIL e proximas 3 acoes objetivas.",
   ].join("\n");
 }
 
@@ -3373,7 +3374,7 @@ function buildMemecoinChatPrompt(notification) {
   const actionable = notification?.actionable !== false;
 
   return [
-    "Analise este alerta de MemeCoin Radar e gere um plano tatico de acompanhamento sem recomendacao financeira.",
+    "Atue como mesa institucional de memecoins e gere leitura tatico-operacional sem recomendacao financeira.",
     `Token: ${tokenSymbol} (${tokenName})`,
     `Chain: ${chain}`,
     `Prioridade: ${priority}`,
@@ -3385,7 +3386,7 @@ function buildMemecoinChatPrompt(notification) {
     `Catalisadores: ${catalysts}`,
     `Riscos: ${risks}`,
     hasValidPoolUrl ? `Link da pool: ${pairUrl}` : "Link da pool: n/d",
-    "Quero resposta em 4 blocos: leitura de momentum, risco de liquidez, gatilhos de entrada/saida para monitoramento e red flags de manipulacao.",
+    "Formato obrigatorio: 1) Leitura de fluxo e liquidez 2) Risco de manipulacao (bundle/vamp/multi-wallet) 3) Plano de monitoramento com gatilhos e invalidacao 4) Controles de risco e kill-switch 5) Conclusao com [RISK SCORE: 0-100] e acao: monitorar/reduzir/excluir.",
   ].join("\n");
 }
 
@@ -10192,7 +10193,6 @@ async function initializeChatHistory() {
           "Desk pronto para apoiar. Abra uma conversa e diga o objetivo do momento.",
           {
             meta: {
-              model: "qwen/qwen3.6-plus",
               time: new Date().toLocaleTimeString("pt-BR", {
                 hour: "2-digit",
                 minute: "2-digit",
@@ -10238,7 +10238,6 @@ async function initializeChatHistory() {
     "Desk pronto para ajudar. Peça um resumo de mercado, riscos de curto prazo, panorama macro ou analise tecnica.",
     {
       meta: {
-        model: "qwen/qwen3.6-plus",
         time: new Date().toLocaleTimeString("pt-BR", {
           hour: "2-digit",
           minute: "2-digit",

@@ -646,6 +646,105 @@ void it("POST /v1/copilot/chat substitui resposta em ingles quando a pergunta es
   assert.doesNotMatch(body.data.answer, /The market analysis summary is direct/);
 });
 
+void it("POST /v1/copilot/chat aplica fallback FX para dolar sem tool de cambio", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let openRouterCalls = 0;
+  let yahooCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("/chat/completions")) {
+      openRouterCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "USD/BRL esta em 5,00 agora e deve continuar estavel.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-fx-no-tool-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 18,
+              prompt_tokens: 26,
+              total_tokens: 44,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("query1.finance.yahoo.com/v7/finance/quote")) {
+      yahooCalls += 1;
+      assert.match(requestUrl, /USDBRL(?:%3D|=)X/);
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            quoteResponse: {
+              error: null,
+              result: [
+                {
+                  currency: "BRL",
+                  marketState: "REGULAR",
+                  regularMarketChange: 0.044,
+                  regularMarketChangePercent: 0.82,
+                  regularMarketPrice: 5.4321,
+                  regularMarketPreviousClose: 5.3881,
+                  regularMarketTime: 1712018000,
+                  symbol: "USDBRL=X",
+                },
+              ],
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Quanto esta o dolar agora em relacao ao real?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 1);
+  assert.equal(yahooCalls, 1);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.responseId, "gen-fx-no-tool-001");
+  assert.match(body.data.answer, /Cotacao FX em tempo real/);
+  assert.match(body.data.answer, /USDBRL/);
+  assert.match(body.data.answer, /Yahoo Finance/);
+  assert.doesNotMatch(body.data.answer, /5,00 agora e deve continuar estavel/);
+});
+
 void it("POST /v1/copilot/chat aplica fallback local para resumo de mercado quando IA recusa", async () => {
   mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
 
