@@ -455,6 +455,197 @@ void it("POST /v1/copilot/chat aplica fallback geral para pergunta nao financeir
   assert.doesNotMatch(body.data.answer, /copiloto financeiro focado/);
 });
 
+void it("POST /v1/copilot/chat substitui resposta com vazamento de raciocinio interno", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let openRouterCalls = 0;
+  const capturedRequestBodies: string[] = [];
+
+  globalThis.fetch = ((input, init) => {
+    const requestUrl = String(input);
+
+    if (!requestUrl.includes("/chat/completions")) {
+      return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+    }
+
+    openRouterCalls += 1;
+    capturedRequestBodies.push(typeof init?.body === "string" ? init.body : "");
+
+    if (openRouterCalls === 1) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: "We need to inspect the user request and call the tool before answering.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-quality-leak-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 19,
+              prompt_tokens: 28,
+              total_tokens: 47,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content:
+                  "Procrastinacao e o atraso recorrente de tarefas importantes. Uma forma pratica de reduzir isso e dividir a tarefa em blocos curtos e iniciar pelo primeiro bloco agora.",
+                role: "assistant",
+              },
+            },
+          ],
+          id: "gen-quality-leak-002",
+          model: "google/gemini-1.5-flash",
+          usage: {
+            completion_tokens: 24,
+            prompt_tokens: 20,
+            total_tokens: 44,
+          },
+        }),
+        {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 200,
+        },
+      ),
+    );
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Como voce define procrastinacao em linguagem simples?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 2);
+  assert.ok(capturedRequestBodies.some((body) => /"tools":\[/.test(body)));
+  assert.ok(capturedRequestBodies.some((body) => !/"tools":\[/.test(body)));
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.deepEqual(body.data.toolCallsUsed, []);
+  assert.match(body.data.answer, /Procrastinacao e o atraso recorrente de tarefas importantes/);
+  assert.doesNotMatch(body.data.answer, /we need to|call the tool|user request/i);
+});
+
+void it("POST /v1/copilot/chat substitui resposta em ingles quando a pergunta esta em portugues", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let openRouterCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (!requestUrl.includes("/chat/completions")) {
+      return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+    }
+
+    openRouterCalls += 1;
+
+    if (openRouterCalls === 1) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    "The market analysis summary is direct and the response should cover risk, chart, price, tool, user context and next step.",
+                  role: "assistant",
+                },
+              },
+            ],
+            id: "gen-quality-language-001",
+            model: "google/gemini-1.5-flash",
+            usage: {
+              completion_tokens: 23,
+              prompt_tokens: 26,
+              total_tokens: 49,
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content:
+                  "Procrastinacao e adiar o que importa. Para melhorar, escolha uma tarefa, defina um bloco de 10 minutos e conclua esse primeiro ciclo sem interrupcao.",
+                role: "assistant",
+              },
+            },
+          ],
+          id: "gen-quality-language-002",
+          model: "google/gemini-1.5-flash",
+          usage: {
+            completion_tokens: 21,
+            prompt_tokens: 19,
+            total_tokens: 40,
+          },
+        }),
+        {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 200,
+        },
+      ),
+    );
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      message: "Como voce define procrastinacao em linguagem simples?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(openRouterCalls, 2);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.deepEqual(body.data.toolCallsUsed, []);
+  assert.match(body.data.answer, /Procrastinacao e adiar o que importa/);
+  assert.doesNotMatch(body.data.answer, /The market analysis summary is direct/);
+});
+
 void it("POST /v1/copilot/chat aplica fallback local para resumo de mercado quando IA recusa", async () => {
   mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
 

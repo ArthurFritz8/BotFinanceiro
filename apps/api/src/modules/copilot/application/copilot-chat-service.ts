@@ -1353,6 +1353,105 @@ function hasMisroutedQuoteTemplateAnswer(answer: string): boolean {
   );
 }
 
+const portugueseLocaleHintTokens = new Set([
+  "analise",
+  "comprar",
+  "como",
+  "corretora",
+  "cotacao",
+  "dados",
+  "explique",
+  "defina",
+  "grafico",
+  "mercado",
+  "onde",
+  "plano",
+  "resuma",
+  "resumo",
+  "risco",
+  "vender",
+  "voce",
+]);
+
+const englishLocaleHintTokens = new Set([
+  "analysis",
+  "buy",
+  "chart",
+  "first",
+  "market",
+  "next",
+  "price",
+  "response",
+  "risk",
+  "sell",
+  "step",
+  "summary",
+  "then",
+  "tool",
+  "user",
+]);
+
+const internalReasoningLeakPatterns = [
+  /\bwe need to\b/,
+  /\bi need to\b/,
+  /\bthe user\b/,
+  /\buser asked\b/,
+  /\buser wants?\b/,
+  /\bi should\b/,
+  /\blet'?s\b/,
+  /\bcall (the )?tool\b/,
+  /\btool call\b/,
+  /\bmy plan\b/,
+  /\bstep by step\b/,
+  /\bfirst\s*,?\s*(we|i)\b/,
+  /\bnext\s*,?\s*(we|i)\b/,
+  /\bthen\s*,?\s*(we|i)\b/,
+  /\bchain of thought\b/,
+  /\binternal reasoning\b/,
+];
+
+function countKeywordHits(value: string, keywords: ReadonlySet<string>): number {
+  return value
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length > 1)
+    .reduce((hits, token) => (keywords.has(token) ? hits + 1 : hits), 0);
+}
+
+function isLikelyPortugueseText(value: string): boolean {
+  const normalizedValue = normalizeText(value);
+  const portugueseHits = countKeywordHits(normalizedValue, portugueseLocaleHintTokens);
+  const englishHits = countKeywordHits(normalizedValue, englishLocaleHintTokens);
+
+  return portugueseHits >= 2 && portugueseHits >= englishHits;
+}
+
+function isLikelyEnglishAnswer(value: string): boolean {
+  const normalizedValue = normalizeText(value);
+
+  if (normalizedValue.length < 80) {
+    return false;
+  }
+
+  const portugueseHits = countKeywordHits(normalizedValue, portugueseLocaleHintTokens);
+  const englishHits = countKeywordHits(normalizedValue, englishLocaleHintTokens);
+
+  return englishHits >= 8 && englishHits >= portugueseHits + 3;
+}
+
+function hasInternalReasoningLeakAnswer(answer: string): boolean {
+  const normalizedAnswer = normalizeText(answer);
+
+  return internalReasoningLeakPatterns.some((pattern) => pattern.test(normalizedAnswer));
+}
+
+function hasResponseQualityLeak(message: string, answer: string): boolean {
+  if (hasInternalReasoningLeakAnswer(answer)) {
+    return true;
+  }
+
+  return isLikelyPortugueseText(message) && isLikelyEnglishAnswer(answer);
+}
+
 function hasWhereToBuyAnswer(answer: string): boolean {
   const normalizedAnswer = normalizeText(answer);
 
@@ -3553,6 +3652,35 @@ export class CopilotChatService {
   ): Promise<OpenRouterChatCompletion> {
     const operativeMessage = this.resolveLatestUserMessage(input.message, conversationMessages);
 
+    if (hasResponseQualityLeak(operativeMessage, completion.answer)) {
+      try {
+        const hasFinancialOrSpecializedIntent =
+          hasFinancialIntent(operativeMessage)
+          || hasAirdropIntent(operativeMessage)
+          || hasMonitoringPlanIntent(operativeMessage)
+          || hasChartAnalysisIntent(operativeMessage)
+          || hasBrokerIntegrationIntent(operativeMessage)
+          || hasInstitutionalFraudIntent(operativeMessage)
+          || hasRiskAnalysisIntent(operativeMessage)
+          || hasWhereToBuyIntent(normalizeText(operativeMessage));
+        const fallbackAnswer = hasFinancialOrSpecializedIntent
+          ? await this.buildEmergencyLocalFallbackAnswer(operativeMessage, conversationMessages)
+          : await this.buildGeneralAssistantFallback(input, conversationMessages);
+
+        return {
+          ...completion,
+          answer: fallbackAnswer,
+        };
+      } catch (error) {
+        logger.warn(
+          {
+            err: error,
+          },
+          "Failed to replace low-quality completion with fallback",
+        );
+      }
+    }
+
     if (shouldForceWhereToBuyFallback(operativeMessage, completion)) {
       try {
         const fallbackAnswer = await this.buildBrokerIntegrationFallback(operativeMessage, conversationMessages);
@@ -4500,6 +4628,17 @@ export class CopilotChatService {
     return null;
   }
 
+  private hasOnlyUnknownBundleChecklist(report: BundleRiskReport): boolean {
+    return (
+      report.checklist.highConcentration.status === "unknown"
+      && report.checklist.symmetricBundle.status === "unknown"
+      && report.checklist.fakeHolders.status === "unknown"
+      && report.checklist.coordinatedFunding.status === "unknown"
+      && report.checklist.earlyDumpTrap.status === "unknown"
+      && report.checklist.communityHealth.status === "unknown"
+    );
+  }
+
   private buildStandaloneFraudChecklistMarkdown(input: {
     assetLabel: string;
     contractCandidates: string[];
@@ -4508,20 +4647,20 @@ export class CopilotChatService {
   }): string {
     const riskScore = input.vampDetected ? 38 : 62;
     const vampStatus = input.vampDetected ? "**<span style=\"color:red\">FAIL</span>**" : "PASS";
-    const unknownStatus = "UNKNOWN";
-    const insufficientOnChainData = "Sem dados on-chain suficientes para auditoria no momento.";
+    const pendingStatus = "**EM ANALISE**";
+    const insufficientOnChainData = "Evidencia on-chain insuficiente nesta rodada; manter monitoramento ativo.";
 
     return [
       `[RISK SCORE: ${riskScore}/100]`,
       "",
       "| Checklist de Seguranca | Status | Evidencia |",
       "| --- | --- | --- |",
-      `| High concentration (>4%) | ${unknownStatus} | ${insufficientOnChainData} |`,
-      `| Symmetric bundle | ${unknownStatus} | ${insufficientOnChainData} |`,
-      `| Viewers vs Holders anomaly | ${unknownStatus} | ${insufficientOnChainData} |`,
-      `| Coordinated funding ping | ${unknownStatus} | ${insufficientOnChainData} |`,
-      `| Early dump trap (<10k MC) | ${unknownStatus} | ${insufficientOnChainData} |`,
-      `| Community health | ${unknownStatus} | ${insufficientOnChainData} |`,
+      `| High concentration (>4%) | ${pendingStatus} | ${insufficientOnChainData} |`,
+      `| Symmetric bundle | ${pendingStatus} | ${insufficientOnChainData} |`,
+      `| Viewers vs Holders anomaly | ${pendingStatus} | ${insufficientOnChainData} |`,
+      `| Coordinated funding ping | ${pendingStatus} | ${insufficientOnChainData} |`,
+      `| Early dump trap (<10k MC) | ${pendingStatus} | ${insufficientOnChainData} |`,
+      `| Community health | ${pendingStatus} | ${insufficientOnChainData} |`,
       `| VAMP SCAM (ticker cruzado) | ${vampStatus} | ${input.vampDetected
         ? "Contratos antigos/mortos com mesmo ticker/imagem detectados."
         : "Nenhum marcador forte de copia parasita detectado agora."} |`,
@@ -4629,6 +4768,15 @@ export class CopilotChatService {
           baseReport.warningMessage ??
           (vampDetected ? "VAMP SCAM detectado no cruzamento de ticker/contrato." : null),
       };
+
+      if (this.hasOnlyUnknownBundleChecklist(report)) {
+        return this.buildStandaloneFraudChecklistMarkdown({
+          assetLabel,
+          contractCandidates,
+          sourceUrls,
+          vampDetected,
+        });
+      }
 
       const multiWalletDetected =
         report.flags.includes("HIGH_CONCENTRATION_RISK") ||
