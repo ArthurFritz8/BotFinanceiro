@@ -52,6 +52,27 @@ if (internalToken) {
     },
     validate: (body) => Boolean(body && typeof body === "object" && body.status === "success"),
   });
+
+  checks.push({
+    name: "internal-market-navigator-modules",
+    path: "/internal/health/market-navigator/modules",
+    headers: {
+      "x-internal-token": internalToken,
+    },
+    validate: (body) => {
+      if (!body || typeof body !== "object") {
+        return false;
+      }
+
+      const safeBody = /** @type {{ status?: unknown; data?: { modules?: unknown } }} */ (body);
+
+      return (
+        safeBody.status === "success"
+        && Array.isArray(safeBody.data?.modules)
+        && safeBody.data.modules.length > 0
+      );
+    },
+  });
 }
 
 async function runCheck(check) {

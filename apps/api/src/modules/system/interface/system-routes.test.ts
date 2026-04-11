@@ -209,6 +209,44 @@ interface FuturesStreamHealthResponse {
   };
 }
 
+interface MarketNavigatorModulesHealthResponse {
+  cache: {
+    cached: boolean;
+    ttlMs: number;
+  };
+  generatedAt: string;
+  modules: Array<{
+    errorCode: string | null;
+    errorMessage: string | null;
+    failureCount: number | null;
+    failureRatePercent: number | null;
+    fetchedAt: string | null;
+    fromCache: boolean | null;
+    label: string;
+    latencyMs: number;
+    limit: number;
+    module: string;
+    preset: string | null;
+    provider: string | null;
+    status: "critical" | "ok" | "warning";
+    successCount: number | null;
+    totalCount: number | null;
+  }>;
+  probeMode: "live" | "stub";
+  summary: {
+    avgFailureRatePercent: number | null;
+    criticalModules: number;
+    maxFailureRatePercent: number | null;
+    okModules: number;
+    staleModules: number;
+    status: "critical" | "ok" | "warning";
+    totalFailureCount: number;
+    totalModules: number;
+    totalSuccessCount: number;
+    warningModules: number;
+  };
+}
+
 interface CryptoLiveChartHealthResponse {
   brokers: Record<
     "binance" | "bybit" | "coinbase" | "kraken" | "okx",
@@ -552,6 +590,54 @@ void it("GET /internal/health/streams/futures retorna estado do stream com token
   assert.equal(typeof body.data.stream.reconnectAttempt, "number");
   assert.equal(typeof body.data.stream.streamUrl, "string");
   assert.equal(typeof body.data.stream.stalenessThresholdMs, "number");
+});
+
+void it("GET /internal/health/market-navigator/modules retorna 401 sem token", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/internal/health/market-navigator/modules",
+  });
+
+  assert.equal(response.statusCode, 401);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "INTERNAL_AUTH_MISSING_TOKEN");
+  assert.equal(body.error.message, "Missing internal route token");
+});
+
+void it("GET /internal/health/market-navigator/modules retorna resumo por modulo com token valido", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/health/market-navigator/modules",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<MarketNavigatorModulesHealthResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(typeof body.data.generatedAt, "string");
+  assert.equal(typeof body.data.cache.cached, "boolean");
+  assert.equal(typeof body.data.cache.ttlMs, "number");
+  assert.equal(typeof body.data.summary.totalModules, "number");
+  assert.ok(Array.isArray(body.data.modules));
+  assert.ok(body.data.modules.length >= 11);
+
+  const modules = body.data.modules.map((item) => item.module);
+  assert.equal(modules.includes("crypto"), true);
+  assert.equal(modules.includes("futures"), true);
+  assert.equal(modules.includes("forex"), true);
+  assert.equal(modules.includes("equities"), true);
+  assert.equal(modules.includes("commodities"), true);
+  assert.equal(modules.includes("wall-street"), true);
+  assert.equal(modules.includes("macro-rates"), true);
+  assert.equal(modules.includes("defi"), true);
+  assert.equal(modules.includes("b3"), true);
+  assert.equal(modules.includes("etfs"), true);
+  assert.equal(modules.includes("fixed-income"), true);
 });
 
 void it("GET /internal/health/streams/brokers.csv retorna 401 sem token", async () => {

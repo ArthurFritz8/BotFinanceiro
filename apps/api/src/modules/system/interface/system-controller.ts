@@ -84,6 +84,13 @@ const clearHistoryQuerySchema = z.object({
     .refine((value) => value === "true", "confirm must be true to clear history"),
 });
 
+const marketNavigatorModulesHealthQuerySchema = z.object({
+  refresh: z
+    .string()
+    .optional()
+    .transform((value) => typeof value === "string" && value.toLowerCase() === "true"),
+});
+
 export function getHealth(request: FastifyRequest, reply: FastifyReply): void {
   const data = systemStatusService.getHealthStatus();
   void reply.send(buildSuccessResponse(request.id, data));
@@ -106,6 +113,17 @@ export function getBrokerLiveQuoteStreamHealth(request: FastifyRequest, reply: F
 
 export function getFuturesMarketStreamHealth(request: FastifyRequest, reply: FastifyReply): void {
   const data = systemStatusService.getFuturesMarketStreamHealth();
+  void reply.send(buildSuccessResponse(request.id, data));
+}
+
+export async function getMarketNavigatorModulesHealth(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const parsedQuery = marketNavigatorModulesHealthQuerySchema.parse(request.query);
+  const data = await systemStatusService.getMarketNavigatorModulesHealth({
+    refresh: parsedQuery.refresh,
+  });
   void reply.send(buildSuccessResponse(request.id, data));
 }
 

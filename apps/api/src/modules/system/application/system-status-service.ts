@@ -3,6 +3,7 @@ import {
   type CryptoSchedulerScopeMetrics,
   type CryptoSchedulerMetricsSnapshot,
 } from "../../../jobs/crypto-sync-job-runner.js";
+import { performance } from "node:perf_hooks";
 import { env } from "../../../shared/config/env.js";
 import {
   brokerLiveQuoteStreamMetricsStore,
@@ -24,8 +25,196 @@ import {
   FuturesMarketService,
   type FuturesMarketDataHealth,
 } from "../../futures/application/futures-market-service.js";
+import { B3MarketService } from "../../b3/application/b3-market-service.js";
+import { CommoditiesMarketService } from "../../commodities/application/commodities-market-service.js";
+import { CryptoMarketOverviewService } from "../../crypto/application/crypto-market-overview-service.js";
+import { DefiMarketService } from "../../defi/application/defi-market-service.js";
+import { EquitiesMarketService } from "../../equities/application/equities-market-service.js";
+import { EtfsMarketService } from "../../etfs/application/etfs-market-service.js";
+import { FixedIncomeMarketService } from "../../fixed_income/application/fixed-income-market-service.js";
+import { ForexMarketService } from "../../forex/application/forex-market-service.js";
+import { MacroRatesMarketService } from "../../macro_rates/application/macro-rates-market-service.js";
+import { WallStreetMarketService } from "../../wall_street/application/wall-street-market-service.js";
 
 const futuresMarketService = new FuturesMarketService();
+const b3MarketService = new B3MarketService();
+const commoditiesMarketService = new CommoditiesMarketService();
+const cryptoMarketOverviewService = new CryptoMarketOverviewService();
+const defiMarketService = new DefiMarketService();
+const equitiesMarketService = new EquitiesMarketService();
+const etfsMarketService = new EtfsMarketService();
+const fixedIncomeMarketService = new FixedIncomeMarketService();
+const forexMarketService = new ForexMarketService();
+const macroRatesMarketService = new MacroRatesMarketService();
+const wallStreetMarketService = new WallStreetMarketService();
+
+const MARKET_NAVIGATOR_MODULE_HEALTH_TTL_MS = 15_000;
+const MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT = 5;
+
+type MarketNavigatorModuleId =
+  | "b3"
+  | "commodities"
+  | "crypto"
+  | "defi"
+  | "equities"
+  | "etfs"
+  | "fixed-income"
+  | "forex"
+  | "futures"
+  | "macro-rates"
+  | "wall-street";
+
+type MarketNavigatorModuleStatus = "critical" | "ok" | "warning";
+
+interface MarketNavigatorModuleCounters {
+  failureCount: number | null;
+  failureRatePercent: number | null;
+  fetchedAt: string | null;
+  fromCache: boolean | null;
+  provider: string | null;
+  successCount: number | null;
+  totalCount: number | null;
+}
+
+interface MarketNavigatorModuleProbeDefinition {
+  label: string;
+  limit: number;
+  module: MarketNavigatorModuleId;
+  preset: string | null;
+  probe: () => Promise<unknown>;
+}
+
+export interface MarketNavigatorModuleHealthEntry {
+  errorCode: string | null;
+  errorMessage: string | null;
+  failureCount: number | null;
+  failureRatePercent: number | null;
+  fetchedAt: string | null;
+  fromCache: boolean | null;
+  label: string;
+  latencyMs: number;
+  limit: number;
+  module: MarketNavigatorModuleId;
+  preset: string | null;
+  provider: string | null;
+  status: MarketNavigatorModuleStatus;
+  successCount: number | null;
+  totalCount: number | null;
+}
+
+export interface MarketNavigatorModulesHealthSummary {
+  avgFailureRatePercent: number | null;
+  criticalModules: number;
+  maxFailureRatePercent: number | null;
+  okModules: number;
+  staleModules: number;
+  status: MarketNavigatorModuleStatus;
+  totalFailureCount: number;
+  totalModules: number;
+  totalSuccessCount: number;
+  warningModules: number;
+}
+
+export interface MarketNavigatorModulesHealth {
+  cache: {
+    cached: boolean;
+    ttlMs: number;
+  };
+  generatedAt: string;
+  modules: MarketNavigatorModuleHealthEntry[];
+  probeMode: "live" | "stub";
+  summary: MarketNavigatorModulesHealthSummary;
+}
+
+interface MarketNavigatorModulesHealthCacheEntry {
+  expiresAtMs: number;
+  value: MarketNavigatorModulesHealth;
+}
+
+let marketNavigatorModulesHealthCache: MarketNavigatorModulesHealthCacheEntry | null = null;
+
+const marketNavigatorModuleProbes: MarketNavigatorModuleProbeDefinition[] = [
+  {
+    label: "B3",
+    limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT,
+    module: "b3",
+    preset: null,
+    probe: () => b3MarketService.getMarketOverview({ limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT }),
+  },
+  {
+    label: "Commodities",
+    limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT,
+    module: "commodities",
+    preset: null,
+    probe: () => commoditiesMarketService.getMarketOverview({ limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT }),
+  },
+  {
+    label: "Crypto",
+    limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT,
+    module: "crypto",
+    preset: null,
+    probe: () => cryptoMarketOverviewService.getOverview({ limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT }),
+  },
+  {
+    label: "DeFi",
+    limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT,
+    module: "defi",
+    preset: null,
+    probe: () => defiMarketService.getMarketOverview({ limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT }),
+  },
+  {
+    label: "Equities",
+    limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT,
+    module: "equities",
+    preset: null,
+    probe: () => equitiesMarketService.getMarketOverview({ limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT }),
+  },
+  {
+    label: "ETFs",
+    limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT,
+    module: "etfs",
+    preset: null,
+    probe: () => etfsMarketService.getMarketOverview({ limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT }),
+  },
+  {
+    label: "Fixed Income",
+    limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT,
+    module: "fixed-income",
+    preset: null,
+    probe: () => fixedIncomeMarketService.getMarketOverview({ limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT }),
+  },
+  {
+    label: "Forex",
+    limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT,
+    module: "forex",
+    preset: null,
+    probe: () => forexMarketService.getMarketOverview({ limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT }),
+  },
+  {
+    label: "Futures",
+    limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT,
+    module: "futures",
+    preset: "crypto_majors",
+    probe: () => futuresMarketService.getMarketOverview({
+      limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT,
+      preset: "crypto_majors",
+    }),
+  },
+  {
+    label: "Macro Rates",
+    limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT,
+    module: "macro-rates",
+    preset: null,
+    probe: () => macroRatesMarketService.getMarketOverview({ limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT }),
+  },
+  {
+    label: "Wall Street",
+    limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT,
+    module: "wall-street",
+    preset: null,
+    probe: () => wallStreetMarketService.getMarketOverview({ limit: MARKET_NAVIGATOR_MODULE_DEFAULT_LIMIT }),
+  },
+];
 
 export interface HealthStatus {
   service: string;
@@ -380,6 +569,161 @@ function aggregateHistoryByGranularity(
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function extractMarketNavigatorModuleCounters(payload: unknown): MarketNavigatorModuleCounters {
+  const data = isRecord(payload) ? payload : {};
+  const provider = typeof data.provider === "string" ? data.provider : null;
+  const fromCache = typeof data.fromCache === "boolean" ? data.fromCache : null;
+  const fetchedAt = typeof data.fetchedAt === "string" ? data.fetchedAt : null;
+
+  let successCount = typeof data.successCount === "number" ? data.successCount : null;
+  let failureCount = typeof data.failureCount === "number" ? data.failureCount : null;
+  let totalCount: number | null = null;
+
+  const snapshots = Array.isArray(data.snapshots) ? data.snapshots : null;
+  const quotes = Array.isArray(data.quotes) ? data.quotes : null;
+  const assets = Array.isArray(data.assets) ? data.assets : null;
+
+  if (snapshots) {
+    const derivedSuccess = snapshots.filter((item) => isRecord(item) && item.status === "ok").length;
+    const derivedFailure = snapshots.filter((item) => isRecord(item) && item.status === "error").length;
+    successCount = successCount ?? derivedSuccess;
+    failureCount = failureCount ?? derivedFailure;
+    totalCount = snapshots.length;
+  } else if (quotes) {
+    const derivedSuccess = quotes.filter((item) => isRecord(item) && item.status === "ok").length;
+    const derivedFailure = quotes.filter((item) => isRecord(item) && item.status === "error").length;
+    successCount = successCount ?? derivedSuccess;
+    failureCount = failureCount ?? derivedFailure;
+    totalCount = quotes.length;
+  } else if (assets) {
+    const derivedSuccess = assets.filter((item) => item !== null && item !== undefined).length;
+    successCount = successCount ?? derivedSuccess;
+    failureCount = failureCount ?? 0;
+    totalCount = assets.length;
+  }
+
+  if (totalCount === null && successCount !== null && failureCount !== null) {
+    totalCount = successCount + failureCount;
+  }
+
+  if (successCount === null && totalCount !== null && failureCount !== null) {
+    successCount = Math.max(0, totalCount - failureCount);
+  }
+
+  if (failureCount === null && totalCount !== null && successCount !== null) {
+    failureCount = Math.max(0, totalCount - successCount);
+  }
+
+  const processed =
+    successCount !== null && failureCount !== null
+      ? successCount + failureCount
+      : null;
+  const failureRatePercent =
+    processed !== null && processed > 0 && failureCount !== null
+      ? roundToTwoDecimals((failureCount / processed) * 100)
+      : null;
+
+  return {
+    failureCount,
+    failureRatePercent,
+    fetchedAt,
+    fromCache,
+    provider,
+    successCount,
+    totalCount,
+  };
+}
+
+function resolveMarketNavigatorModuleStatus(
+  counters: MarketNavigatorModuleCounters,
+): MarketNavigatorModuleStatus {
+  if (counters.failureRatePercent === null) {
+    return "ok";
+  }
+
+  if (counters.failureRatePercent >= 70) {
+    return "critical";
+  }
+
+  if (counters.failureRatePercent > 0) {
+    return "warning";
+  }
+
+  return "ok";
+}
+
+function extractErrorCode(error: unknown): string | null {
+  if (!isRecord(error)) {
+    return null;
+  }
+
+  return typeof error.code === "string" ? error.code : null;
+}
+
+function extractErrorMessage(error: unknown): string | null {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (!isRecord(error)) {
+    return null;
+  }
+
+  return typeof error.message === "string" ? error.message : null;
+}
+
+function buildMarketNavigatorModulesSummary(
+  modules: MarketNavigatorModuleHealthEntry[],
+): MarketNavigatorModulesHealthSummary {
+  const okModules = modules.filter((item) => item.status === "ok").length;
+  const warningModules = modules.filter((item) => item.status === "warning").length;
+  const criticalModules = modules.filter((item) => item.status === "critical").length;
+  const staleModules = modules.filter((item) => item.fromCache === true).length;
+  const totalSuccessCount = modules.reduce(
+    (accumulator, item) => accumulator + (item.successCount ?? 0),
+    0,
+  );
+  const totalFailureCount = modules.reduce(
+    (accumulator, item) => accumulator + (item.failureCount ?? 0),
+    0,
+  );
+  const failureRates = modules
+    .map((item) => item.failureRatePercent)
+    .filter((item): item is number => typeof item === "number" && Number.isFinite(item));
+
+  const avgFailureRatePercent =
+    failureRates.length > 0
+      ? roundToTwoDecimals(failureRates.reduce((acc, item) => acc + item, 0) / failureRates.length)
+      : null;
+  const maxFailureRatePercent =
+    failureRates.length > 0
+      ? roundToTwoDecimals(Math.max(...failureRates))
+      : null;
+  const status: MarketNavigatorModuleStatus =
+    criticalModules > 0
+      ? "critical"
+      : warningModules > 0
+        ? "warning"
+        : "ok";
+
+  return {
+    avgFailureRatePercent,
+    criticalModules,
+    maxFailureRatePercent,
+    okModules,
+    staleModules,
+    status,
+    totalFailureCount,
+    totalModules: modules.length,
+    totalSuccessCount,
+    warningModules,
+  };
+}
+
 export class SystemStatusService {
   public getHealthStatus(): HealthStatus {
     return {
@@ -414,6 +758,121 @@ export class SystemStatusService {
 
   public getFuturesMarketStreamHealth(): FuturesMarketStreamHealth {
     return futuresMarketService.getMarketDataHealth();
+  }
+
+  public async getMarketNavigatorModulesHealth(options?: {
+    refresh?: boolean;
+  }): Promise<MarketNavigatorModulesHealth> {
+    const shouldRefresh = options?.refresh === true;
+    const nowMs = Date.now();
+
+    if (
+      !shouldRefresh
+      && marketNavigatorModulesHealthCache
+      && marketNavigatorModulesHealthCache.expiresAtMs > nowMs
+    ) {
+      return {
+        ...marketNavigatorModulesHealthCache.value,
+        cache: {
+          cached: true,
+          ttlMs: MARKET_NAVIGATOR_MODULE_HEALTH_TTL_MS,
+        },
+      };
+    }
+
+    const probeMode: MarketNavigatorModulesHealth["probeMode"] = env.NODE_ENV === "test" ? "stub" : "live";
+    const generatedAt = new Date().toISOString();
+
+    const modules =
+      probeMode === "stub"
+        ? marketNavigatorModuleProbes.map((moduleDefinition) => ({
+          errorCode: null,
+          errorMessage: "Live probe disabled in NODE_ENV=test",
+          failureCount: null,
+          failureRatePercent: null,
+          fetchedAt: generatedAt,
+          fromCache: null,
+          label: moduleDefinition.label,
+          latencyMs: 0,
+          limit: moduleDefinition.limit,
+          module: moduleDefinition.module,
+          preset: moduleDefinition.preset,
+          provider: null,
+          status: "warning" as const,
+          successCount: null,
+          totalCount: null,
+        }))
+        : await Promise.all(
+          marketNavigatorModuleProbes.map((moduleDefinition) =>
+            this.probeMarketNavigatorModule(moduleDefinition),
+          ),
+        );
+
+    const response: MarketNavigatorModulesHealth = {
+      cache: {
+        cached: false,
+        ttlMs: MARKET_NAVIGATOR_MODULE_HEALTH_TTL_MS,
+      },
+      generatedAt,
+      modules,
+      probeMode,
+      summary: buildMarketNavigatorModulesSummary(modules),
+    };
+
+    marketNavigatorModulesHealthCache = {
+      expiresAtMs: nowMs + MARKET_NAVIGATOR_MODULE_HEALTH_TTL_MS,
+      value: response,
+    };
+
+    return response;
+  }
+
+  private async probeMarketNavigatorModule(
+    moduleDefinition: MarketNavigatorModuleProbeDefinition,
+  ): Promise<MarketNavigatorModuleHealthEntry> {
+    const startedAtMs = performance.now();
+
+    try {
+      const payload = await moduleDefinition.probe();
+      const counters = extractMarketNavigatorModuleCounters(payload);
+      const status = resolveMarketNavigatorModuleStatus(counters);
+
+      return {
+        errorCode: null,
+        errorMessage: null,
+        failureCount: counters.failureCount,
+        failureRatePercent: counters.failureRatePercent,
+        fetchedAt: counters.fetchedAt,
+        fromCache: counters.fromCache,
+        label: moduleDefinition.label,
+        latencyMs: roundToTwoDecimals(performance.now() - startedAtMs),
+        limit: moduleDefinition.limit,
+        module: moduleDefinition.module,
+        preset: moduleDefinition.preset,
+        provider: counters.provider,
+        status,
+        successCount: counters.successCount,
+        totalCount: counters.totalCount,
+      };
+    } catch (error) {
+      return {
+        errorCode: extractErrorCode(error),
+        errorMessage: extractErrorMessage(error),
+        failureCount: null,
+        failureRatePercent: null,
+        fetchedAt: null,
+        fromCache: null,
+        label: moduleDefinition.label,
+        latencyMs: roundToTwoDecimals(performance.now() - startedAtMs),
+        limit: moduleDefinition.limit,
+        module: moduleDefinition.module,
+        preset: moduleDefinition.preset,
+        provider: null,
+        status: "critical",
+        successCount: null,
+        totalCount: null,
+      };
+    }
   }
 
   public getOperationalHealth(): OperationalHealthStatus {
