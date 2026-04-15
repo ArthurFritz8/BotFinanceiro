@@ -85,6 +85,33 @@ test("main.js prioriza prefixo cripto no TradingView e reseta modulo na watchlis
   );
 });
 
+test("main.js preserva semantica AUTO na watchlist", async () => {
+  const mainSource = await readWebFile("src/main.js");
+
+  assert.match(mainSource, /let watchlistAutoPreferredBroker = "binance";/);
+  assert.match(mainSource, /function resolveAutoWatchlistPrimaryBroker\(\)/);
+
+  assert.match(mainSource, /const normalizedRequestedBroker = normalizeRequestedBroker\(broker\);/);
+  assert.match(
+    mainSource,
+    /const normalizedPrimaryBroker = normalizedRequestedBroker === "auto"[\s\S]*\? resolveAutoWatchlistPrimaryBroker\(\)[\s\S]*: normalizeBrokerName\(normalizedRequestedBroker\);/,
+  );
+  assert.match(
+    mainSource,
+    /if \(normalizedRequestedBroker === "auto"\) \{[\s\S]*watchlistAutoPreferredBroker = candidateBroker;/,
+  );
+
+  assert.match(mainSource, /const selectedRequestedBroker = normalizeRequestedBroker\(getSelectedBroker\(\)\);/);
+  assert.match(
+    mainSource,
+    /if \(selectedRequestedBroker === "auto"\) \{[\s\S]*watchlistAutoPreferredBroker = streamBroker;/,
+  );
+  assert.match(
+    mainSource,
+    /if \(!watchlistStream \|\| normalizeRequestedBroker\(getSelectedBroker\(\)\) !== selectedRequestedBroker\) \{/,
+  );
+});
+
 test("styles.css contem classes base do prop desk", async () => {
   const stylesSource = await readWebFile("src/styles.css");
 
