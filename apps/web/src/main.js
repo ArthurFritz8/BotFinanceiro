@@ -1470,6 +1470,7 @@ let watchlistStream = null;
 let watchlistStreamBackoffTimer = null;
 let watchlistStreamReconnectAttempt = 0;
 let watchlistStreamBroker = "";
+let watchlistAutoPreferredBroker = "binance";
 let watchlistStreamFallbackPollTimer = null;
 let watchlistMarketByAsset = new Map();
 let watchlistLastUpdatedAt = "";
@@ -7968,7 +7969,10 @@ async function requestBrokerLiveQuoteBatch(assetIds, broker) {
 }
 
 async function requestBrokerLiveQuoteBatchWithFailover(assetIds, broker) {
-  const normalizedPrimaryBroker = normalizeBrokerName(broker);
+  const normalizedRequestedBroker = normalizeRequestedBroker(broker);
+  const normalizedPrimaryBroker = normalizedRequestedBroker === "auto"
+    ? resolveAutoWatchlistPrimaryBroker()
+    : normalizeBrokerName(normalizedRequestedBroker);
   const failoverChain = buildBrokerFailoverChain(normalizedPrimaryBroker);
   const primarySkippedByCircuit =
     failoverChain.length > 0
@@ -7983,6 +7987,10 @@ async function requestBrokerLiveQuoteBatchWithFailover(assetIds, broker) {
     try {
       const batch = await requestBrokerLiveQuoteBatch(assetIds, candidateBroker);
       markBrokerSuccess(candidateBroker);
+
+      if (normalizedRequestedBroker === "auto") {
+        watchlistAutoPreferredBroker = candidateBroker;
+      }
 
       const failoverReasonParts = [];
 
@@ -8255,10 +8263,14 @@ async function refreshWatchlistMarket(options = {}) {
       getErrorMessage(error, "Falha na sincronizacao da watchlist"),
       "Falha na sincronizacao da watchlist",
     );
+    const selectedRequestedBroker = normalizeRequestedBroker(getSelectedBroker());
+    const diagnosticsBroker = selectedRequestedBroker === "auto"
+      ? resolveAutoWatchlistPrimaryBroker()
+      : normalizeBrokerName(selectedRequestedBroker);
     setWatchlistStatus(message, "error");
     watchlistDiagnostics = {
       ...watchlistDiagnostics,
-      broker: normalizeBrokerName(getSelectedBroker()),
+      broker: diagnosticsBroker,
       mode: "polling",
     };
     renderWatchlistDiagnostics();
@@ -8321,7 +8333,10 @@ function connectWatchlistStream(intervalMs) {
     return false;
   }
 
-  const selectedBroker = normalizeBrokerName(getSelectedBroker());
+  const selectedRequestedBroker = normalizeRequestedBroker(getSelectedBroker());
+  const selectedBroker = selectedRequestedBroker === "auto"
+    ? resolveAutoWatchlistPrimaryBroker()
+    : normalizeBrokerName(selectedRequestedBroker);
   const streamFailoverChain = buildBrokerFailoverChain(selectedBroker);
   const streamBroker = streamFailoverChain[0] ?? selectedBroker;
   const streamFailoverReason = streamBroker === selectedBroker
@@ -8353,6 +8368,11 @@ function connectWatchlistStream(intervalMs) {
     }
 
     markBrokerSuccess(streamBroker);
+
+    if (selectedRequestedBroker === "auto") {
+      watchlistAutoPreferredBroker = streamBroker;
+    }
+
     stopWatchlistStreamFallbackPolling();
     watchlistStreamReconnectAttempt = 0;
     const generatedAtMs = typeof payload?.generatedAt === "string" ? Date.parse(payload.generatedAt) : Number.NaN;
@@ -8388,7 +8408,7 @@ function connectWatchlistStream(intervalMs) {
   });
 
   eventSource.onerror = () => {
-    if (!watchlistStream || normalizeBrokerName(getSelectedBroker()) !== selectedBroker) {
+    if (!watchlistStream || normalizeRequestedBroker(getSelectedBroker()) !== selectedRequestedBroker) {
       return;
     }
 
@@ -9272,6 +9292,10 @@ function normalizeRequestedBroker(broker) {
   }
 
   return normalizeBrokerName(normalized);
+}
+
+function resolveAutoWatchlistPrimaryBroker() {
+  return normalizeBrokerName(watchlistAutoPreferredBroker);
 }
 
 function resolveExchangeLabelFromBroker(broker) {
