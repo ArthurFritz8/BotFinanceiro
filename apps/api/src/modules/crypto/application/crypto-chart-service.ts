@@ -1552,7 +1552,13 @@ export class CryptoChartService {
       }
     }
 
-    return this.refreshLiveChart(normalizedInput);
+    // For non-binance stream snapshots, reuse the resilient live-chart path
+    // so transient provider failures can serve stale cache instead of emitting stream-error on each tick.
+    return this.getLiveChart({
+      assetId: normalizedInput.assetId,
+      broker: normalizedInput.requestedBroker,
+      range: normalizedInput.range,
+    });
   }
 
   public async refreshChart(input: {
