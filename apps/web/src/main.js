@@ -149,6 +149,7 @@ const CHART_TRANSIENT_LEGEND_MIN_INTERVAL_MS = 8000;
 const WATCHLIST_STREAM_FALLBACK_POLL_MS = 6000;
 const CHART_STREAM_FALLBACK_POLL_MS = 4000;
 const CHART_CONTEXT_SYNC_DEBOUNCE_MS = 280;
+const INTELLIGENCE_SYNC_METRICS_MAX_SAMPLES = 60;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
 const APP_ROUTE_CHAT = "chat";
 const APP_ROUTE_CHART_LAB = "chart-lab";
@@ -1465,6 +1466,19 @@ let chartLastTransientLegendMessage = "";
 let chartLastTransientLegendAtMs = 0;
 let chartLiveFallbackPollTimer = null;
 let chartContextSyncTimer = null;
+let intelligenceSyncPendingStartedAtMs = 0;
+let intelligenceSyncLatencySamplesMs = [];
+let intelligenceSyncMetrics = {
+  averageLatencyMs: 0,
+  failed: 0,
+  lastLatencyMs: null,
+  lastReason: "",
+  lastSyncedAt: "",
+  p95LatencyMs: 0,
+  requests: 0,
+  success: 0,
+  successRatePercent: 0,
+};
 let isChartLoading = false;
 let chartApi = null;
 let chartBaseSeries = null;
@@ -7771,6 +7785,101 @@ function resolveChartRangeForTerminalInterval(interval) {
   return TERMINAL_INTERVAL_TO_CHART_RANGE[normalizedInterval] ?? "7d";
 }
 
+function computeLatencyPercentile(samples, percentile) {
+  if (!Array.isArray(samples) || samples.length === 0) {
+    return 0;
+  }
+
+  const normalizedPercentile = Math.min(1, Math.max(0, percentile));
+  const sortedSamples = [...samples].sort((left, right) => left - right);
+  const index = Math.min(
+    sortedSamples.length - 1,
+    Math.max(0, Math.floor((sortedSamples.length - 1) * normalizedPercentile)),
+  );
+
+  return sortedSamples[index] ?? 0;
+}
+
+function publishIntelligenceSyncTelemetry() {
+  const safeSummary = {
+    averageLatencyMs: intelligenceSyncMetrics.averageLatencyMs,
+    failed: intelligenceSyncMetrics.failed,
+    lastLatencyMs: intelligenceSyncMetrics.lastLatencyMs,
+    lastReason: intelligenceSyncMetrics.lastReason,
+    lastSyncedAt: intelligenceSyncMetrics.lastSyncedAt,
+    p95LatencyMs: intelligenceSyncMetrics.p95LatencyMs,
+    requests: intelligenceSyncMetrics.requests,
+    success: intelligenceSyncMetrics.success,
+    successRatePercent: intelligenceSyncMetrics.successRatePercent,
+  };
+
+  if (analysisPanel instanceof HTMLElement) {
+    analysisPanel.dataset.syncAvgMs = String(safeSummary.averageLatencyMs);
+    analysisPanel.dataset.syncP95Ms = String(safeSummary.p95LatencyMs);
+    analysisPanel.dataset.syncRequests = String(safeSummary.requests);
+    analysisPanel.dataset.syncSuccessRate = String(safeSummary.successRatePercent);
+  }
+
+  if (typeof window === "object") {
+    window.__botfinanceiroIntelligenceSyncTelemetry = safeSummary;
+
+    if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
+      window.dispatchEvent(
+        new CustomEvent("botfinanceiro:intelligence-sync-metrics", {
+          detail: safeSummary,
+        }),
+      );
+    }
+  }
+}
+
+function startIntelligenceSyncTelemetry(reason) {
+  intelligenceSyncPendingStartedAtMs = performance.now();
+  intelligenceSyncMetrics.requests += 1;
+  intelligenceSyncMetrics.lastReason = reason;
+}
+
+function finishIntelligenceSyncTelemetry(input = {}) {
+  const ok = input.ok !== false;
+  const reason = typeof input.reason === "string" ? input.reason : "context-sync";
+  const endedAtMs = performance.now();
+  const latencyMs = intelligenceSyncPendingStartedAtMs > 0
+    ? Math.max(0, Number((endedAtMs - intelligenceSyncPendingStartedAtMs).toFixed(2)))
+    : 0;
+
+  intelligenceSyncPendingStartedAtMs = 0;
+  intelligenceSyncMetrics.lastReason = reason;
+  intelligenceSyncMetrics.lastLatencyMs = latencyMs;
+  intelligenceSyncMetrics.lastSyncedAt = new Date().toISOString();
+
+  if (ok) {
+    intelligenceSyncMetrics.success += 1;
+    intelligenceSyncLatencySamplesMs.push(latencyMs);
+
+    if (intelligenceSyncLatencySamplesMs.length > INTELLIGENCE_SYNC_METRICS_MAX_SAMPLES) {
+      intelligenceSyncLatencySamplesMs = intelligenceSyncLatencySamplesMs.slice(
+        intelligenceSyncLatencySamplesMs.length - INTELLIGENCE_SYNC_METRICS_MAX_SAMPLES,
+      );
+    }
+  } else {
+    intelligenceSyncMetrics.failed += 1;
+  }
+
+  const sampleCount = intelligenceSyncLatencySamplesMs.length;
+  const averageLatencyMs = sampleCount > 0
+    ? intelligenceSyncLatencySamplesMs.reduce((sum, sample) => sum + sample, 0) / sampleCount
+    : 0;
+  const successRatePercent = intelligenceSyncMetrics.requests > 0
+    ? (intelligenceSyncMetrics.success / intelligenceSyncMetrics.requests) * 100
+    : 0;
+
+  intelligenceSyncMetrics.averageLatencyMs = Number(averageLatencyMs.toFixed(2));
+  intelligenceSyncMetrics.p95LatencyMs = Number(computeLatencyPercentile(intelligenceSyncLatencySamplesMs, 0.95).toFixed(2));
+  intelligenceSyncMetrics.successRatePercent = Number(successRatePercent.toFixed(2));
+
+  publishIntelligenceSyncTelemetry();
+}
+
 function syncChartRangeWithTerminalInterval(interval, options = {}) {
   if (!(chartRangeSelect instanceof HTMLSelectElement)) {
     return false;
@@ -7792,23 +7901,46 @@ function syncChartRangeWithTerminalInterval(interval, options = {}) {
   return true;
 }
 
-function syncIntelligenceDeskForCurrentContext(options = {}) {
+async function syncIntelligenceDeskForCurrentContext(options = {}) {
   const silent = options.silent === true;
+  const reason = typeof options.reason === "string" && options.reason.length > 0
+    ? options.reason
+    : "context-sync";
 
   if (isChartLoading) {
     scheduleChartContextSync({
       delayMs: 140,
+      reason,
       silent,
     });
     return;
   }
 
-  void loadChart({
+  startIntelligenceSyncTelemetry(reason);
+
+  await loadChart({
     silent,
+  });
+
+  const hasSnapshot =
+    currentChartSnapshot !== null
+    && typeof currentChartSnapshot === "object"
+    && Array.isArray(currentChartSnapshot.points)
+    && currentChartSnapshot.points.length > 0;
+  const statusIsError =
+    chartStatusElement instanceof HTMLElement
+    && chartStatusElement.getAttribute("data-mode") === "error";
+
+  finishIntelligenceSyncTelemetry({
+    ok: hasSnapshot || !statusIsError,
+    reason,
   });
 }
 
 function scheduleChartContextSync(options = {}) {
+  const reason = typeof options.reason === "string" && options.reason.length > 0
+    ? options.reason
+    : "context-sync";
   const silent = options.silent !== false;
   const requestedDelay = Number.isFinite(options.delayMs)
     ? Number(options.delayMs)
@@ -7821,7 +7953,8 @@ function scheduleChartContextSync(options = {}) {
 
   chartContextSyncTimer = window.setTimeout(() => {
     chartContextSyncTimer = null;
-    syncIntelligenceDeskForCurrentContext({
+    void syncIntelligenceDeskForCurrentContext({
+      reason,
       silent,
     });
   }, delayMs);
@@ -11231,7 +11364,8 @@ function setupChartKeyboardShortcuts() {
 
       if (didSyncRange) {
         configureChartAutoRefresh();
-        syncIntelligenceDeskForCurrentContext({
+        void syncIntelligenceDeskForCurrentContext({
+          reason: "interval-shortcut",
           silent: true,
         });
       }
@@ -11481,6 +11615,7 @@ function setupChartLab() {
       );
       renderWatchlist();
       scheduleChartContextSync({
+        reason: "symbol-input",
         silent: true,
       });
       scheduleTradingViewRefresh();
@@ -11494,7 +11629,8 @@ function setupChartLab() {
 
       event.preventDefault();
       chartSymbolInput.blur();
-      syncIntelligenceDeskForCurrentContext({
+      void syncIntelligenceDeskForCurrentContext({
+        reason: "symbol-enter",
         silent: false,
       });
       scheduleTradingViewRefresh();
@@ -11596,7 +11732,8 @@ function setupChartLab() {
 
       if (didSyncRange) {
         configureChartAutoRefresh();
-        syncIntelligenceDeskForCurrentContext({
+        void syncIntelligenceDeskForCurrentContext({
+          reason: "interval-chip",
           silent: true,
         });
       }

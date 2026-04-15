@@ -117,6 +117,7 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
 
   assert.match(mainSource, /const CHART_AUTO_BROKER_STICKY_MS = 180000/);
   assert.match(mainSource, /const CHART_CONTEXT_SYNC_DEBOUNCE_MS = 280/);
+  assert.match(mainSource, /const INTELLIGENCE_SYNC_METRICS_MAX_SAMPLES = 60/);
   assert.match(mainSource, /const TERMINAL_INTERVAL_TO_CHART_RANGE = \{/);
   assert.match(mainSource, /let chartAutoPreferredBroker = "binance";/);
   assert.match(mainSource, /function resolveAutoChartPrimaryBroker\(\)/);
@@ -125,6 +126,11 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /function canRunInstitutionalMacroForSymbol\(symbol\)/);
   assert.match(mainSource, /function syncIntelligenceDeskForCurrentContext\(options = \{\}\)/);
   assert.match(mainSource, /function scheduleChartContextSync\(options = \{\}\)/);
+  assert.match(mainSource, /function publishIntelligenceSyncTelemetry\(\)/);
+  assert.match(mainSource, /function startIntelligenceSyncTelemetry\(reason\)/);
+  assert.match(mainSource, /function finishIntelligenceSyncTelemetry\(input = \{\}\)/);
+  assert.match(mainSource, /window\.__botfinanceiroIntelligenceSyncTelemetry = safeSummary/);
+  assert.match(mainSource, /botfinanceiro:intelligence-sync-metrics/);
   assert.match(mainSource, /if \(pipelineStrategy === "institutional_macro" && !canRunInstitutionalMacroForSymbol\(selectedTerminalSymbol\)\)/);
   assert.match(mainSource, /function updateAutoChartPreferredBroker\(nextBroker, options = \{\}\)/);
   assert.match(mainSource, /if \(requestedBroker === "auto"\) \{/);
