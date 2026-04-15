@@ -142,6 +142,8 @@ const MAX_RECENT_HISTORY_ITEMS = 8;
 const MAX_CONVERSATIONS = 60;
 const MARKET_HTTP_RETRY_MAX_ATTEMPTS = 3;
 const MARKET_HTTP_RETRY_BASE_DELAY_MS = 280;
+const BROKER_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
+const BROKER_CIRCUIT_BREAKER_COOLDOWN_MS = 120000;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
 const APP_ROUTE_CHAT = "chat";
 const APP_ROUTE_CHART_LAB = "chart-lab";
@@ -1505,6 +1507,8 @@ let marketNavigatorSearchInFlight = false;
 let marketNavigatorRegionFilter = "all";
 let marketNavigatorFavoritesOnly = false;
 let marketNavigatorFavoriteKeys = new Set();
+let brokerFailureStreakByName = new Map();
+let brokerCircuitOpenUntilByName = new Map();
 let propDeskState = {
   ...PROP_DESK_DEFAULT_STATE,
 };
@@ -7956,14 +7960,33 @@ async function requestBrokerLiveQuoteBatch(assetIds, broker) {
 async function requestBrokerLiveQuoteBatchWithFailover(assetIds, broker) {
   const normalizedPrimaryBroker = normalizeBrokerName(broker);
   const failoverChain = buildBrokerFailoverChain(normalizedPrimaryBroker);
+  const primarySkippedByCircuit =
+    failoverChain.length > 0
+    && failoverChain[0] !== normalizedPrimaryBroker
+    && isBrokerCircuitOpen(normalizedPrimaryBroker);
+  const primaryCircuitSummary = primarySkippedByCircuit
+    ? getBrokerCircuitSummary(normalizedPrimaryBroker)
+    : "";
   const failures = [];
 
   for (const candidateBroker of failoverChain) {
     try {
       const batch = await requestBrokerLiveQuoteBatch(assetIds, candidateBroker);
-      const failoverReason = candidateBroker === normalizedPrimaryBroker
-        ? ""
-        : `Failover da watchlist: ${normalizedPrimaryBroker.toUpperCase()} -> ${candidateBroker.toUpperCase()}`;
+      markBrokerSuccess(candidateBroker);
+
+      const failoverReasonParts = [];
+
+      if (primaryCircuitSummary.length > 0) {
+        failoverReasonParts.push(primaryCircuitSummary);
+      }
+
+      if (candidateBroker !== normalizedPrimaryBroker) {
+        failoverReasonParts.push(
+          `Failover da watchlist: ${normalizedPrimaryBroker.toUpperCase()} -> ${candidateBroker.toUpperCase()}`,
+        );
+      }
+
+      const failoverReason = failoverReasonParts.join(" • ");
 
       return {
         batch,
@@ -7972,19 +7995,27 @@ async function requestBrokerLiveQuoteBatchWithFailover(assetIds, broker) {
       };
     } catch (error) {
       const message = getErrorMessage(error, "Falha ao consultar batch do broker");
+      const normalizedMessage = normalizeBrokerApiErrorMessage(message, "Falha ao consultar batch do broker");
+      markBrokerFailure(candidateBroker, normalizedMessage);
       failures.push({
         broker: candidateBroker,
-        message,
+        message: normalizedMessage,
       });
 
       if (!isRetryableMarketApiErrorMessage(message)) {
-        throw new Error(normalizeBrokerApiErrorMessage(message, "Falha na sincronizacao da watchlist"));
+        throw new Error(normalizeBrokerApiErrorMessage(normalizedMessage, "Falha na sincronizacao da watchlist"));
       }
     }
   }
 
   const lastFailure = failures[failures.length - 1];
-  throw new Error(normalizeBrokerApiErrorMessage(lastFailure?.message, "Falha na sincronizacao da watchlist"));
+  const baseMessage = normalizeBrokerApiErrorMessage(lastFailure?.message, "Falha na sincronizacao da watchlist");
+
+  if (primaryCircuitSummary.length > 0) {
+    throw new Error(`${primaryCircuitSummary} • ${baseMessage}`);
+  }
+
+  throw new Error(baseMessage);
 }
 
 function buildBrokerLiveQuoteStreamUrl(assetIds, broker, intervalMs) {
@@ -8257,11 +8288,16 @@ function connectWatchlistStream(intervalMs) {
     return false;
   }
 
-  const selectedBroker = getSelectedBroker();
-  watchlistStreamBroker = selectedBroker;
+  const selectedBroker = normalizeBrokerName(getSelectedBroker());
+  const streamFailoverChain = buildBrokerFailoverChain(selectedBroker);
+  const streamBroker = streamFailoverChain[0] ?? selectedBroker;
+  const streamFailoverReason = streamBroker === selectedBroker
+    ? ""
+    : `Failover do stream watchlist: ${selectedBroker.toUpperCase()} -> ${streamBroker.toUpperCase()}`;
+  watchlistStreamBroker = streamBroker;
   const streamUrl = buildBrokerLiveQuoteStreamUrl(
     TERMINAL_WATCHLIST.map((item) => item.assetId),
-    selectedBroker,
+    streamBroker,
     intervalMs,
   );
 
@@ -8283,12 +8319,15 @@ function connectWatchlistStream(intervalMs) {
       return;
     }
 
+    markBrokerSuccess(streamBroker);
     watchlistStreamReconnectAttempt = 0;
     const generatedAtMs = typeof payload?.generatedAt === "string" ? Date.parse(payload.generatedAt) : Number.NaN;
     const latencyMs = Number.isFinite(generatedAtMs) ? Date.now() - generatedAtMs : null;
 
     void applyWatchlistBatchSnapshot(batch, {
+      failoverReason: streamFailoverReason,
       latencyMs,
+      resolvedBroker: streamBroker,
       silent: true,
       transport: "stream",
     });
@@ -8306,6 +8345,7 @@ function connectWatchlistStream(intervalMs) {
     const message = typeof payload?.message === "string"
       ? payload.message
       : "Stream de watchlist reportou falha";
+    markBrokerFailure(streamBroker, message);
     setWatchlistStatus(
       normalizeBrokerApiErrorMessage(message, "Stream de watchlist reportou falha"),
       "error",
@@ -8313,10 +8353,11 @@ function connectWatchlistStream(intervalMs) {
   });
 
   eventSource.onerror = () => {
-    if (!watchlistStream || watchlistStreamBroker !== getSelectedBroker()) {
+    if (!watchlistStream || normalizeBrokerName(getSelectedBroker()) !== selectedBroker) {
       return;
     }
 
+    markBrokerFailure(streamBroker, "Stream de watchlist desconectado");
     stopWatchlistStream();
     watchlistDiagnostics = {
       ...watchlistDiagnostics,
@@ -9205,19 +9246,89 @@ function resolveExchangeLabelFromBroker(broker) {
   return "BINANCE";
 }
 
-function buildBrokerFailoverChain(primaryBroker) {
+function getBrokerFailureStreak(broker) {
+  const normalizedBroker = normalizeBrokerName(broker);
+  const streak = brokerFailureStreakByName.get(normalizedBroker);
+
+  if (!Number.isInteger(streak) || streak <= 0) {
+    return 0;
+  }
+
+  return streak;
+}
+
+function getBrokerCircuitRemainingMs(broker, nowMs = Date.now()) {
+  const normalizedBroker = normalizeBrokerName(broker);
+  const openUntil = brokerCircuitOpenUntilByName.get(normalizedBroker);
+
+  if (typeof openUntil !== "number" || Number.isNaN(openUntil)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.round(openUntil - nowMs));
+}
+
+function isBrokerCircuitOpen(broker, nowMs = Date.now()) {
+  return getBrokerCircuitRemainingMs(broker, nowMs) > 0;
+}
+
+function markBrokerSuccess(broker) {
+  const normalizedBroker = normalizeBrokerName(broker);
+  brokerFailureStreakByName.set(normalizedBroker, 0);
+  brokerCircuitOpenUntilByName.delete(normalizedBroker);
+}
+
+function markBrokerFailure(broker, message) {
+  if (!isRetryableMarketApiErrorMessage(message)) {
+    return;
+  }
+
+  const normalizedBroker = normalizeBrokerName(broker);
+  const nextStreak = getBrokerFailureStreak(normalizedBroker) + 1;
+  brokerFailureStreakByName.set(normalizedBroker, nextStreak);
+
+  if (nextStreak < BROKER_CIRCUIT_BREAKER_FAILURE_THRESHOLD) {
+    return;
+  }
+
+  brokerCircuitOpenUntilByName.set(
+    normalizedBroker,
+    Date.now() + BROKER_CIRCUIT_BREAKER_COOLDOWN_MS,
+  );
+  brokerFailureStreakByName.set(normalizedBroker, 0);
+}
+
+function getBrokerCircuitSummary(broker) {
+  const remainingMs = getBrokerCircuitRemainingMs(broker);
+
+  if (remainingMs <= 0) {
+    return "";
+  }
+
+  const seconds = Math.max(1, Math.ceil(remainingMs / 1000));
+  return `Circuit breaker ativo para ${normalizeBrokerName(broker).toUpperCase()} (${seconds}s restantes)`;
+}
+
+function buildBrokerFailoverChain(primaryBroker, options = {}) {
   const normalizedPrimary = normalizeBrokerName(primaryBroker);
-  const chain = [normalizedPrimary];
+  const strictChain = [normalizedPrimary];
 
   for (const candidate of BROKER_FAILOVER_ORDER) {
     if (candidate === normalizedPrimary) {
       continue;
     }
 
-    chain.push(candidate);
+    strictChain.push(candidate);
   }
 
-  return chain;
+  const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
+  const activeChain = strictChain.filter((candidate) => !isBrokerCircuitOpen(candidate, nowMs));
+
+  if (activeChain.length > 0) {
+    return activeChain;
+  }
+
+  return strictChain;
 }
 
 function getErrorMessage(error, fallbackMessage) {
@@ -9356,15 +9467,21 @@ async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "bina
 
 async function requestCryptoChart(assetId, range, mode, exchange) {
   const requestedBroker = normalizeBrokerName(exchange);
-  const primaryChain = mode === "live"
-    ? buildBrokerFailoverChain(requestedBroker)
-    : [requestedBroker];
+  const primaryChain = buildBrokerFailoverChain(requestedBroker);
+  const primarySkippedByCircuit =
+    primaryChain.length > 0
+    && primaryChain[0] !== requestedBroker
+    && isBrokerCircuitOpen(requestedBroker);
+  const primaryCircuitSummary = primarySkippedByCircuit
+    ? getBrokerCircuitSummary(requestedBroker)
+    : "";
   const failureTrail = [];
 
   const tryResolveSnapshot = async (targetMode, brokerChain) => {
     for (const broker of brokerChain) {
       try {
         const snapshot = await requestCryptoChartEndpoint(assetId, range, targetMode, broker);
+        markBrokerSuccess(broker);
         return {
           broker,
           mode: targetMode,
@@ -9372,13 +9489,15 @@ async function requestCryptoChart(assetId, range, mode, exchange) {
         };
       } catch (error) {
         const message = getErrorMessage(error, "Falha ao consultar grafico");
+        const normalizedMessage = normalizeChartApiErrorMessage(message, "Falha ao consultar grafico");
+        markBrokerFailure(broker, normalizedMessage);
         failureTrail.push({
           broker,
-          message,
+          message: normalizedMessage,
         });
 
         if (!isRetryableMarketApiErrorMessage(message)) {
-          throw error;
+          throw new Error(normalizedMessage);
         }
       }
     }
@@ -9390,9 +9509,19 @@ async function requestCryptoChart(assetId, range, mode, exchange) {
 
   if (liveOrDelayedSnapshot) {
     const usedFailoverBroker = liveOrDelayedSnapshot.broker !== requestedBroker;
-    const fallbackReason = usedFailoverBroker
-      ? `Failover de corretora ativo: ${requestedBroker.toUpperCase()} -> ${liveOrDelayedSnapshot.broker.toUpperCase()}`
-      : "";
+    const fallbackReasonParts = [];
+
+    if (primaryCircuitSummary.length > 0) {
+      fallbackReasonParts.push(primaryCircuitSummary);
+    }
+
+    if (usedFailoverBroker) {
+      fallbackReasonParts.push(
+        `Failover de corretora ativo: ${requestedBroker.toUpperCase()} -> ${liveOrDelayedSnapshot.broker.toUpperCase()}`,
+      );
+    }
+
+    const fallbackReason = fallbackReasonParts.join(" • ");
 
     return {
       fallbackReason,
@@ -9413,6 +9542,7 @@ async function requestCryptoChart(assetId, range, mode, exchange) {
     const usedFailoverBroker = delayedSnapshot.broker !== requestedBroker;
     const fallbackReasonParts = [
       "Live indisponivel, fallback delayed acionado",
+      primaryCircuitSummary,
       usedFailoverBroker
         ? `rota de contingencia ${requestedBroker.toUpperCase()} -> ${delayedSnapshot.broker.toUpperCase()}`
         : "",
@@ -9593,8 +9723,10 @@ function connectChartLiveStream(intervalMs) {
 
   const assetId = chartAssetSelect.value;
   const range = chartRangeSelect.value;
-  const exchange = getSelectedBroker();
-  const streamKey = `${assetId}:${exchange}:${range}:${intervalMs}`;
+  const selectedBroker = normalizeBrokerName(getSelectedBroker());
+  const streamFailoverChain = buildBrokerFailoverChain(selectedBroker);
+  const exchange = streamFailoverChain[0] ?? selectedBroker;
+  const streamKey = `${assetId}:${selectedBroker}:${exchange}:${range}:${intervalMs}`;
 
   if (chartLiveStream && chartLiveStreamKey === streamKey) {
     return true;
@@ -9606,6 +9738,13 @@ function connectChartLiveStream(intervalMs) {
   const streamUrl = buildCryptoLiveStreamUrl(assetId, exchange, range, intervalMs);
   const eventSource = new EventSource(streamUrl);
   chartLiveStream = eventSource;
+
+  if (exchange !== selectedBroker) {
+    setChartLegend(
+      `Stream live em contingencia: ${selectedBroker.toUpperCase()} -> ${exchange.toUpperCase()}.`,
+      "warn",
+    );
+  }
 
   eventSource.addEventListener("snapshot", (event) => {
     let payload = null;
@@ -9630,11 +9769,13 @@ function connectChartLiveStream(intervalMs) {
       return;
     }
 
+    markBrokerSuccess(exchange);
     chartLiveStreamReconnectAttempt = 0;
 
     try {
+      const selectedExchangeForStatus = resolveExchangeLabelFromBroker(exchange);
       applyChartSnapshot(snapshot, {
-        selectedExchange: getSelectedTerminalExchange(),
+        selectedExchange: selectedExchangeForStatus,
         transport: "stream",
       });
     } catch {
@@ -9654,6 +9795,7 @@ function connectChartLiveStream(intervalMs) {
     const message = typeof payload?.message === "string"
       ? payload.message
       : "Stream de chart reportou falha";
+    markBrokerFailure(exchange, message);
     setChartStatus(
       normalizeBrokerApiErrorMessage(message, "Stream de chart reportou falha"),
       "error",
@@ -9661,10 +9803,15 @@ function connectChartLiveStream(intervalMs) {
   });
 
   eventSource.onerror = () => {
+    if (normalizeBrokerName(getSelectedBroker()) !== selectedBroker) {
+      return;
+    }
+
     if (!chartLiveStream || chartLiveStreamKey !== streamKey) {
       return;
     }
 
+    markBrokerFailure(exchange, "Stream live desconectado");
     stopChartLiveStream();
     chartLiveStreamReconnectAttempt += 1;
     const backoffMs = Math.min(30000, 1200 * 2 ** chartLiveStreamReconnectAttempt);

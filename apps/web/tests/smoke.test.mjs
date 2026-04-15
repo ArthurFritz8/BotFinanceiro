@@ -45,9 +45,16 @@ test("main.js inicializa estado, aba e render da gestao de risco", async () => {
   assert.match(mainSource, /classList\.toggle\("is-collapsed", isCollapsed\)/);
   assert.match(mainSource, /watchlist-risk-collapse/);
   assert.match(mainSource, /const BROKER_FAILOVER_ORDER = \["binance", "bybit", "coinbase", "kraken", "okx"\]/);
-  assert.match(mainSource, /function buildBrokerFailoverChain\(primaryBroker\)/);
+  assert.match(mainSource, /const BROKER_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3/);
+  assert.match(mainSource, /const BROKER_CIRCUIT_BREAKER_COOLDOWN_MS = 120000/);
+  assert.match(mainSource, /function getBrokerCircuitRemainingMs\(broker, nowMs = Date\.now\(\)\)/);
+  assert.match(mainSource, /function markBrokerFailure\(broker, message\)/);
+  assert.match(mainSource, /function getBrokerCircuitSummary\(broker\)/);
+  assert.match(mainSource, /function buildBrokerFailoverChain\(primaryBroker, options = \{\}\)/);
   assert.match(mainSource, /function runMarketRequestWithRetry\(requestFactory, options = \{\}\)/);
   assert.match(mainSource, /requestBrokerLiveQuoteBatchWithFailover\(/);
+  assert.match(mainSource, /Failover do stream watchlist:/);
+  assert.match(mainSource, /Stream live em contingencia:/);
   assert.match(mainSource, /openRiskManagementTab\(\{[\s\S]*scroll: true,[\s\S]*\}\);/);
   assert.match(mainSource, /if \(lowerKey === "g"\)/);
   assert.match(mainSource, /function setupPropDesk\(\)/);
