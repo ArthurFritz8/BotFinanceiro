@@ -219,6 +219,26 @@ function isRetryableLiveBrokerError(error: unknown): boolean {
   return false;
 }
 
+function shouldContinueFailoverForCoinbaseLongRange(input: {
+  broker: LiveChartBroker;
+  error: unknown;
+  range: CryptoChartRange;
+}): boolean {
+  if (input.broker !== "coinbase") {
+    return false;
+  }
+
+  if (input.range !== "90d" && input.range !== "1y") {
+    return false;
+  }
+
+  if (!(input.error instanceof AppError)) {
+    return false;
+  }
+
+  return input.error.code === "BROKER_NATIVE_BAD_STATUS";
+}
+
 function getLiveBrokerFailureStreak(broker: LiveChartBroker): number {
   const streak = liveBrokerFailureStreakByName.get(broker);
 
@@ -1695,7 +1715,14 @@ export class CryptoChartService {
           message,
         });
 
-        if (!isRetryableLiveBrokerError(error)) {
+        const shouldContinueFailover = isRetryableLiveBrokerError(error)
+          || shouldContinueFailoverForCoinbaseLongRange({
+            broker,
+            error,
+            range: input.range,
+          });
+
+        if (!shouldContinueFailover) {
           throw error;
         }
       }
