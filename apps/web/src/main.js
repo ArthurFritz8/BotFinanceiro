@@ -5149,7 +5149,11 @@ function openMarketItemInChart(item) {
     chartAssetSelect.value = target.assetId;
   }
 
-  chartSymbolSourceModule = typeof target.module === "string" ? target.module : "";
+  chartSymbolSourceModule = target.hasNativeAsset
+    ? "crypto"
+    : typeof target.module === "string"
+      ? target.module
+      : "";
 
   if (chartSymbolInput instanceof HTMLInputElement && target.symbol.length > 0) {
     chartSymbolInput.value = mapSymbolToExchange(target.symbol, getSelectedTerminalExchange());
@@ -6750,6 +6754,16 @@ function setChartStatus(message, mode = "") {
   }
 }
 
+function clearChartErrorStatusMode() {
+  if (!(chartStatusElement instanceof HTMLElement)) {
+    return;
+  }
+
+  if (chartStatusElement.getAttribute("data-mode") === "error") {
+    chartStatusElement.removeAttribute("data-mode");
+  }
+}
+
 function setChartLegend(message, mode = "") {
   if (!chartLegendElement) {
     return;
@@ -7586,6 +7600,10 @@ function resolveTradingViewExchangePrefix(symbol) {
     return "FX_IDC";
   }
 
+  if (isLikelyCryptoTerminalSymbol(normalizedSymbol)) {
+    return getSelectedTerminalExchange();
+  }
+
   if (/^(DXY|VIX|DJI|NDX|SPX|RUT|TNX|FVX|IRX|US0?2Y|US0?5Y|US10Y|US30Y)/.test(normalizedSymbol)) {
     return "TVC";
   }
@@ -7608,16 +7626,17 @@ function resolveTradingViewExchangePrefix(symbol) {
     return "TVC";
   }
 
-  if (isLikelyCryptoTerminalSymbol(normalizedSymbol)) {
-    return getSelectedTerminalExchange();
-  }
-
   return "NASDAQ";
 }
 
 function buildTradingViewSymbol() {
   const symbol = getSelectedTerminalSymbol();
   return `${resolveTradingViewExchangePrefix(symbol)}:${symbol}`;
+}
+
+function buildTerminalReadyStatus() {
+  const styleLabel = CHART_STYLE_LABELS[getSelectedTerminalStyle()] ?? getSelectedTerminalStyle();
+  return `Terminal ${buildTradingViewSymbol()} ativo • intervalo ${getSelectedTerminalInterval()} • estilo ${styleLabel}`;
 }
 
 function syncTerminalSymbolWithAsset() {
@@ -8266,9 +8285,7 @@ async function mountTradingViewWidget() {
 
     tvWidgetContainer.append(iframe);
 
-    setChartStatus(
-      `Terminal ${symbol} (${interval}) pronto • desenho liberado na barra lateral`,
-    );
+    setChartStatus(`${buildTerminalReadyStatus()} • desenho liberado na barra lateral`);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Falha ao montar terminal";
     setChartStatus(message, "error");
@@ -9119,6 +9136,7 @@ function applyChartSnapshot(snapshot, options = {}) {
   const fallbackLabel = combinedFallbackReason.length > 0
     ? " • live indisponivel, usando delayed"
     : "";
+  const statusMode = combinedFallbackReason.length > 0 ? "warn" : "";
   const updatedAtLabel = new Date().toLocaleTimeString("pt-BR", {
     hour: "2-digit",
     minute: "2-digit",
@@ -9128,14 +9146,13 @@ function applyChartSnapshot(snapshot, options = {}) {
 
   setChartStatus(
     `Grafico ${snapshot.assetId.toUpperCase()} (${modeLabel}, ${rangeLabel}, ${styleLabel}) • estrategia ${strategyLabel} • exchange ${selectedExchange} • provider ${providerLabel} • ${cacheLabel}${refreshLabel}${liveLabel}${transportLabel}${fallbackLabel} • atualizado ${updatedAtLabel}`,
+    statusMode,
   );
 
   if (chartViewMode === "tv") {
-    setChartLegend(
-      `Terminal ${buildTradingViewSymbol()} ativo • intervalo ${getSelectedTerminalInterval()} • estilo ${styleLabel}`,
-    );
+    setChartLegend(buildTerminalReadyStatus());
   } else if (combinedFallbackReason.length > 0) {
-    setChartLegend(`Fallback ativo: ${combinedFallbackReason}. Exibindo delayed temporariamente.`, "error");
+    setChartLegend(`Fallback ativo: ${combinedFallbackReason}. Exibindo delayed temporariamente.`, "warn");
   }
 }
 
@@ -9461,6 +9478,12 @@ async function loadChart(options = {}) {
 
   if (!silent) {
     setChartStatus("Atualizando dados de grafico...", "loading");
+  } else {
+    clearChartErrorStatusMode();
+
+    if (chartViewMode === "tv") {
+      setChartStatus(buildTerminalReadyStatus());
+    }
   }
 
   try {
@@ -9491,8 +9514,14 @@ async function loadChart(options = {}) {
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Erro ao carregar grafico";
+    const shouldSurfaceStatusError = !silent || chartViewMode !== "tv";
 
     if (pipelineStrategy === "institutional_macro") {
+      if (!shouldSurfaceStatusError) {
+        setChartStatus(buildTerminalReadyStatus());
+        return;
+      }
+
       setChartStatus(errorMessage, "error");
 
       if (currentChartSnapshot && chartViewMode === "copilot") {
@@ -9535,9 +9564,20 @@ async function loadChart(options = {}) {
       }
 
       renderChartMetrics(contingencySnapshot);
-      setChartStatus(`Modo contingencia ativo: ${errorMessage}`, "error");
-      setChartLegend("Sem historico no momento. Exibindo preco de contingencia para manter acompanhamento operacional.", "error");
+
+      if (shouldSurfaceStatusError) {
+        const contingencyProvider = String(spotQuote.quote.provider ?? "secundario").toUpperCase();
+        setChartStatus(`Modo contingencia ativo via ${contingencyProvider}. Dados secundarios em uso.`, "warn");
+        setChartLegend("Sem historico no momento. Exibindo preco de contingencia para manter acompanhamento operacional.", "warn");
+      } else {
+        setChartStatus(buildTerminalReadyStatus());
+      }
     } else {
+      if (!shouldSurfaceStatusError) {
+        setChartStatus(buildTerminalReadyStatus());
+        return;
+      }
+
       setChartStatus(errorMessage, "error");
 
       if (currentChartSnapshot && chartViewMode === "copilot") {
@@ -10624,6 +10664,8 @@ function setupChartLab() {
       if (exchange && chartExchangeSelect instanceof HTMLSelectElement) {
         chartExchangeSelect.value = exchange;
       }
+
+      chartSymbolSourceModule = "crypto";
 
       renderWatchlist();
       chartHasInitialFit = false;

@@ -1351,6 +1351,10 @@ body.sidebar-collapsed .app-shell {
   color: #ffb5b5;
 }
 
+.chart-status[data-mode="warn"] {
+  color: #ffd78e;
+}
+
 .chart-status[data-mode="loading"] {
   color: #8be8d0;
 }
@@ -1372,6 +1376,10 @@ body.sidebar-collapsed .app-shell {
 
 .chart-legend[data-mode="error"] {
   color: #ffb5b5;
+}
+
+.chart-legend[data-mode="warn"] {
+  color: #ffd78e;
 }
 
 .is-hidden {
@@ -1433,6 +1441,7 @@ body.sidebar-collapsed .app-shell {
   flex-direction: column;
   max-height: 450px;
   min-height: 450px;
+  overflow: hidden;
   padding: 0.58rem;
 }
 
@@ -1526,7 +1535,7 @@ body.sidebar-collapsed .app-shell {
 
 .watchlist-grid {
   display: grid;
-  flex: 1;
+  flex: 1 1 auto;
   gap: 0.35rem;
   margin-top: 0.45rem;
   min-height: 0;
@@ -1539,8 +1548,21 @@ body.sidebar-collapsed .app-shell {
   border-radius: 10px;
   display: grid;
   gap: 0.42rem;
+  max-height: 252px;
   margin-top: 0.52rem;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 0.48rem;
+}
+
+.prop-desk::-webkit-scrollbar {
+  width: 6px;
+}
+
+.prop-desk::-webkit-scrollbar-thumb {
+  background: rgba(118, 170, 230, 0.45);
+  border-radius: 999px;
 }
 
 .prop-desk-head {
@@ -1582,6 +1604,7 @@ body.sidebar-collapsed .app-shell {
   font-size: 0.62rem;
   line-height: 1.36;
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .prop-desk-grid {
