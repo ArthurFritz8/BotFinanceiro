@@ -10012,10 +10012,13 @@ function connectChartLiveStream(intervalMs) {
     }
 
     startChartLiveFallbackPolling();
-    setChartStatus(
-      normalizeBrokerApiErrorMessage(message, "Stream de chart reportou falha"),
-      "error",
-    );
+    const normalizedMessage = normalizeBrokerApiErrorMessage(message, "Stream de chart reportou falha");
+
+    if (chartViewMode === "tv" && currentChartSnapshot) {
+      setChartLegend(`Stream com oscilacao: ${normalizedMessage}`, "warn");
+    } else {
+      setChartStatus(normalizedMessage, "error");
+    }
   });
 
   eventSource.onerror = () => {
@@ -10044,7 +10047,12 @@ function connectChartLiveStream(intervalMs) {
     startChartLiveFallbackPolling();
     chartLiveStreamReconnectAttempt += 1;
     const backoffMs = Math.min(30000, 1200 * 2 ** chartLiveStreamReconnectAttempt);
-    setChartStatus(`Reconectando stream live em ${Math.round(backoffMs / 1000)}s...`, "loading");
+
+    if (chartViewMode === "tv" && currentChartSnapshot) {
+      setChartLegend(`Reconectando stream live em ${Math.round(backoffMs / 1000)}s...`, "warn");
+    } else {
+      setChartStatus(`Reconectando stream live em ${Math.round(backoffMs / 1000)}s...`, "loading");
+    }
 
     chartLiveStreamBackoffTimer = window.setTimeout(() => {
       chartLiveStreamBackoffTimer = null;
@@ -10305,7 +10313,6 @@ async function loadChart(options = {}) {
 
     if (pipelineStrategy === "institutional_macro") {
       if (!shouldSurfaceStatusError) {
-        setChartStatus(buildTerminalReadyStatus());
         return;
       }
 
@@ -10356,12 +10363,9 @@ async function loadChart(options = {}) {
         const contingencyProvider = String(spotQuote.quote.provider ?? "secundario").toUpperCase();
         setChartStatus(`Modo contingencia ativo via ${contingencyProvider}. Dados secundarios em uso.`, "warn");
         setChartLegend("Sem historico no momento. Exibindo preco de contingencia para manter acompanhamento operacional.", "warn");
-      } else {
-        setChartStatus(buildTerminalReadyStatus());
       }
     } else {
       if (!shouldSurfaceStatusError) {
-        setChartStatus(buildTerminalReadyStatus());
         return;
       }
 
