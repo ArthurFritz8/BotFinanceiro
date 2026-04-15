@@ -112,6 +112,21 @@ test("main.js preserva semantica AUTO na watchlist", async () => {
   );
 });
 
+test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
+  const mainSource = await readWebFile("src/main.js");
+
+  assert.match(mainSource, /const CHART_AUTO_BROKER_STICKY_MS = 180000/);
+  assert.match(mainSource, /let chartAutoPreferredBroker = "binance";/);
+  assert.match(mainSource, /function resolveAutoChartPrimaryBroker\(\)/);
+  assert.match(mainSource, /function updateAutoChartPreferredBroker\(nextBroker, options = \{\}\)/);
+  assert.match(mainSource, /if \(requestedBroker === "auto"\) \{/);
+  assert.match(mainSource, /const preferredBroker = resolveAutoChartPrimaryBroker\(\);/);
+  assert.match(mainSource, /requestCryptoChartEndpoint\(assetId, range, targetMode, preferredBroker\)/);
+  assert.match(mainSource, /requestCryptoChartEndpoint\(assetId, range, targetMode, "auto"\)/);
+  assert.match(mainSource, /AUTO inteligente: ajuste de provider/);
+  assert.match(mainSource, /displayProvider: statusBroker,/);
+});
+
 test("styles.css contem classes base do prop desk", async () => {
   const stylesSource = await readWebFile("src/styles.css");
 

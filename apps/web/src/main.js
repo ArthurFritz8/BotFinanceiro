@@ -144,6 +144,7 @@ const MARKET_HTTP_RETRY_MAX_ATTEMPTS = 3;
 const MARKET_HTTP_RETRY_BASE_DELAY_MS = 280;
 const BROKER_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
 const BROKER_CIRCUIT_BREAKER_COOLDOWN_MS = 120000;
+const CHART_AUTO_BROKER_STICKY_MS = 180000;
 const WATCHLIST_STREAM_FALLBACK_POLL_MS = 6000;
 const CHART_STREAM_FALLBACK_POLL_MS = 4000;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
@@ -1448,6 +1449,8 @@ let chartLiveStream = null;
 let chartLiveStreamBackoffTimer = null;
 let chartLiveStreamReconnectAttempt = 0;
 let chartLiveStreamKey = "";
+let chartAutoPreferredBroker = "binance";
+let chartAutoPreferredBrokerLockUntilMs = 0;
 let chartLiveFallbackPollTimer = null;
 let isChartLoading = false;
 let chartApi = null;
@@ -9282,6 +9285,28 @@ function normalizeRequestedBroker(broker) {
   return normalizeBrokerName(normalized);
 }
 
+function resolveAutoChartPrimaryBroker() {
+  return normalizeBrokerName(chartAutoPreferredBroker);
+}
+
+function updateAutoChartPreferredBroker(nextBroker, options = {}) {
+  const normalizedBroker = normalizeBrokerName(nextBroker);
+  const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
+  const force = options.force === true;
+  const canSwitchBroker =
+    force
+    || normalizedBroker === chartAutoPreferredBroker
+    || nowMs >= chartAutoPreferredBrokerLockUntilMs;
+
+  if (!canSwitchBroker) {
+    return false;
+  }
+
+  chartAutoPreferredBroker = normalizedBroker;
+  chartAutoPreferredBrokerLockUntilMs = nowMs + CHART_AUTO_BROKER_STICKY_MS;
+  return true;
+}
+
 function resolveAutoWatchlistPrimaryBroker() {
   return normalizeBrokerName(watchlistAutoPreferredBroker);
 }
@@ -9531,15 +9556,52 @@ async function requestCryptoChart(assetId, range, mode, exchange) {
   const requestedBroker = normalizeRequestedBroker(exchange);
 
   if (requestedBroker === "auto") {
+    const resolveAutoSnapshot = async (targetMode) => {
+      const preferredBroker = resolveAutoChartPrimaryBroker();
+
+      try {
+        const snapshot = await requestCryptoChartEndpoint(assetId, range, targetMode, preferredBroker);
+        markBrokerSuccess(preferredBroker);
+        updateAutoChartPreferredBroker(preferredBroker);
+
+        return {
+          fallbackReason: "",
+          resolvedBroker: preferredBroker,
+          resolvedMode: snapshot?.mode === "live" ? "live" : "delayed",
+          snapshot,
+        };
+      } catch (preferredError) {
+        const preferredMessage = getErrorMessage(preferredError, "Falha ao consultar grafico");
+        const normalizedPreferredMessage = normalizeChartApiErrorMessage(preferredMessage, "Falha ao consultar grafico");
+        markBrokerFailure(preferredBroker, normalizedPreferredMessage);
+
+        if (!isRetryableMarketApiErrorMessage(preferredMessage)) {
+          throw new Error(normalizedPreferredMessage);
+        }
+
+        const snapshot = await requestCryptoChartEndpoint(assetId, range, targetMode, "auto");
+        const resolvedBroker = normalizeBrokerName(snapshot?.provider ?? preferredBroker);
+        const switchedBroker = resolvedBroker !== preferredBroker;
+
+        markBrokerSuccess(resolvedBroker);
+        updateAutoChartPreferredBroker(resolvedBroker, {
+          force: switchedBroker,
+        });
+
+        return {
+          fallbackReason: switchedBroker
+            ? `AUTO inteligente: ajuste de provider ${preferredBroker.toUpperCase()} -> ${resolvedBroker.toUpperCase()}`
+            : "",
+          resolvedBroker,
+          resolvedMode: snapshot?.mode === "live" ? "live" : "delayed",
+          snapshot,
+        };
+      }
+    };
+
     try {
       const targetMode = mode === "live" ? "live" : "delayed";
-      const snapshot = await requestCryptoChartEndpoint(assetId, range, targetMode, requestedBroker);
-      return {
-        fallbackReason: "",
-        resolvedBroker: normalizeBrokerName(snapshot?.provider),
-        resolvedMode: snapshot?.mode === "live" ? "live" : "delayed",
-        snapshot,
-      };
+      return await resolveAutoSnapshot(targetMode);
     } catch (error) {
       const message = getErrorMessage(error, "Falha ao consultar grafico");
       const normalizedMessage = normalizeChartApiErrorMessage(message, "Falha ao consultar grafico");
@@ -9548,12 +9610,15 @@ async function requestCryptoChart(assetId, range, mode, exchange) {
         throw new Error(normalizedMessage);
       }
 
-      const delayedSnapshot = await requestCryptoChartEndpoint(assetId, range, "delayed", requestedBroker);
+      const delayedResult = await resolveAutoSnapshot("delayed");
+
       return {
-        fallbackReason: "Live indisponivel, fallback delayed acionado (auto broker)",
-        resolvedBroker: normalizeBrokerName(delayedSnapshot?.provider),
-        resolvedMode: delayedSnapshot?.mode === "live" ? "live" : "delayed",
-        snapshot: delayedSnapshot,
+        ...delayedResult,
+        fallbackReason: [
+          "Live indisponivel, fallback delayed acionado (auto broker)",
+          delayedResult.fallbackReason,
+        ].filter((item) => item.length > 0).join(" • "),
+        resolvedMode: "delayed",
       };
     }
   }
@@ -9742,7 +9807,10 @@ function applyChartSnapshot(snapshot, options = {}) {
     ? CHART_STYLE_LABELS[getSelectedTerminalStyle()] ?? getSelectedTerminalStyle()
     : CHART_STYLE_LABELS[resolveChartStyle()] ?? resolveChartStyle();
   const strategyLabel = currentChartStrategy === "institutional_macro" ? "institucional" : "crypto";
-  const providerLabel = String(snapshot.provider ?? "n/d").toUpperCase();
+  const displayProvider = typeof options.displayProvider === "string"
+    ? options.displayProvider
+    : snapshot.provider;
+  const providerLabel = String(displayProvider ?? "n/d").toUpperCase();
   const refreshIntervalMs = resolveAutoRefreshIntervalMs();
   const refreshLabel =
     snapshot.mode === "live"
@@ -9845,11 +9913,9 @@ function connectChartLiveStream(intervalMs) {
   const range = chartRangeSelect.value;
   const selectedRequestedBroker = normalizeRequestedBroker(getSelectedBroker());
   const selectedBroker = selectedRequestedBroker === "auto"
-    ? "auto"
+    ? resolveAutoChartPrimaryBroker()
     : normalizeBrokerName(selectedRequestedBroker);
-  const streamFailoverChain = selectedBroker === "auto"
-    ? ["auto"]
-    : buildBrokerFailoverChain(selectedBroker);
+  const streamFailoverChain = buildBrokerFailoverChain(selectedBroker);
   const exchange = streamFailoverChain[0] ?? selectedBroker;
   const streamKey = `${assetId}:${selectedRequestedBroker}:${exchange}:${range}:${intervalMs}`;
 
@@ -9864,7 +9930,7 @@ function connectChartLiveStream(intervalMs) {
   const eventSource = new EventSource(streamUrl);
   chartLiveStream = eventSource;
 
-  if (selectedBroker !== "auto" && exchange !== selectedBroker) {
+  if (exchange !== selectedBroker) {
     setChartLegend(
       `Stream live em contingencia: ${selectedBroker.toUpperCase()} -> ${exchange.toUpperCase()}.`,
       "warn",
@@ -9896,12 +9962,21 @@ function connectChartLiveStream(intervalMs) {
 
     const resolvedStreamBroker = normalizeBrokerName(snapshot?.provider ?? exchange);
     markBrokerSuccess(resolvedStreamBroker);
+
+    if (selectedRequestedBroker === "auto") {
+      updateAutoChartPreferredBroker(resolvedStreamBroker);
+    }
+
     stopChartLiveFallbackPolling();
     chartLiveStreamReconnectAttempt = 0;
 
     try {
-      const selectedExchangeForStatus = resolveExchangeLabelFromBroker(resolvedStreamBroker);
+      const statusBroker = selectedRequestedBroker === "auto"
+        ? resolveAutoChartPrimaryBroker()
+        : resolvedStreamBroker;
+      const selectedExchangeForStatus = resolveExchangeLabelFromBroker(statusBroker);
       applyChartSnapshot(snapshot, {
+        displayProvider: statusBroker,
         selectedExchange: selectedExchangeForStatus,
         transport: "stream",
       });
@@ -9923,8 +9998,17 @@ function connectChartLiveStream(intervalMs) {
       ? payload.message
       : "Stream de chart reportou falha";
 
-    if (exchange !== "auto") {
-      markBrokerFailure(exchange, message);
+    markBrokerFailure(exchange, message);
+
+    if (selectedRequestedBroker === "auto" && isBrokerCircuitOpen(exchange)) {
+      const failoverChain = buildBrokerFailoverChain(exchange);
+      const nextBroker = failoverChain.find((candidate) => candidate !== exchange);
+
+      if (nextBroker) {
+        updateAutoChartPreferredBroker(nextBroker, {
+          force: true,
+        });
+      }
     }
 
     startChartLiveFallbackPolling();
@@ -9943,8 +10027,17 @@ function connectChartLiveStream(intervalMs) {
       return;
     }
 
-    if (exchange !== "auto") {
-      markBrokerFailure(exchange, "Stream live desconectado");
+    markBrokerFailure(exchange, "Stream live desconectado");
+
+    if (selectedRequestedBroker === "auto" && isBrokerCircuitOpen(exchange)) {
+      const failoverChain = buildBrokerFailoverChain(exchange);
+      const nextBroker = failoverChain.find((candidate) => candidate !== exchange);
+
+      if (nextBroker) {
+        updateAutoChartPreferredBroker(nextBroker, {
+          force: true,
+        });
+      }
     }
 
     stopChartLiveStream();
@@ -10193,11 +10286,14 @@ async function loadChart(options = {}) {
       mode,
       selectedBroker,
     );
-    const selectedExchangeForStatus = typeof resolvedBroker === "string"
-      ? resolveExchangeLabelFromBroker(resolvedBroker)
-      : selectedExchange;
+    const requestedBroker = normalizeRequestedBroker(selectedBroker);
+    const statusBroker = requestedBroker === "auto"
+      ? resolveAutoChartPrimaryBroker()
+      : normalizeBrokerName(resolvedBroker);
+    const selectedExchangeForStatus = resolveExchangeLabelFromBroker(statusBroker);
 
     applyChartSnapshot(snapshot, {
+      displayProvider: statusBroker,
       fallbackReason,
       forcedModeReason,
       selectedExchange: selectedExchangeForStatus,
@@ -11221,6 +11317,14 @@ function setupChartLab() {
 
   if (chartExchangeSelect) {
     chartExchangeSelect.addEventListener("change", () => {
+      const requestedBroker = normalizeRequestedBroker(getSelectedBroker());
+
+      if (requestedBroker !== "auto") {
+        updateAutoChartPreferredBroker(requestedBroker, {
+          force: true,
+        });
+      }
+
       if (chartSymbolInput instanceof HTMLInputElement) {
         chartSymbolInput.value = mapSymbolToExchange(chartSymbolInput.value, getSelectedTerminalExchange());
       }
