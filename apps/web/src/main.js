@@ -87,6 +87,7 @@ const analysisSignalCardElement = document.querySelector("#analysis-signal-card"
 const analysisContextCardElement = document.querySelector("#analysis-context-card");
 const analysisTabsElement = document.querySelector("#analysis-tabs");
 const analysisTabContentElement = document.querySelector("#analysis-tab-content");
+const riskManagementTabPanel = document.querySelector("#risk-management-tab-panel");
 const airdropRefreshButton = document.querySelector("#airdrop-refresh-button");
 const airdropFiltersForm = document.querySelector("#airdrop-filters");
 const airdropChainFilter = document.querySelector("#airdrop-chain-filter");
@@ -1225,6 +1226,10 @@ const ANALYSIS_TAB_DEFINITIONS = [
   {
     id: "calculadora",
     label: "Calculadora",
+  },
+  {
+    id: "gestao_risco",
+    label: "Gestao de risco",
   },
   {
     id: "timing",
@@ -6340,6 +6345,32 @@ function renderAnalysisTabContent(analysis, snapshot) {
 
   const currency = snapshot?.currency ?? "usd";
 
+  if (activeAnalysisTabId === "gestao_risco") {
+    analysisTabContentElement.innerHTML = "";
+
+    if (riskManagementTabPanel instanceof HTMLElement) {
+      riskManagementTabPanel.classList.remove("is-hidden");
+      riskManagementTabPanel.removeAttribute("aria-hidden");
+      analysisTabContentElement.append(riskManagementTabPanel);
+      setupPropDesk();
+      renderPropDesk();
+    } else {
+      analysisTabContentElement.innerHTML = `
+        <article class="analysis-block">
+          <h4>Gestao de risco</h4>
+          <p>Painel de gestao de risco indisponivel no momento.</p>
+        </article>
+      `;
+    }
+
+    return;
+  }
+
+  if (riskManagementTabPanel instanceof HTMLElement) {
+    riskManagementTabPanel.classList.add("is-hidden");
+    riskManagementTabPanel.setAttribute("aria-hidden", "true");
+  }
+
   if (activeAnalysisTabId === "resumo") {
     analysisTabContentElement.innerHTML = `
       <div class="analysis-grid">
@@ -8979,6 +9010,24 @@ function renderChartMetrics(snapshot) {
   renderDeepAnalysisPanel(snapshot);
 }
 
+function normalizeChartApiErrorMessage(message, fallbackMessage) {
+  if (typeof message !== "string") {
+    return fallbackMessage;
+  }
+
+  const normalizedMessage = message.toLowerCase();
+
+  if (normalizedMessage.includes("returned a non-success status")) {
+    return "Dados de mercado indisponiveis no momento. Tentando fallback automatico.";
+  }
+
+  if (normalizedMessage.includes("failed to fetch") || normalizedMessage.includes("network")) {
+    return "Falha de rede ao consultar dados de mercado.";
+  }
+
+  return message;
+}
+
 async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "binance") {
   const normalizedExchange = typeof exchange === "string" && exchange.length > 0 ? exchange : "binance";
   const normalizedMode = mode === "live" ? "live" : "delayed";
@@ -9002,7 +9051,7 @@ async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "bina
 
   if (!response.ok) {
     const errorMessage = payload?.error?.message;
-    throw new Error(typeof errorMessage === "string" ? errorMessage : "Nao foi possivel carregar o grafico");
+    throw new Error(normalizeChartApiErrorMessage(errorMessage, "Nao foi possivel carregar o grafico"));
   }
 
   return payload?.data ?? null;
@@ -9065,9 +9114,10 @@ async function requestInstitutionalMacroSnapshot(symbol, range, mode, moduleName
   if (!response.ok) {
     const errorMessage = payload?.error?.message;
     throw new Error(
-      typeof errorMessage === "string"
-        ? errorMessage
-        : "Nao foi possivel carregar o motor institucional",
+      normalizeChartApiErrorMessage(
+        errorMessage,
+        "Nao foi possivel carregar o motor institucional",
+      ),
     );
   }
 

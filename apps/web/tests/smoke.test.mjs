@@ -12,19 +12,30 @@ async function readWebFile(relativePath) {
   return readFile(absolutePath, "utf8");
 }
 
-test("index.html expoe painel prop desk no Chart Lab", async () => {
+test("index.html move risk desk para painel de analise profunda", async () => {
   const html = await readWebFile("index.html");
+  const watchlistStart = html.indexOf("<aside class=\"market-watch\"");
+  const watchlistEnd = watchlistStart >= 0 ? html.indexOf("</aside>", watchlistStart) : -1;
+  const watchlistMarkup = watchlistStart >= 0 && watchlistEnd > watchlistStart
+    ? html.slice(watchlistStart, watchlistEnd)
+    : "";
 
+  assert.match(html, /id="risk-management-tab-panel"/);
   assert.match(html, /id="prop-desk"/);
   assert.match(html, /id="prop-mode-toggle"/);
   assert.match(html, /id="prop-exit-strategy"/);
   assert.match(html, /id="prop-3x7-status"/);
+  assert.match(html, /grid grid-cols-1 md:grid-cols-3 gap-6/);
+  assert.doesNotMatch(watchlistMarkup, /id="prop-desk"/);
 });
 
-test("main.js inicializa estado e setup do prop desk", async () => {
+test("main.js inicializa estado, aba e render da gestao de risco", async () => {
   const mainSource = await readWebFile("src/main.js");
 
   assert.match(mainSource, /const PROP_DESK_STORAGE_KEY = "botfinanceiro\.chart\.propDesk\.v1"/);
+  assert.match(mainSource, /id:\s*"gestao_risco"/);
+  assert.match(mainSource, /if \(activeAnalysisTabId === "gestao_risco"\)/);
+  assert.match(mainSource, /analysisTabContentElement\.append\(riskManagementTabPanel\);/);
   assert.match(mainSource, /function setupPropDesk\(\)/);
   assert.match(mainSource, /setupPropDesk\(\);/);
 });
@@ -52,9 +63,10 @@ test("styles.css contem classes base do prop desk", async () => {
   const stylesSource = await readWebFile("src/styles.css");
 
   assert.match(stylesSource, /\.prop-desk\s*\{/);
+  assert.match(stylesSource, /\.analysis-risk-tab-panel\s*\{/);
+  assert.match(stylesSource, /\.prop-desk-risk-tab\s*\{/);
+  assert.match(stylesSource, /\.prop-risk-card\s*\{/);
   assert.match(stylesSource, /\.prop-tracker-status\[data-state="good"\]/);
   assert.match(stylesSource, /\.prop-tracker-status\[data-state="alert"\]/);
-  assert.match(stylesSource, /\.market-watch\s*\{[\s\S]*overflow:\s*hidden;/);
-  assert.match(stylesSource, /\.prop-desk\s*\{[\s\S]*max-height:\s*252px;[\s\S]*overflow-y:\s*auto;/);
   assert.match(stylesSource, /\.chart-status\[data-mode="warn"\]/);
 });

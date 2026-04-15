@@ -1723,6 +1723,81 @@ body.sidebar-collapsed .app-shell {
   color: #ffb2c4;
 }
 
+.analysis-risk-tab-panel {
+  margin-top: 0.1rem;
+}
+
+.prop-desk-risk-tab {
+  margin-top: 0;
+  max-height: none;
+  overflow: visible;
+  padding: 0.7rem;
+}
+
+.prop-desk-risk-grid {
+  align-items: stretch;
+}
+
+.prop-risk-card {
+  background: rgba(8, 22, 38, 0.7);
+  border: 1px solid rgba(117, 166, 224, 0.3);
+  border-radius: 10px;
+  display: grid;
+  gap: 0.46rem;
+  padding: 0.55rem;
+}
+
+.prop-risk-card h5 {
+  color: #dff0ff;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.prop-risk-input-grid {
+  display: grid;
+  gap: 0.34rem;
+}
+
+.prop-desk-risk-tab .prop-desk-field {
+  font-size: 0.6rem;
+}
+
+.prop-desk-risk-tab .prop-desk-field input,
+.prop-desk-risk-tab .prop-desk-field select {
+  font-size: 0.78rem;
+  padding: 0.3rem 0.36rem;
+}
+
+.prop-desk-risk-tab .prop-lot-result {
+  background: linear-gradient(130deg, rgba(25, 64, 99, 0.52), rgba(10, 30, 54, 0.72));
+  border: 1px solid rgba(121, 176, 239, 0.38);
+  border-radius: 9px;
+  color: #e9f3ff;
+  font-size: 0.9rem;
+  line-height: 1.46;
+  padding: 0.54rem;
+}
+
+.prop-risk-result-note {
+  color: #9ebfe3;
+  font-size: 0.66rem;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.prop-desk-risk-tab .prop-exit-strategy,
+.prop-desk-risk-tab .prop-tracker {
+  border-top: 1px solid rgba(124, 177, 236, 0.2);
+  padding-top: 0.42rem;
+}
+
+.prop-desk-risk-tab .prop-tracker-actions button {
+  font-size: 0.62rem;
+  padding: 0.24rem 0.34rem;
+}
+
 .watch-item {
   align-items: center;
   background: rgba(8, 22, 38, 0.72);
