@@ -1470,6 +1470,94 @@ body.sidebar-collapsed .app-shell {
   margin-top: 0.45rem;
 }
 
+.watchlist-risk-summary {
+  background: rgba(8, 22, 38, 0.72);
+  border: 1px solid rgba(117, 166, 224, 0.32);
+  border-radius: 10px;
+  display: grid;
+  gap: 0.32rem;
+  margin-top: 0.4rem;
+  padding: 0.38rem 0.42rem;
+}
+
+.watchlist-risk-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.3rem;
+}
+
+.watchlist-risk-head strong {
+  color: #dff0ff;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.watchlist-risk-open {
+  background: rgba(42, 191, 255, 0.22);
+  border: 1px solid rgba(114, 223, 255, 0.52);
+  border-radius: 999px;
+  color: #d8f3ff;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.54rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 0.14rem 0.36rem;
+  text-transform: uppercase;
+}
+
+.watchlist-risk-open:hover {
+  border-color: rgba(162, 238, 255, 0.74);
+}
+
+.watchlist-risk-grid {
+  display: grid;
+  gap: 0.24rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.watchlist-risk-chip {
+  background: rgba(6, 18, 31, 0.72);
+  border: 1px solid rgba(116, 167, 228, 0.26);
+  border-radius: 7px;
+  color: #95b4da;
+  display: grid;
+  font-size: 0.52rem;
+  font-weight: 700;
+  gap: 0.08rem;
+  letter-spacing: 0.04em;
+  padding: 0.2rem 0.24rem;
+  text-transform: uppercase;
+}
+
+.watchlist-risk-chip span {
+  color: #e6f4ff;
+  font-size: 0.62rem;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.watchlist-risk-note {
+  color: #9ebfe3;
+  font-size: 0.58rem;
+  line-height: 1.34;
+  margin: 0;
+}
+
+.watchlist-risk-note[data-state="good"] {
+  color: #8fefcc;
+}
+
+.watchlist-risk-note[data-state="warn"] {
+  color: #ffd78e;
+}
+
+.watchlist-risk-note[data-state="alert"] {
+  color: #ffb2c4;
+}
+
 .watchlist-diagnostic-row {
   display: grid;
   gap: 0.3rem;
@@ -3454,6 +3542,10 @@ body.sidebar-collapsed .app-shell {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .watchlist-risk-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .prop-desk-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -3599,6 +3691,15 @@ body.sidebar-collapsed .app-shell {
 
   .watchlist-grid {
     grid-template-columns: 1fr;
+  }
+
+  .watchlist-risk-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .watchlist-risk-head {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .prop-desk-grid {

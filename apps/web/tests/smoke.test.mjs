@@ -26,6 +26,8 @@ test("index.html move risk desk para painel de analise profunda", async () => {
   assert.match(html, /id="prop-exit-strategy"/);
   assert.match(html, /id="prop-3x7-status"/);
   assert.match(html, /grid grid-cols-1 md:grid-cols-3 gap-6/);
+  assert.match(html, /id="watchlist-risk-summary"/);
+  assert.match(html, /Alt\+G gestao de risco/);
   assert.doesNotMatch(watchlistMarkup, /id="prop-desk"/);
 });
 
@@ -36,6 +38,9 @@ test("main.js inicializa estado, aba e render da gestao de risco", async () => {
   assert.match(mainSource, /id:\s*"gestao_risco"/);
   assert.match(mainSource, /if \(activeAnalysisTabId === "gestao_risco"\)/);
   assert.match(mainSource, /analysisTabContentElement\.append\(riskManagementTabPanel\);/);
+  assert.match(mainSource, /function renderWatchlistRiskSummary\(\)/);
+  assert.match(mainSource, /openRiskManagementTab\(\{[\s\S]*scroll: true,[\s\S]*\}\);/);
+  assert.match(mainSource, /if \(lowerKey === "g"\)/);
   assert.match(mainSource, /function setupPropDesk\(\)/);
   assert.match(mainSource, /setupPropDesk\(\);/);
 });
@@ -66,6 +71,9 @@ test("styles.css contem classes base do prop desk", async () => {
   assert.match(stylesSource, /\.analysis-risk-tab-panel\s*\{/);
   assert.match(stylesSource, /\.prop-desk-risk-tab\s*\{/);
   assert.match(stylesSource, /\.prop-risk-card\s*\{/);
+  assert.match(stylesSource, /\.watchlist-risk-summary\s*\{/);
+  assert.match(stylesSource, /\.watchlist-risk-open\s*\{/);
+  assert.match(stylesSource, /\.watchlist-risk-grid\s*\{/);
   assert.match(stylesSource, /\.prop-tracker-status\[data-state="good"\]/);
   assert.match(stylesSource, /\.prop-tracker-status\[data-state="alert"\]/);
   assert.match(stylesSource, /\.chart-status\[data-mode="warn"\]/);

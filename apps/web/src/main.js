@@ -64,6 +64,7 @@ const watchlistGrid = document.querySelector("#watchlist-grid");
 const watchlistRefreshButton = document.querySelector("#watchlist-refresh");
 const watchlistStatusElement = document.querySelector("#watchlist-status");
 const watchlistDiagnosticsElement = document.querySelector("#watchlist-diagnostics");
+const watchlistRiskSummaryElement = document.querySelector("#watchlist-risk-summary");
 const propModeToggle = document.querySelector("#prop-mode-toggle");
 const propModeStatusElement = document.querySelector("#prop-mode-status");
 const propAccountSizeInput = document.querySelector("#prop-account-size");
@@ -7184,6 +7185,7 @@ function renderPropDesk() {
   }
 
   updatePropStrategyHint(propDeskState.exitStrategy);
+  renderWatchlistRiskSummary();
 }
 
 function updatePropDeskStateFromInputs() {
@@ -7542,6 +7544,62 @@ function renderWatchlistDiagnostics() {
         </div>
       `).join("")}
     </div>
+  `;
+}
+
+function renderWatchlistRiskSummary() {
+  if (!(watchlistRiskSummaryElement instanceof HTMLElement)) {
+    return;
+  }
+
+  const effectiveRiskPercent = propDeskState.propModeEnabled
+    ? Math.min(propDeskState.riskPercent, 1)
+    : propDeskState.riskPercent;
+  const riskBudget = roundNumber(propDeskState.accountSize * (effectiveRiskPercent / 100), 2);
+  const stopLoss = Math.max(0.1, propDeskState.stopLoss);
+  const usdPerPointPerLot = 10;
+  const recommendedLot = Math.max(0.01, roundNumber(riskBudget / (stopLoss * usdPerPointPerLot), 2));
+  const totalTrades = propDeskState.trackerWins + propDeskState.trackerLosses;
+  const trackerStatus = derivePropTrackerStatus(propDeskState);
+  const strategyLabel = propDeskState.exitStrategy === "arbitrage_ab" ? "AB" : "3x7";
+  const modeLabel = propDeskState.propModeEnabled ? "Mesa ON" : "Mesa OFF";
+  const statusMode = trackerStatus.mode.length > 0 ? trackerStatus.mode : "ok";
+  const trackerHint = trackerStatus.message.length > 86
+    ? `${trackerStatus.message.slice(0, 83)}...`
+    : trackerStatus.message;
+
+  watchlistRiskSummaryElement.innerHTML = `
+    <div class="watchlist-risk-head">
+      <strong>Risk Snapshot</strong>
+      <button type="button" class="watchlist-risk-open">Abrir gestao</button>
+    </div>
+    <div class="watchlist-risk-grid">
+      <div class="watchlist-risk-chip">
+        Modo
+        <span>${modeLabel}</span>
+      </div>
+      <div class="watchlist-risk-chip">
+        Estrategia
+        <span>${strategyLabel}</span>
+      </div>
+      <div class="watchlist-risk-chip">
+        Risco
+        <span>${effectiveRiskPercent.toFixed(2)}%</span>
+      </div>
+      <div class="watchlist-risk-chip">
+        Lote
+        <span>${recommendedLot.toFixed(2)}</span>
+      </div>
+      <div class="watchlist-risk-chip">
+        Perda max.
+        <span>USD ${riskBudget.toFixed(2)}</span>
+      </div>
+      <div class="watchlist-risk-chip">
+        Ciclo
+        <span>${propDeskState.trackerWins}W / ${propDeskState.trackerLosses}L (${Math.min(totalTrades, 10)}/10)</span>
+      </div>
+    </div>
+    <p class="watchlist-risk-note" data-state="${statusMode}">${escapeHtml(trackerHint)}</p>
   `;
 }
 
@@ -10345,6 +10403,22 @@ function isEditableElement(target) {
   );
 }
 
+function openRiskManagementTab(options = {}) {
+  if (activeAppRoute !== APP_ROUTE_CHART_LAB) {
+    navigateToRoute(APP_ROUTE_CHART_LAB);
+  }
+
+  activeAnalysisTabId = "gestao_risco";
+  renderDeepAnalysisPanel(currentChartSnapshot);
+
+  if (options.scroll === true && analysisPanel instanceof HTMLElement) {
+    analysisPanel.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }
+}
+
 function setupChartKeyboardShortcuts() {
   window.addEventListener("keydown", (event) => {
     if (event.defaultPrevented) {
@@ -10398,6 +10472,15 @@ function setupChartKeyboardShortcuts() {
     }
 
     const lowerKey = event.key.toLowerCase();
+
+    if (lowerKey === "g") {
+      event.preventDefault();
+      openRiskManagementTab({
+        scroll: true,
+      });
+      setChartLegend("Atalho ativo: Gestao de Risco (Alt+G).");
+      return;
+    }
 
     if (lowerKey === "v") {
       event.preventDefault();
@@ -10467,6 +10550,7 @@ function setupChartLab() {
       : "Aguardando sync",
   );
   setupPropDesk();
+  renderWatchlistRiskSummary();
 
   chartControlsForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -10691,6 +10775,24 @@ function setupChartLab() {
   }
 
   if (watchlistGrid instanceof HTMLElement) {
+    if (watchlistRiskSummaryElement instanceof HTMLElement) {
+      watchlistRiskSummaryElement.addEventListener("click", (event) => {
+        const target = event.target;
+        const button = target instanceof HTMLElement
+          ? target.closest("button.watchlist-risk-open")
+          : null;
+
+        if (!(button instanceof HTMLButtonElement)) {
+          return;
+        }
+
+        openRiskManagementTab({
+          scroll: true,
+        });
+        setStatus("", "Gestao de risco aberta");
+      });
+    }
+
     watchlistGrid.addEventListener("click", (event) => {
       const target = event.target;
       const button = target instanceof HTMLElement ? target.closest("button.watch-item") : null;
