@@ -47,10 +47,15 @@ test("main.js inicializa estado, aba e render da gestao de risco", async () => {
   assert.match(mainSource, /const BROKER_FAILOVER_ORDER = \["binance", "bybit", "coinbase", "kraken", "okx"\]/);
   assert.match(mainSource, /const BROKER_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3/);
   assert.match(mainSource, /const BROKER_CIRCUIT_BREAKER_COOLDOWN_MS = 120000/);
+  assert.match(mainSource, /const WATCHLIST_STREAM_FALLBACK_POLL_MS = 6000/);
+  assert.match(mainSource, /const CHART_STREAM_FALLBACK_POLL_MS = 4000/);
   assert.match(mainSource, /function getBrokerCircuitRemainingMs\(broker, nowMs = Date\.now\(\)\)/);
   assert.match(mainSource, /function markBrokerFailure\(broker, message\)/);
   assert.match(mainSource, /function getBrokerCircuitSummary\(broker\)/);
   assert.match(mainSource, /function buildBrokerFailoverChain\(primaryBroker, options = \{\}\)/);
+  assert.match(mainSource, /function startWatchlistStreamFallbackPolling\(\)/);
+  assert.match(mainSource, /function startChartLiveFallbackPolling\(\)/);
+  assert.match(mainSource, /void loadChart\(\{[\s\S]*mode: "live",[\s\S]*silent: true,[\s\S]*\}\);/);
   assert.match(mainSource, /function runMarketRequestWithRetry\(requestFactory, options = \{\}\)/);
   assert.match(mainSource, /requestBrokerLiveQuoteBatchWithFailover\(/);
   assert.match(mainSource, /Failover do stream watchlist:/);

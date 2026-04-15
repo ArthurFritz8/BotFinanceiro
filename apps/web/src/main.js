@@ -144,6 +144,8 @@ const MARKET_HTTP_RETRY_MAX_ATTEMPTS = 3;
 const MARKET_HTTP_RETRY_BASE_DELAY_MS = 280;
 const BROKER_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
 const BROKER_CIRCUIT_BREAKER_COOLDOWN_MS = 120000;
+const WATCHLIST_STREAM_FALLBACK_POLL_MS = 6000;
+const CHART_STREAM_FALLBACK_POLL_MS = 4000;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
 const APP_ROUTE_CHAT = "chat";
 const APP_ROUTE_CHART_LAB = "chart-lab";
@@ -1445,6 +1447,7 @@ let chartLiveStream = null;
 let chartLiveStreamBackoffTimer = null;
 let chartLiveStreamReconnectAttempt = 0;
 let chartLiveStreamKey = "";
+let chartLiveFallbackPollTimer = null;
 let isChartLoading = false;
 let chartApi = null;
 let chartBaseSeries = null;
@@ -1466,6 +1469,7 @@ let watchlistStream = null;
 let watchlistStreamBackoffTimer = null;
 let watchlistStreamReconnectAttempt = 0;
 let watchlistStreamBroker = "";
+let watchlistStreamFallbackPollTimer = null;
 let watchlistMarketByAsset = new Map();
 let watchlistLastUpdatedAt = "";
 let isWatchlistLoading = false;
@@ -8263,6 +8267,8 @@ async function refreshWatchlistMarket(options = {}) {
 }
 
 function stopWatchlistStream() {
+  stopWatchlistStreamFallbackPolling();
+
   if (watchlistStreamBackoffTimer !== null) {
     window.clearTimeout(watchlistStreamBackoffTimer);
     watchlistStreamBackoffTimer = null;
@@ -8272,6 +8278,27 @@ function stopWatchlistStream() {
     watchlistStream.close();
     watchlistStream = null;
   }
+}
+
+function stopWatchlistStreamFallbackPolling() {
+  if (watchlistStreamFallbackPollTimer === null) {
+    return;
+  }
+
+  window.clearInterval(watchlistStreamFallbackPollTimer);
+  watchlistStreamFallbackPollTimer = null;
+}
+
+function startWatchlistStreamFallbackPolling() {
+  if (watchlistStreamFallbackPollTimer !== null) {
+    return;
+  }
+
+  watchlistStreamFallbackPollTimer = window.setInterval(() => {
+    void refreshWatchlistMarket({
+      silent: true,
+    });
+  }, WATCHLIST_STREAM_FALLBACK_POLL_MS);
 }
 
 function stopWatchlistAutoRefresh() {
@@ -8320,6 +8347,7 @@ function connectWatchlistStream(intervalMs) {
     }
 
     markBrokerSuccess(streamBroker);
+    stopWatchlistStreamFallbackPolling();
     watchlistStreamReconnectAttempt = 0;
     const generatedAtMs = typeof payload?.generatedAt === "string" ? Date.parse(payload.generatedAt) : Number.NaN;
     const latencyMs = Number.isFinite(generatedAtMs) ? Date.now() - generatedAtMs : null;
@@ -8346,6 +8374,7 @@ function connectWatchlistStream(intervalMs) {
       ? payload.message
       : "Stream de watchlist reportou falha";
     markBrokerFailure(streamBroker, message);
+    startWatchlistStreamFallbackPolling();
     setWatchlistStatus(
       normalizeBrokerApiErrorMessage(message, "Stream de watchlist reportou falha"),
       "error",
@@ -8359,6 +8388,7 @@ function connectWatchlistStream(intervalMs) {
 
     markBrokerFailure(streamBroker, "Stream de watchlist desconectado");
     stopWatchlistStream();
+    startWatchlistStreamFallbackPolling();
     watchlistDiagnostics = {
       ...watchlistDiagnostics,
       mode: "polling",
@@ -9687,6 +9717,8 @@ function applyChartSnapshot(snapshot, options = {}) {
 }
 
 function stopChartLiveStream() {
+  stopChartLiveFallbackPolling();
+
   if (chartLiveStreamBackoffTimer !== null) {
     window.clearTimeout(chartLiveStreamBackoffTimer);
     chartLiveStreamBackoffTimer = null;
@@ -9698,6 +9730,33 @@ function stopChartLiveStream() {
   }
 
   chartLiveStreamKey = "";
+}
+
+function stopChartLiveFallbackPolling() {
+  if (chartLiveFallbackPollTimer === null) {
+    return;
+  }
+
+  window.clearInterval(chartLiveFallbackPollTimer);
+  chartLiveFallbackPollTimer = null;
+}
+
+function startChartLiveFallbackPolling() {
+  if (chartLiveFallbackPollTimer !== null) {
+    return;
+  }
+
+  chartLiveFallbackPollTimer = window.setInterval(() => {
+    if (chartModeSelect?.value !== "live") {
+      stopChartLiveFallbackPolling();
+      return;
+    }
+
+    void loadChart({
+      mode: "live",
+      silent: true,
+    });
+  }, CHART_STREAM_FALLBACK_POLL_MS);
 }
 
 function connectChartLiveStream(intervalMs) {
@@ -9770,6 +9829,7 @@ function connectChartLiveStream(intervalMs) {
     }
 
     markBrokerSuccess(exchange);
+    stopChartLiveFallbackPolling();
     chartLiveStreamReconnectAttempt = 0;
 
     try {
@@ -9796,6 +9856,7 @@ function connectChartLiveStream(intervalMs) {
       ? payload.message
       : "Stream de chart reportou falha";
     markBrokerFailure(exchange, message);
+    startChartLiveFallbackPolling();
     setChartStatus(
       normalizeBrokerApiErrorMessage(message, "Stream de chart reportou falha"),
       "error",
@@ -9813,6 +9874,7 @@ function connectChartLiveStream(intervalMs) {
 
     markBrokerFailure(exchange, "Stream live desconectado");
     stopChartLiveStream();
+    startChartLiveFallbackPolling();
     chartLiveStreamReconnectAttempt += 1;
     const backoffMs = Math.min(30000, 1200 * 2 ** chartLiveStreamReconnectAttempt);
     setChartStatus(`Reconectando stream live em ${Math.round(backoffMs / 1000)}s...`, "loading");
@@ -10172,18 +10234,22 @@ function configureChartAutoRefresh() {
   stopChartAutoRefresh();
 
   if (!chartModeSelect) {
+    stopChartLiveFallbackPolling();
     return;
   }
 
   const refreshIntervalMs = resolveAutoRefreshIntervalMs();
 
   if (refreshIntervalMs <= 0) {
+    stopChartLiveFallbackPolling();
     return;
   }
 
   if (chartModeSelect.value === "live" && connectChartLiveStream(refreshIntervalMs)) {
     return;
   }
+
+  stopChartLiveFallbackPolling();
 
   chartAutoRefreshTimer = window.setInterval(() => {
     void loadChart({
