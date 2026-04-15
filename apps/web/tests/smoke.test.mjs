@@ -116,8 +116,16 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   const mainSource = await readWebFile("src/main.js");
 
   assert.match(mainSource, /const CHART_AUTO_BROKER_STICKY_MS = 180000/);
+  assert.match(mainSource, /const CHART_CONTEXT_SYNC_DEBOUNCE_MS = 280/);
+  assert.match(mainSource, /const TERMINAL_INTERVAL_TO_CHART_RANGE = \{/);
   assert.match(mainSource, /let chartAutoPreferredBroker = "binance";/);
   assert.match(mainSource, /function resolveAutoChartPrimaryBroker\(\)/);
+  assert.match(mainSource, /function resolveChartRangeForTerminalInterval\(interval\)/);
+  assert.match(mainSource, /function syncChartRangeWithTerminalInterval\(interval, options = \{\}\)/);
+  assert.match(mainSource, /function canRunInstitutionalMacroForSymbol\(symbol\)/);
+  assert.match(mainSource, /function syncIntelligenceDeskForCurrentContext\(options = \{\}\)/);
+  assert.match(mainSource, /function scheduleChartContextSync\(options = \{\}\)/);
+  assert.match(mainSource, /if \(pipelineStrategy === "institutional_macro" && !canRunInstitutionalMacroForSymbol\(selectedTerminalSymbol\)\)/);
   assert.match(mainSource, /function updateAutoChartPreferredBroker\(nextBroker, options = \{\}\)/);
   assert.match(mainSource, /if \(requestedBroker === "auto"\) \{/);
   assert.match(mainSource, /const preferredBroker = resolveAutoChartPrimaryBroker\(\);/);
@@ -125,6 +133,16 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /requestCryptoChartEndpoint\(assetId, range, targetMode, "auto"\)/);
   assert.match(mainSource, /AUTO inteligente: ajuste de provider/);
   assert.match(mainSource, /displayProvider: statusBroker,/);
+  assert.match(
+    mainSource,
+    /chartSymbolInput\.addEventListener\("input", \(\) => \{[\s\S]*scheduleChartContextSync\(\{[\s\S]*silent: true,[\s\S]*\}\);/,
+  );
+  assert.match(
+    mainSource,
+    /chartSymbolInput\.addEventListener\("keydown", \(event\) => \{[\s\S]*syncIntelligenceDeskForCurrentContext\(\{[\s\S]*silent: false,[\s\S]*\}\);/,
+  );
+  assert.match(mainSource, /const didSyncRange = syncChartRangeWithTerminalInterval\(intervalShortcut\);/);
+  assert.match(mainSource, /const didSyncRange = syncChartRangeWithTerminalInterval\(interval\);/);
 });
 
 test("styles.css contem classes base do prop desk", async () => {

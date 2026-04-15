@@ -148,6 +148,7 @@ const CHART_AUTO_BROKER_STICKY_MS = 180000;
 const CHART_TRANSIENT_LEGEND_MIN_INTERVAL_MS = 8000;
 const WATCHLIST_STREAM_FALLBACK_POLL_MS = 6000;
 const CHART_STREAM_FALLBACK_POLL_MS = 4000;
+const CHART_CONTEXT_SYNC_DEBOUNCE_MS = 280;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
 const APP_ROUTE_CHAT = "chat";
 const APP_ROUTE_CHART_LAB = "chart-lab";
@@ -189,6 +190,14 @@ const TERMINAL_INTERVAL_SHORTCUTS = {
   Digit4: "240",
   Digit5: "1D",
   Digit6: "1W",
+};
+const TERMINAL_INTERVAL_TO_CHART_RANGE = {
+  1: "24h",
+  5: "24h",
+  60: "7d",
+  240: "30d",
+  "1D": "90d",
+  "1W": "1y",
 };
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").trim().replace(/\/$/, "");
 const CHART_RANGE_LABELS = {
@@ -1455,6 +1464,7 @@ let chartAutoPreferredBrokerLockUntilMs = 0;
 let chartLastTransientLegendMessage = "";
 let chartLastTransientLegendAtMs = 0;
 let chartLiveFallbackPollTimer = null;
+let chartContextSyncTimer = null;
 let isChartLoading = false;
 let chartApi = null;
 let chartBaseSeries = null;
@@ -1618,6 +1628,16 @@ function resolveChartPipelineStrategy(symbol) {
   }
 
   return "institutional_macro";
+}
+
+function canRunInstitutionalMacroForSymbol(symbol) {
+  const normalizedSymbol = sanitizeTerminalSymbol(symbol);
+
+  if (isLikelyForexPairSymbol(normalizedSymbol)) {
+    return true;
+  }
+
+  return INSTITUTIONAL_MACRO_MODULES.has(chartSymbolSourceModule);
 }
 
 function applyExternalSymbolChartState(symbol, options = {}) {
@@ -7746,6 +7766,67 @@ function setActiveTerminalInterval(interval) {
   });
 }
 
+function resolveChartRangeForTerminalInterval(interval) {
+  const normalizedInterval = TERMINAL_INTERVAL_SET.has(interval) ? interval : "60";
+  return TERMINAL_INTERVAL_TO_CHART_RANGE[normalizedInterval] ?? "7d";
+}
+
+function syncChartRangeWithTerminalInterval(interval, options = {}) {
+  if (!(chartRangeSelect instanceof HTMLSelectElement)) {
+    return false;
+  }
+
+  const nextRange = resolveChartRangeForTerminalInterval(interval);
+
+  if (!isValueInSelect(chartRangeSelect, nextRange) || chartRangeSelect.value === nextRange) {
+    return false;
+  }
+
+  chartRangeSelect.value = nextRange;
+
+  if (options.announce === true) {
+    const rangeLabel = CHART_RANGE_LABELS[nextRange] ?? nextRange;
+    setChartLegend(`Janela sincronizada para ${rangeLabel}.`);
+  }
+
+  return true;
+}
+
+function syncIntelligenceDeskForCurrentContext(options = {}) {
+  const silent = options.silent === true;
+
+  if (isChartLoading) {
+    scheduleChartContextSync({
+      delayMs: 140,
+      silent,
+    });
+    return;
+  }
+
+  void loadChart({
+    silent,
+  });
+}
+
+function scheduleChartContextSync(options = {}) {
+  const silent = options.silent !== false;
+  const requestedDelay = Number.isFinite(options.delayMs)
+    ? Number(options.delayMs)
+    : CHART_CONTEXT_SYNC_DEBOUNCE_MS;
+  const delayMs = Math.max(0, requestedDelay);
+
+  if (chartContextSyncTimer !== null) {
+    window.clearTimeout(chartContextSyncTimer);
+  }
+
+  chartContextSyncTimer = window.setTimeout(() => {
+    chartContextSyncTimer = null;
+    syncIntelligenceDeskForCurrentContext({
+      silent,
+    });
+  }, delayMs);
+}
+
 function getSelectedTerminalStyle() {
   const rawStyle = chartStyleSelect instanceof HTMLSelectElement ? chartStyleSelect.value : "candles";
 
@@ -9077,6 +9158,11 @@ function destroyInteractiveChart() {
     terminalRefreshTimer = null;
   }
 
+  if (chartContextSyncTimer !== null) {
+    window.clearTimeout(chartContextSyncTimer);
+    chartContextSyncTimer = null;
+  }
+
   stopChartAutoRefresh();
   stopWatchlistAutoRefresh();
 
@@ -10272,6 +10358,14 @@ async function loadChart(options = {}) {
   const range = options.range ?? chartRangeSelect.value;
   const silent = options.silent === true;
 
+  if (pipelineStrategy === "institutional_macro" && !canRunInstitutionalMacroForSymbol(selectedTerminalSymbol)) {
+    stopChartLiveStream();
+    applyExternalSymbolChartState(selectedTerminalSymbol, {
+      silent,
+    });
+    return;
+  }
+
   isChartLoading = true;
 
   if (chartRefreshButton instanceof HTMLButtonElement && !silent) {
@@ -11133,9 +11227,20 @@ function setupChartKeyboardShortcuts() {
     if (event.altKey && !event.metaKey && !event.ctrlKey && intervalShortcut) {
       event.preventDefault();
       setActiveTerminalInterval(intervalShortcut);
+      const didSyncRange = syncChartRangeWithTerminalInterval(intervalShortcut);
+
+      if (didSyncRange) {
+        configureChartAutoRefresh();
+        syncIntelligenceDeskForCurrentContext({
+          silent: true,
+        });
+      }
+
       scheduleTradingViewRefresh();
       saveChartPreferences();
-      setChartLegend(`Atalho ativo: intervalo ${intervalShortcut}`);
+      const linkedRange = CHART_RANGE_LABELS[resolveChartRangeForTerminalInterval(intervalShortcut)]
+        ?? resolveChartRangeForTerminalInterval(intervalShortcut);
+      setChartLegend(`Atalho ativo: intervalo ${intervalShortcut} • janela ${linkedRange}`);
       return;
     }
 
@@ -11375,6 +11480,9 @@ function setupChartLab() {
         getSelectedTerminalExchange(),
       );
       renderWatchlist();
+      scheduleChartContextSync({
+        silent: true,
+      });
       scheduleTradingViewRefresh();
       saveChartPreferences();
     });
@@ -11386,6 +11494,9 @@ function setupChartLab() {
 
       event.preventDefault();
       chartSymbolInput.blur();
+      syncIntelligenceDeskForCurrentContext({
+        silent: false,
+      });
       scheduleTradingViewRefresh();
       saveChartPreferences();
     });
@@ -11481,6 +11592,15 @@ function setupChartLab() {
       }
 
       setActiveTerminalInterval(interval);
+      const didSyncRange = syncChartRangeWithTerminalInterval(interval);
+
+      if (didSyncRange) {
+        configureChartAutoRefresh();
+        syncIntelligenceDeskForCurrentContext({
+          silent: true,
+        });
+      }
+
       scheduleTradingViewRefresh();
       saveChartPreferences();
     });
