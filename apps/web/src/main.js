@@ -140,6 +140,8 @@ const WATCHLIST_RISK_SUMMARY_COLLAPSED_STORAGE_KEY = "botfinanceiro.chart.watchl
 const MAX_STORED_MESSAGES = 60;
 const MAX_RECENT_HISTORY_ITEMS = 8;
 const MAX_CONVERSATIONS = 60;
+const MARKET_HTTP_RETRY_MAX_ATTEMPTS = 3;
+const MARKET_HTTP_RETRY_BASE_DELAY_MS = 280;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
 const APP_ROUTE_CHAT = "chat";
 const APP_ROUTE_CHART_LAB = "chart-lab";
@@ -1261,6 +1263,7 @@ const EXCHANGE_TO_BROKER = {
   KRAKEN: "kraken",
   OKX: "okx",
 };
+const BROKER_FAILOVER_ORDER = ["binance", "bybit", "coinbase", "kraken", "okx"];
 const EXCHANGES_WITH_NATIVE_LIVE = new Set(["BINANCE", "BYBIT", "COINBASE", "KRAKEN", "OKX"]);
 const INSTITUTIONAL_MACRO_MODULES = new Set([
   "b3",
@@ -7907,7 +7910,7 @@ function normalizeAssetIds(assetIds) {
 
 async function requestBrokerLiveQuoteBatch(assetIds, broker) {
   const normalizedAssetIds = normalizeAssetIds(assetIds);
-  const normalizedBroker = typeof broker === "string" && broker.length > 0 ? broker : "binance";
+  const normalizedBroker = normalizeBrokerName(broker);
 
   if (normalizedAssetIds.length === 0) {
     return {
@@ -7921,34 +7924,72 @@ async function requestBrokerLiveQuoteBatch(assetIds, broker) {
     };
   }
 
-  const response = await fetch(
-    buildApiUrl(
-      `/v1/brokers/live-quote/batch?broker=${encodeURIComponent(normalizedBroker)}&assetIds=${encodeURIComponent(normalizedAssetIds.join(","))}`,
-    ),
-    {
-      method: "GET",
-    },
-  );
+  return runMarketRequestWithRetry(async () => {
+    const response = await fetch(
+      buildApiUrl(
+        `/v1/brokers/live-quote/batch?broker=${encodeURIComponent(normalizedBroker)}&assetIds=${encodeURIComponent(normalizedAssetIds.join(","))}`,
+      ),
+      {
+        method: "GET",
+      },
+    );
 
-  let payload = null;
+    let payload = null;
 
-  try {
-    payload = await response.json();
-  } catch {
-    payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    if (!response.ok) {
+      const message = payload?.error?.message;
+      throw new Error(
+        normalizeBrokerApiErrorMessage(message, "Falha ao consultar batch do broker"),
+      );
+    }
+
+    return payload?.data ?? null;
+  });
+}
+
+async function requestBrokerLiveQuoteBatchWithFailover(assetIds, broker) {
+  const normalizedPrimaryBroker = normalizeBrokerName(broker);
+  const failoverChain = buildBrokerFailoverChain(normalizedPrimaryBroker);
+  const failures = [];
+
+  for (const candidateBroker of failoverChain) {
+    try {
+      const batch = await requestBrokerLiveQuoteBatch(assetIds, candidateBroker);
+      const failoverReason = candidateBroker === normalizedPrimaryBroker
+        ? ""
+        : `Failover da watchlist: ${normalizedPrimaryBroker.toUpperCase()} -> ${candidateBroker.toUpperCase()}`;
+
+      return {
+        batch,
+        failoverReason,
+        resolvedBroker: candidateBroker,
+      };
+    } catch (error) {
+      const message = getErrorMessage(error, "Falha ao consultar batch do broker");
+      failures.push({
+        broker: candidateBroker,
+        message,
+      });
+
+      if (!isRetryableMarketApiErrorMessage(message)) {
+        throw new Error(normalizeBrokerApiErrorMessage(message, "Falha na sincronizacao da watchlist"));
+      }
+    }
   }
 
-  if (!response.ok) {
-    const message = payload?.error?.message;
-    throw new Error(typeof message === "string" ? message : "Falha ao consultar batch do broker");
-  }
-
-  return payload?.data ?? null;
+  const lastFailure = failures[failures.length - 1];
+  throw new Error(normalizeBrokerApiErrorMessage(lastFailure?.message, "Falha na sincronizacao da watchlist"));
 }
 
 function buildBrokerLiveQuoteStreamUrl(assetIds, broker, intervalMs) {
   const normalizedAssetIds = normalizeAssetIds(assetIds);
-  const normalizedBroker = typeof broker === "string" && broker.length > 0 ? broker : "binance";
+  const normalizedBroker = normalizeBrokerName(broker);
   const safeIntervalMs = Number.isFinite(intervalMs) ? Math.max(2000, Math.min(60000, intervalMs)) : 10000;
   const params = new URLSearchParams({
     assetIds: normalizedAssetIds.join(","),
@@ -7973,34 +8014,40 @@ async function requestSpotPriceBatch(assetIds) {
     };
   }
 
-  const response = await fetch(
-    buildApiUrl(
-      `/v1/crypto/spot-price/batch?assetIds=${encodeURIComponent(normalizedAssetIds.join(","))}&currency=usd`,
-    ),
-    {
-      method: "GET",
-    },
-  );
+  return runMarketRequestWithRetry(async () => {
+    const response = await fetch(
+      buildApiUrl(
+        `/v1/crypto/spot-price/batch?assetIds=${encodeURIComponent(normalizedAssetIds.join(","))}&currency=usd`,
+      ),
+      {
+        method: "GET",
+      },
+    );
 
-  let payload = null;
+    let payload = null;
 
-  try {
-    payload = await response.json();
-  } catch {
-    payload = null;
-  }
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
 
-  if (!response.ok) {
-    const message = payload?.error?.message;
-    throw new Error(typeof message === "string" ? message : "Falha ao consultar batch spot fallback");
-  }
+    if (!response.ok) {
+      const message = payload?.error?.message;
+      throw new Error(
+        normalizeBrokerApiErrorMessage(message, "Falha ao consultar batch spot fallback"),
+      );
+    }
 
-  return payload?.data ?? null;
+    return payload?.data ?? null;
+  });
 }
 
 async function applyWatchlistBatchSnapshot(brokerBatch, options = {}) {
   const silent = options.silent === true;
   const transportMode = options.transport === "stream" ? "stream" : "polling";
+  const resolvedBroker = normalizeBrokerName(options.resolvedBroker ?? getSelectedBroker());
+  const failoverReason = typeof options.failoverReason === "string" ? options.failoverReason : "";
   const measuredLatencyMs =
     typeof options.latencyMs === "number" && Number.isFinite(options.latencyMs)
       ? Math.max(0, options.latencyMs)
@@ -8111,13 +8158,13 @@ async function applyWatchlistBatchSnapshot(brokerBatch, options = {}) {
   watchlistLastUpdatedAt = new Date().toISOString();
   renderWatchlist();
 
-  const selectedBroker = getSelectedBroker();
-  const statusLabel = `${successCount}/${TERMINAL_WATCHLIST.length} live • fb ${fallbackCount} • cfg ${unavailableCount} • err ${errorCount} • broker ${selectedBroker} • ${formatShortTime(watchlistLastUpdatedAt)}`;
+  const failoverLabel = failoverReason.length > 0 ? " • failover" : "";
+  const statusLabel = `${successCount}/${TERMINAL_WATCHLIST.length} live • fb ${fallbackCount} • cfg ${unavailableCount} • err ${errorCount} • broker ${resolvedBroker}${failoverLabel} • ${formatShortTime(watchlistLastUpdatedAt)}`;
   setWatchlistStatus(statusLabel);
 
   watchlistDiagnostics = {
     ...watchlistDiagnostics,
-    broker: selectedBroker,
+    broker: resolvedBroker,
     errorCount,
     fallbackCount,
     latencyMs:
@@ -8133,7 +8180,11 @@ async function applyWatchlistBatchSnapshot(brokerBatch, options = {}) {
   renderWatchlistDiagnostics();
 
   if (!silent) {
-    setChartLegend(`Watchlist sincronizada: ${statusLabel}`);
+    if (failoverReason.length > 0) {
+      setChartLegend(`Watchlist sincronizada com contingencia: ${failoverReason}.`, "warn");
+    } else {
+      setChartLegend(`Watchlist sincronizada: ${statusLabel}`);
+    }
   }
 }
 
@@ -8150,18 +8201,23 @@ async function refreshWatchlistMarket(options = {}) {
     const requestedAssetIds = TERMINAL_WATCHLIST.map((item) => item.assetId);
     const selectedBroker = getSelectedBroker();
     const startedAt = performance.now();
-    const brokerBatch = await requestBrokerLiveQuoteBatch(requestedAssetIds, selectedBroker);
-    await applyWatchlistBatchSnapshot(brokerBatch, {
+    const brokerResult = await requestBrokerLiveQuoteBatchWithFailover(requestedAssetIds, selectedBroker);
+    await applyWatchlistBatchSnapshot(brokerResult.batch, {
+      failoverReason: brokerResult.failoverReason,
       latencyMs: performance.now() - startedAt,
+      resolvedBroker: brokerResult.resolvedBroker,
       silent,
       transport: "polling",
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Falha na sincronizacao da watchlist";
+    const message = normalizeBrokerApiErrorMessage(
+      getErrorMessage(error, "Falha na sincronizacao da watchlist"),
+      "Falha na sincronizacao da watchlist",
+    );
     setWatchlistStatus(message, "error");
     watchlistDiagnostics = {
       ...watchlistDiagnostics,
-      broker: getSelectedBroker(),
+      broker: normalizeBrokerName(getSelectedBroker()),
       mode: "polling",
     };
     renderWatchlistDiagnostics();
@@ -8250,7 +8306,10 @@ function connectWatchlistStream(intervalMs) {
     const message = typeof payload?.message === "string"
       ? payload.message
       : "Stream de watchlist reportou falha";
-    setWatchlistStatus(message, "error");
+    setWatchlistStatus(
+      normalizeBrokerApiErrorMessage(message, "Stream de watchlist reportou falha"),
+      "error",
+    );
   });
 
   eventSource.onerror = () => {
@@ -9115,7 +9174,85 @@ function renderChartMetrics(snapshot) {
   renderDeepAnalysisPanel(snapshot);
 }
 
-function normalizeChartApiErrorMessage(message, fallbackMessage) {
+function normalizeBrokerName(broker) {
+  if (typeof broker !== "string") {
+    return "binance";
+  }
+
+  const normalized = broker.trim().toLowerCase();
+  return BROKER_FAILOVER_ORDER.includes(normalized) ? normalized : "binance";
+}
+
+function resolveExchangeLabelFromBroker(broker) {
+  const normalizedBroker = normalizeBrokerName(broker);
+
+  if (normalizedBroker === "bybit") {
+    return "BYBIT";
+  }
+
+  if (normalizedBroker === "coinbase") {
+    return "COINBASE";
+  }
+
+  if (normalizedBroker === "kraken") {
+    return "KRAKEN";
+  }
+
+  if (normalizedBroker === "okx") {
+    return "OKX";
+  }
+
+  return "BINANCE";
+}
+
+function buildBrokerFailoverChain(primaryBroker) {
+  const normalizedPrimary = normalizeBrokerName(primaryBroker);
+  const chain = [normalizedPrimary];
+
+  for (const candidate of BROKER_FAILOVER_ORDER) {
+    if (candidate === normalizedPrimary) {
+      continue;
+    }
+
+    chain.push(candidate);
+  }
+
+  return chain;
+}
+
+function getErrorMessage(error, fallbackMessage) {
+  return error instanceof Error && typeof error.message === "string" && error.message.length > 0
+    ? error.message
+    : fallbackMessage;
+}
+
+function isRetryableMarketApiErrorMessage(message) {
+  if (typeof message !== "string") {
+    return true;
+  }
+
+  const normalized = message.toLowerCase();
+
+  if (
+    normalized.includes("non-success status")
+    || normalized.includes("failed to fetch")
+    || normalized.includes("network")
+    || normalized.includes("timeout")
+    || normalized.includes("temporarily unavailable")
+    || normalized.includes("service unavailable")
+    || normalized.includes("gateway timeout")
+    || normalized.includes("too many requests")
+    || normalized.includes("bad gateway")
+    || normalized.includes("indisponivel")
+    || normalized.includes("request failed")
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function normalizeBrokerApiErrorMessage(message, fallbackMessage) {
   if (typeof message !== "string") {
     return fallbackMessage;
   }
@@ -9123,66 +9260,174 @@ function normalizeChartApiErrorMessage(message, fallbackMessage) {
   const normalizedMessage = message.toLowerCase();
 
   if (normalizedMessage.includes("returned a non-success status")) {
-    return "Dados de mercado indisponiveis no momento. Tentando fallback automatico.";
+    return "Provedor de mercado indisponivel no momento. Failover automatico ativado.";
   }
 
   if (normalizedMessage.includes("failed to fetch") || normalizedMessage.includes("network")) {
-    return "Falha de rede ao consultar dados de mercado.";
+    return "Falha de rede ao consultar provedores de mercado.";
+  }
+
+  if (normalizedMessage.includes("too many requests")) {
+    return "Provedor de mercado saturado (rate limit). Aplicando contingencia automatica.";
+  }
+
+  if (normalizedMessage.includes("timeout")) {
+    return "Timeout no provedor de mercado. Reprocessando em rota de contingencia.";
   }
 
   return message;
 }
 
+function normalizeChartApiErrorMessage(message, fallbackMessage) {
+  return normalizeBrokerApiErrorMessage(
+    message,
+    fallbackMessage,
+  );
+}
+
+function waitFor(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+async function runMarketRequestWithRetry(requestFactory, options = {}) {
+  const maxAttempts = Number.isInteger(options.maxAttempts)
+    ? Math.max(1, options.maxAttempts)
+    : MARKET_HTTP_RETRY_MAX_ATTEMPTS;
+  const baseDelayMs = Number.isFinite(options.baseDelayMs)
+    ? Math.max(80, options.baseDelayMs)
+    : MARKET_HTTP_RETRY_BASE_DELAY_MS;
+
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await requestFactory();
+    } catch (error) {
+      lastError = error;
+
+      const message = getErrorMessage(error, "Falha no provedor de mercado");
+      const canRetry = attempt < maxAttempts && isRetryableMarketApiErrorMessage(message);
+
+      if (!canRetry) {
+        throw error;
+      }
+
+      const jitterMs = Math.round(Math.random() * 120);
+      const backoffMs = Math.min(3000, Math.round(baseDelayMs * 2 ** (attempt - 1)) + jitterMs);
+      await waitFor(backoffMs);
+    }
+  }
+
+  throw lastError ?? new Error("Falha ao consultar provedor de mercado");
+}
+
 async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "binance") {
-  const normalizedExchange = typeof exchange === "string" && exchange.length > 0 ? exchange : "binance";
-  const normalizedMode = mode === "live" ? "live" : "delayed";
-  const params = new URLSearchParams({
-    assetId,
-    exchange: normalizedExchange,
-    mode: normalizedMode,
-    range,
+  return runMarketRequestWithRetry(async () => {
+    const normalizedExchange = normalizeBrokerName(exchange);
+    const normalizedMode = mode === "live" ? "live" : "delayed";
+    const params = new URLSearchParams({
+      assetId,
+      exchange: normalizedExchange,
+      mode: normalizedMode,
+      range,
+    });
+    const response = await fetch(buildApiUrl(`/v1/crypto/strategy-chart?${params.toString()}`), {
+      method: "GET",
+    });
+
+    let payload = null;
+
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    if (!response.ok) {
+      const errorMessage = payload?.error?.message;
+      throw new Error(normalizeChartApiErrorMessage(errorMessage, "Nao foi possivel carregar o grafico"));
+    }
+
+    return payload?.data ?? null;
   });
-  const response = await fetch(buildApiUrl(`/v1/crypto/strategy-chart?${params.toString()}`), {
-    method: "GET",
-  });
-
-  let payload = null;
-
-  try {
-    payload = await response.json();
-  } catch {
-    payload = null;
-  }
-
-  if (!response.ok) {
-    const errorMessage = payload?.error?.message;
-    throw new Error(normalizeChartApiErrorMessage(errorMessage, "Nao foi possivel carregar o grafico"));
-  }
-
-  return payload?.data ?? null;
 }
 
 async function requestCryptoChart(assetId, range, mode, exchange) {
-  try {
-    const snapshot = await requestCryptoChartEndpoint(assetId, range, mode, exchange);
+  const requestedBroker = normalizeBrokerName(exchange);
+  const primaryChain = mode === "live"
+    ? buildBrokerFailoverChain(requestedBroker)
+    : [requestedBroker];
+  const failureTrail = [];
 
-    return {
-      fallbackReason: "",
-      snapshot,
-    };
-  } catch (error) {
-    if (mode !== "live") {
-      throw error;
+  const tryResolveSnapshot = async (targetMode, brokerChain) => {
+    for (const broker of brokerChain) {
+      try {
+        const snapshot = await requestCryptoChartEndpoint(assetId, range, targetMode, broker);
+        return {
+          broker,
+          mode: targetMode,
+          snapshot,
+        };
+      } catch (error) {
+        const message = getErrorMessage(error, "Falha ao consultar grafico");
+        failureTrail.push({
+          broker,
+          message,
+        });
+
+        if (!isRetryableMarketApiErrorMessage(message)) {
+          throw error;
+        }
+      }
     }
 
-    const fallbackSnapshot = await requestCryptoChartEndpoint(assetId, range, "delayed", exchange);
+    return null;
+  };
+
+  const liveOrDelayedSnapshot = await tryResolveSnapshot(mode === "live" ? "live" : "delayed", primaryChain);
+
+  if (liveOrDelayedSnapshot) {
+    const usedFailoverBroker = liveOrDelayedSnapshot.broker !== requestedBroker;
+    const fallbackReason = usedFailoverBroker
+      ? `Failover de corretora ativo: ${requestedBroker.toUpperCase()} -> ${liveOrDelayedSnapshot.broker.toUpperCase()}`
+      : "";
 
     return {
-      fallbackReason:
-        error instanceof Error ? error.message : "Live indisponivel, fallback delayed acionado",
-      snapshot: fallbackSnapshot,
+      fallbackReason,
+      resolvedBroker: liveOrDelayedSnapshot.broker,
+      resolvedMode: liveOrDelayedSnapshot.mode,
+      snapshot: liveOrDelayedSnapshot.snapshot,
     };
   }
+
+  if (mode !== "live") {
+    const lastFailure = failureTrail[failureTrail.length - 1];
+    throw new Error(normalizeChartApiErrorMessage(lastFailure?.message, "Nao foi possivel carregar o grafico"));
+  }
+
+  const delayedSnapshot = await tryResolveSnapshot("delayed", buildBrokerFailoverChain(requestedBroker));
+
+  if (delayedSnapshot) {
+    const usedFailoverBroker = delayedSnapshot.broker !== requestedBroker;
+    const fallbackReasonParts = [
+      "Live indisponivel, fallback delayed acionado",
+      usedFailoverBroker
+        ? `rota de contingencia ${requestedBroker.toUpperCase()} -> ${delayedSnapshot.broker.toUpperCase()}`
+        : "",
+    ].filter((item) => item.length > 0);
+
+    return {
+      fallbackReason: fallbackReasonParts.join(" • "),
+      resolvedBroker: delayedSnapshot.broker,
+      resolvedMode: delayedSnapshot.mode,
+      snapshot: delayedSnapshot.snapshot,
+    };
+  }
+
+  const lastFailure = failureTrail[failureTrail.length - 1];
+  throw new Error(normalizeChartApiErrorMessage(lastFailure?.message, "Nao foi possivel carregar o grafico"));
 }
 
 async function requestInstitutionalMacroSnapshot(symbol, range, mode, moduleName = "forex") {
@@ -9409,7 +9654,10 @@ function connectChartLiveStream(intervalMs) {
     const message = typeof payload?.message === "string"
       ? payload.message
       : "Stream de chart reportou falha";
-    setChartStatus(message, "error");
+    setChartStatus(
+      normalizeBrokerApiErrorMessage(message, "Stream de chart reportou falha"),
+      "error",
+    );
   });
 
   eventSource.onerror = () => {
@@ -9660,11 +9908,20 @@ async function loadChart(options = {}) {
       return;
     }
 
-    const { fallbackReason, snapshot } = await requestCryptoChart(assetId, range, mode, selectedBroker);
+    const { fallbackReason, resolvedBroker, snapshot } = await requestCryptoChart(
+      assetId,
+      range,
+      mode,
+      selectedBroker,
+    );
+    const selectedExchangeForStatus = typeof resolvedBroker === "string"
+      ? resolveExchangeLabelFromBroker(resolvedBroker)
+      : selectedExchange;
+
     applyChartSnapshot(snapshot, {
       fallbackReason,
       forcedModeReason,
-      selectedExchange,
+      selectedExchange: selectedExchangeForStatus,
       transport: "polling",
     });
   } catch (error) {

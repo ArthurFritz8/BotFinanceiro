@@ -44,6 +44,10 @@ test("main.js inicializa estado, aba e render da gestao de risco", async () => {
   assert.match(mainSource, /function saveWatchlistRiskSummaryCollapsed\(\)/);
   assert.match(mainSource, /classList\.toggle\("is-collapsed", isCollapsed\)/);
   assert.match(mainSource, /watchlist-risk-collapse/);
+  assert.match(mainSource, /const BROKER_FAILOVER_ORDER = \["binance", "bybit", "coinbase", "kraken", "okx"\]/);
+  assert.match(mainSource, /function buildBrokerFailoverChain\(primaryBroker\)/);
+  assert.match(mainSource, /function runMarketRequestWithRetry\(requestFactory, options = \{\}\)/);
+  assert.match(mainSource, /requestBrokerLiveQuoteBatchWithFailover\(/);
   assert.match(mainSource, /openRiskManagementTab\(\{[\s\S]*scroll: true,[\s\S]*\}\);/);
   assert.match(mainSource, /if \(lowerKey === "g"\)/);
   assert.match(mainSource, /function setupPropDesk\(\)/);
