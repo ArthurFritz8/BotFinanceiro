@@ -8227,14 +8227,6 @@ async function applyWatchlistBatchSnapshot(brokerBatch, options = {}) {
     unavailableCount,
   };
   renderWatchlistDiagnostics();
-
-  if (!silent) {
-    if (failoverReason.length > 0) {
-      setChartLegend(`Watchlist sincronizada com contingencia: ${failoverReason}.`, "warn");
-    } else {
-      setChartLegend(`Watchlist sincronizada: ${statusLabel}`);
-    }
-  }
 }
 
 async function refreshWatchlistMarket(options = {}) {
@@ -8274,10 +8266,6 @@ async function refreshWatchlistMarket(options = {}) {
       mode: "polling",
     };
     renderWatchlistDiagnostics();
-
-    if (!silent) {
-      setChartLegend(message, "error");
-    }
   } finally {
     isWatchlistLoading = false;
     setWatchlistLoadingState(false);
@@ -10178,10 +10166,6 @@ async function loadChart(options = {}) {
     setChartStatus("Atualizando dados de grafico...", "loading");
   } else {
     clearChartErrorStatusMode();
-
-    if (chartViewMode === "tv") {
-      setChartStatus(buildTerminalReadyStatus());
-    }
   }
 
   try {
