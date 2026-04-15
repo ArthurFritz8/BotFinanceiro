@@ -84,6 +84,14 @@ const chartMetricsElement = document.querySelector("#chart-metrics");
 const chartAnalyzeButton = document.querySelector("#chart-analyze-button");
 const analysisPanel = document.querySelector("#analysis-panel");
 const analysisStatusElement = document.querySelector("#analysis-status");
+const intelligenceSyncOpsPanelElement = document.querySelector("#intelligence-sync-ops");
+const intelligenceSyncOpsBadgeElement = document.querySelector("#intelligence-sync-ops-badge");
+const intelligenceSyncOpsStatusElement = document.querySelector("#intelligence-sync-ops-status");
+const intelligenceSyncOpsSuccessRateElement = document.querySelector("#intelligence-sync-ops-success-rate");
+const intelligenceSyncOpsP95Element = document.querySelector("#intelligence-sync-ops-p95");
+const intelligenceSyncOpsAvgElement = document.querySelector("#intelligence-sync-ops-avg");
+const intelligenceSyncOpsRequestsElement = document.querySelector("#intelligence-sync-ops-requests");
+const intelligenceSyncOpsUpdatedElement = document.querySelector("#intelligence-sync-ops-updated");
 const analysisSignalCardElement = document.querySelector("#analysis-signal-card");
 const analysisContextCardElement = document.querySelector("#analysis-context-card");
 const analysisTabsElement = document.querySelector("#analysis-tabs");
@@ -156,6 +164,10 @@ const INTELLIGENCE_SYNC_ALERT_WARNING_SUCCESS_RATE_PERCENT = 95;
 const INTELLIGENCE_SYNC_ALERT_CRITICAL_SUCCESS_RATE_PERCENT = 90;
 const INTELLIGENCE_SYNC_ALERT_MIN_INTERVAL_MS = 45000;
 const INTELLIGENCE_SYNC_TELEMETRY_ENDPOINT = "/v1/crypto/intelligence-sync/telemetry";
+const INTELLIGENCE_SYNC_HEALTH_ENDPOINT = "/internal/health/intelligence-sync";
+const INTELLIGENCE_SYNC_HEALTH_REFRESH_MS = 20000;
+const INTELLIGENCE_SYNC_HEALTH_STALE_AFTER_MS = 90000;
+const INTELLIGENCE_SYNC_INTERNAL_TOKEN = (import.meta.env.VITE_INTERNAL_API_TOKEN ?? "").trim();
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
 const APP_ROUTE_CHAT = "chat";
 const APP_ROUTE_CHART_LAB = "chart-lab";
@@ -1478,6 +1490,10 @@ let intelligenceSyncActiveCorrelationId = "";
 let intelligenceSyncAlertLevel = "ok";
 let intelligenceSyncLastAlertAtMs = 0;
 let intelligenceSyncLatencySamplesMs = [];
+let intelligenceSyncHealthPollTimer = null;
+let intelligenceSyncHealthInFlight = false;
+let intelligenceSyncBackendHealthSnapshot = null;
+let intelligenceSyncBackendHealthError = "";
 let intelligenceSyncMetrics = {
   alertLevel: "ok",
   averageLatencyMs: 0,
@@ -1957,6 +1973,7 @@ function navigateToRoute(route, options = {}) {
   const safeRoute = normalizeAppRoute(route);
   activeAppRoute = safeRoute;
   setRouteVisibility(safeRoute);
+  handleIntelligenceSyncOpsRouteChange(safeRoute);
   updateActiveRouteButton(safeRoute);
 
   if (options.persist !== false) {
@@ -7858,6 +7875,269 @@ function resolveIntelligenceSyncAlertLevel(summary) {
   return "ok";
 }
 
+function normalizeIntelligenceSyncThresholds(thresholds) {
+  return {
+    criticalP95LatencyMs: Number.isFinite(thresholds?.criticalP95LatencyMs)
+      ? Math.max(0, Number(thresholds.criticalP95LatencyMs))
+      : INTELLIGENCE_SYNC_ALERT_CRITICAL_P95_MS,
+    criticalSuccessRatePercent: Number.isFinite(thresholds?.criticalSuccessRatePercent)
+      ? clampNumber(Number(thresholds.criticalSuccessRatePercent), 0, 100)
+      : INTELLIGENCE_SYNC_ALERT_CRITICAL_SUCCESS_RATE_PERCENT,
+    warningP95LatencyMs: Number.isFinite(thresholds?.warningP95LatencyMs)
+      ? Math.max(0, Number(thresholds.warningP95LatencyMs))
+      : INTELLIGENCE_SYNC_ALERT_WARNING_P95_MS,
+    warningSuccessRatePercent: Number.isFinite(thresholds?.warningSuccessRatePercent)
+      ? clampNumber(Number(thresholds.warningSuccessRatePercent), 0, 100)
+      : INTELLIGENCE_SYNC_ALERT_WARNING_SUCCESS_RATE_PERCENT,
+  };
+}
+
+function normalizeIntelligenceSyncSummary(summary = {}) {
+  const requests = Number.isFinite(summary?.requests) ? Math.max(0, Number(summary.requests)) : 0;
+  const p95LatencyMs = Number.isFinite(summary?.p95LatencyMs) ? Math.max(0, Number(summary.p95LatencyMs)) : 0;
+  const averageLatencyMs = Number.isFinite(summary?.averageLatencyMs)
+    ? Math.max(0, Number(summary.averageLatencyMs))
+    : 0;
+  const successRatePercent = Number.isFinite(summary?.successRatePercent)
+    ? clampNumber(Number(summary.successRatePercent), 0, 100)
+    : 0;
+  const lastRecordedAt = typeof summary?.lastRecordedAt === "string" && summary.lastRecordedAt.length > 0
+    ? summary.lastRecordedAt
+    : (typeof summary?.lastSyncedAt === "string" && summary.lastSyncedAt.length > 0 ? summary.lastSyncedAt : "");
+  const fallbackAlertLevel = resolveIntelligenceSyncAlertLevel({
+    p95LatencyMs,
+    requests,
+    successRatePercent,
+  });
+  const alertLevel = summary?.alertLevel === "ok" || summary?.alertLevel === "warning" || summary?.alertLevel === "critical"
+    ? summary.alertLevel
+    : fallbackAlertLevel;
+
+  return {
+    alertLevel,
+    averageLatencyMs: Number(averageLatencyMs.toFixed(2)),
+    lastRecordedAt,
+    p95LatencyMs: Number(p95LatencyMs.toFixed(2)),
+    requests,
+    successRatePercent: Number(successRatePercent.toFixed(2)),
+  };
+}
+
+function resolveLocalIntelligenceSyncOpsSnapshot() {
+  const summary = normalizeIntelligenceSyncSummary({
+    alertLevel: intelligenceSyncMetrics.alertLevel,
+    averageLatencyMs: intelligenceSyncMetrics.averageLatencyMs,
+    lastRecordedAt: intelligenceSyncMetrics.lastSyncedAt,
+    p95LatencyMs: intelligenceSyncMetrics.p95LatencyMs,
+    requests: intelligenceSyncMetrics.requests,
+    successRatePercent: intelligenceSyncMetrics.successRatePercent,
+  });
+
+  return {
+    generatedAt: summary.lastRecordedAt.length > 0 ? summary.lastRecordedAt : new Date().toISOString(),
+    source: "local",
+    summary,
+    thresholds: normalizeIntelligenceSyncThresholds(undefined),
+  };
+}
+
+function resolveIntelligenceSyncOpsSnapshot() {
+  const hasFreshBackendSnapshot =
+    intelligenceSyncBackendHealthSnapshot
+    && Date.now() - intelligenceSyncBackendHealthSnapshot.fetchedAtMs <= INTELLIGENCE_SYNC_HEALTH_STALE_AFTER_MS;
+
+  if (hasFreshBackendSnapshot) {
+    return intelligenceSyncBackendHealthSnapshot;
+  }
+
+  return resolveLocalIntelligenceSyncOpsSnapshot();
+}
+
+function formatIntelligenceSyncOpsAlertLabel(level) {
+  if (level === "critical") {
+    return "CRITICO";
+  }
+
+  if (level === "warning") {
+    return "WARNING";
+  }
+
+  return "OK";
+}
+
+function buildIntelligenceSyncOpsStatusMessage(snapshot) {
+  const summary = snapshot.summary;
+
+  if (summary.requests <= 0) {
+    const baseMessage = "Aguardando primeiro ciclo de sincronizacao.";
+
+    if (INTELLIGENCE_SYNC_INTERNAL_TOKEN.length < 16) {
+      return `${baseMessage} Backend health requer VITE_INTERNAL_API_TOKEN.`;
+    }
+
+    if (snapshot.source === "local" && intelligenceSyncBackendHealthError.length > 0) {
+      return `${baseMessage} Backend health indisponivel; mantendo telemetria local.`;
+    }
+
+    return baseMessage;
+  }
+
+  if (summary.alertLevel === "critical") {
+    return `SLA critico: p95 ${summary.p95LatencyMs.toFixed(2)}ms e sucesso ${summary.successRatePercent.toFixed(2)}%.`;
+  }
+
+  if (summary.alertLevel === "warning") {
+    return `SLA em atencao: p95 ${summary.p95LatencyMs.toFixed(2)}ms e sucesso ${summary.successRatePercent.toFixed(2)}%.`;
+  }
+
+  return `SLA estavel: p95 ${summary.p95LatencyMs.toFixed(2)}ms e sucesso ${summary.successRatePercent.toFixed(2)}%.`;
+}
+
+function renderIntelligenceSyncOpsPanel() {
+  if (!(intelligenceSyncOpsPanelElement instanceof HTMLElement)) {
+    return;
+  }
+
+  const snapshot = resolveIntelligenceSyncOpsSnapshot();
+  const summary = snapshot.summary;
+
+  intelligenceSyncOpsPanelElement.dataset.level = summary.alertLevel;
+  intelligenceSyncOpsPanelElement.dataset.source = snapshot.source;
+
+  if (intelligenceSyncOpsBadgeElement instanceof HTMLElement) {
+    intelligenceSyncOpsBadgeElement.dataset.level = summary.alertLevel;
+    intelligenceSyncOpsBadgeElement.textContent = formatIntelligenceSyncOpsAlertLabel(summary.alertLevel);
+  }
+
+  if (intelligenceSyncOpsStatusElement instanceof HTMLElement) {
+    intelligenceSyncOpsStatusElement.textContent = buildIntelligenceSyncOpsStatusMessage(snapshot);
+  }
+
+  if (intelligenceSyncOpsSuccessRateElement instanceof HTMLElement) {
+    intelligenceSyncOpsSuccessRateElement.textContent = `${summary.successRatePercent.toFixed(2)}%`;
+  }
+
+  if (intelligenceSyncOpsP95Element instanceof HTMLElement) {
+    intelligenceSyncOpsP95Element.textContent = `${summary.p95LatencyMs.toFixed(2)} ms`;
+  }
+
+  if (intelligenceSyncOpsAvgElement instanceof HTMLElement) {
+    intelligenceSyncOpsAvgElement.textContent = `${summary.averageLatencyMs.toFixed(2)} ms`;
+  }
+
+  if (intelligenceSyncOpsRequestsElement instanceof HTMLElement) {
+    intelligenceSyncOpsRequestsElement.textContent = String(summary.requests);
+  }
+
+  if (intelligenceSyncOpsUpdatedElement instanceof HTMLElement) {
+    const sourceLabel = snapshot.source === "backend" ? "fonte backend" : "fonte local";
+    intelligenceSyncOpsUpdatedElement.textContent = `Atualizado ${formatShortTime(snapshot.generatedAt)} • ${sourceLabel}`;
+  }
+}
+
+function stopIntelligenceSyncHealthPolling() {
+  if (intelligenceSyncHealthPollTimer !== null) {
+    window.clearTimeout(intelligenceSyncHealthPollTimer);
+    intelligenceSyncHealthPollTimer = null;
+  }
+}
+
+function scheduleIntelligenceSyncHealthPolling() {
+  stopIntelligenceSyncHealthPolling();
+
+  intelligenceSyncHealthPollTimer = window.setTimeout(() => {
+    void refreshIntelligenceSyncHealthSnapshot({
+      reschedule: true,
+    });
+  }, INTELLIGENCE_SYNC_HEALTH_REFRESH_MS);
+}
+
+async function refreshIntelligenceSyncHealthSnapshot(options = {}) {
+  if (typeof fetch !== "function") {
+    return;
+  }
+
+  if (INTELLIGENCE_SYNC_INTERNAL_TOKEN.length < 16) {
+    return;
+  }
+
+  if (activeAppRoute !== APP_ROUTE_CHART_LAB) {
+    return;
+  }
+
+  if (intelligenceSyncHealthInFlight) {
+    return;
+  }
+
+  intelligenceSyncHealthInFlight = true;
+
+  try {
+    const response = await fetch(buildApiUrl(INTELLIGENCE_SYNC_HEALTH_ENDPOINT), {
+      headers: {
+        "x-internal-token": INTELLIGENCE_SYNC_INTERNAL_TOKEN,
+      },
+      method: "GET",
+    });
+
+    if (!response.ok) {
+      throw new Error(`health-status-${response.status}`);
+    }
+
+    const payload = await response.json();
+    const payloadData = payload && typeof payload === "object" && payload.data && typeof payload.data === "object"
+      ? payload.data
+      : null;
+
+    if (!payloadData) {
+      throw new Error("health-payload-invalid");
+    }
+
+    intelligenceSyncBackendHealthSnapshot = {
+      fetchedAtMs: Date.now(),
+      generatedAt: typeof payloadData.generatedAt === "string" && payloadData.generatedAt.length > 0
+        ? payloadData.generatedAt
+        : new Date().toISOString(),
+      source: "backend",
+      summary: normalizeIntelligenceSyncSummary(payloadData.summary),
+      thresholds: normalizeIntelligenceSyncThresholds(payloadData.thresholds),
+    };
+    intelligenceSyncBackendHealthError = "";
+    renderIntelligenceSyncOpsPanel();
+  } catch (error) {
+    intelligenceSyncBackendHealthError = error instanceof Error ? error.message : "health-fetch-failed";
+    renderIntelligenceSyncOpsPanel();
+  } finally {
+    intelligenceSyncHealthInFlight = false;
+
+    if (options.reschedule === true && activeAppRoute === APP_ROUTE_CHART_LAB) {
+      scheduleIntelligenceSyncHealthPolling();
+    }
+  }
+}
+
+function startIntelligenceSyncHealthPolling() {
+  renderIntelligenceSyncOpsPanel();
+
+  if (INTELLIGENCE_SYNC_INTERNAL_TOKEN.length < 16) {
+    return;
+  }
+
+  stopIntelligenceSyncHealthPolling();
+
+  void refreshIntelligenceSyncHealthSnapshot({
+    reschedule: true,
+  });
+}
+
+function handleIntelligenceSyncOpsRouteChange(route) {
+  if (route === APP_ROUTE_CHART_LAB) {
+    startIntelligenceSyncHealthPolling();
+    return;
+  }
+
+  stopIntelligenceSyncHealthPolling();
+}
+
 function maybeNotifyIntelligenceSyncBudgetAlert(summary) {
   const nextAlertLevel = resolveIntelligenceSyncAlertLevel(summary);
   const nowMs = Date.now();
@@ -7997,6 +8277,7 @@ function publishIntelligenceSyncTelemetry() {
   }
 
   maybeNotifyIntelligenceSyncBudgetAlert(safeSummary);
+  renderIntelligenceSyncOpsPanel();
 
   if (typeof window === "object") {
     window.__botfinanceiroIntelligenceSyncTelemetry = safeSummary;
@@ -9517,6 +9798,7 @@ function destroyInteractiveChart() {
 
   pendingChartLoadRequest = null;
   intelligenceSyncActiveCorrelationId = "";
+  stopIntelligenceSyncHealthPolling();
 
   stopChartAutoRefresh();
   stopWatchlistAutoRefresh();
@@ -12112,6 +12394,8 @@ function setupChartLab() {
       }
     });
   }
+
+  renderIntelligenceSyncOpsPanel();
 
   ensureInteractiveChart();
   setChartViewMode(chartViewMode);
