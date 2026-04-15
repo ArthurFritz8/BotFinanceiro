@@ -150,6 +150,12 @@ const WATCHLIST_STREAM_FALLBACK_POLL_MS = 6000;
 const CHART_STREAM_FALLBACK_POLL_MS = 4000;
 const CHART_CONTEXT_SYNC_DEBOUNCE_MS = 280;
 const INTELLIGENCE_SYNC_METRICS_MAX_SAMPLES = 60;
+const INTELLIGENCE_SYNC_ALERT_WARNING_P95_MS = 1200;
+const INTELLIGENCE_SYNC_ALERT_CRITICAL_P95_MS = 2000;
+const INTELLIGENCE_SYNC_ALERT_WARNING_SUCCESS_RATE_PERCENT = 95;
+const INTELLIGENCE_SYNC_ALERT_CRITICAL_SUCCESS_RATE_PERCENT = 90;
+const INTELLIGENCE_SYNC_ALERT_MIN_INTERVAL_MS = 45000;
+const INTELLIGENCE_SYNC_TELEMETRY_ENDPOINT = "/v1/crypto/intelligence-sync/telemetry";
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
 const APP_ROUTE_CHAT = "chat";
 const APP_ROUTE_CHART_LAB = "chart-lab";
@@ -1468,10 +1474,16 @@ let chartLiveFallbackPollTimer = null;
 let chartContextSyncTimer = null;
 let pendingChartLoadRequest = null;
 let intelligenceSyncPendingStartedAtMs = 0;
+let intelligenceSyncActiveCorrelationId = "";
+let intelligenceSyncAlertLevel = "ok";
+let intelligenceSyncLastAlertAtMs = 0;
 let intelligenceSyncLatencySamplesMs = [];
 let intelligenceSyncMetrics = {
+  alertLevel: "ok",
   averageLatencyMs: 0,
   failed: 0,
+  lastContextId: "",
+  lastCorrelationId: "",
   lastLatencyMs: null,
   lastReason: "",
   lastSyncedAt: "",
@@ -7801,10 +7813,162 @@ function computeLatencyPercentile(samples, percentile) {
   return sortedSamples[index] ?? 0;
 }
 
+function createIntelligenceSyncCorrelationId() {
+  return `sync_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function getActiveIntelligenceSyncCorrelationId() {
+  return intelligenceSyncActiveCorrelationId;
+}
+
+function buildIntelligenceSyncContextId(reason) {
+  const normalizedReason = typeof reason === "string" && reason.trim().length > 0
+    ? reason.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 40)
+    : "context_sync";
+
+  return `ctx_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}_${normalizedReason}`;
+}
+
+function resolveIntelligenceSyncAlertLevel(summary) {
+  const requests = Number.isFinite(summary?.requests) ? Number(summary.requests) : 0;
+
+  if (requests <= 0) {
+    return "ok";
+  }
+
+  const p95LatencyMs = Number.isFinite(summary?.p95LatencyMs) ? Number(summary.p95LatencyMs) : 0;
+  const successRatePercent = Number.isFinite(summary?.successRatePercent)
+    ? Number(summary.successRatePercent)
+    : 0;
+
+  if (
+    p95LatencyMs >= INTELLIGENCE_SYNC_ALERT_CRITICAL_P95_MS
+    || successRatePercent <= INTELLIGENCE_SYNC_ALERT_CRITICAL_SUCCESS_RATE_PERCENT
+  ) {
+    return "critical";
+  }
+
+  if (
+    p95LatencyMs >= INTELLIGENCE_SYNC_ALERT_WARNING_P95_MS
+    || successRatePercent <= INTELLIGENCE_SYNC_ALERT_WARNING_SUCCESS_RATE_PERCENT
+  ) {
+    return "warning";
+  }
+
+  return "ok";
+}
+
+function maybeNotifyIntelligenceSyncBudgetAlert(summary) {
+  const nextAlertLevel = resolveIntelligenceSyncAlertLevel(summary);
+  const nowMs = Date.now();
+  const changedLevel = intelligenceSyncAlertLevel !== nextAlertLevel;
+
+  intelligenceSyncAlertLevel = nextAlertLevel;
+
+  if (nextAlertLevel === "ok") {
+    return;
+  }
+
+  if (!changedLevel && nowMs - intelligenceSyncLastAlertAtMs < INTELLIGENCE_SYNC_ALERT_MIN_INTERVAL_MS) {
+    return;
+  }
+
+  intelligenceSyncLastAlertAtMs = nowMs;
+
+  const p95LatencyMs = Number.isFinite(summary?.p95LatencyMs) ? Number(summary.p95LatencyMs) : 0;
+  const successRatePercent = Number.isFinite(summary?.successRatePercent)
+    ? Number(summary.successRatePercent)
+    : 0;
+  const levelLabel = nextAlertLevel === "critical" ? "CRITICO" : "WARNING";
+
+  setChartLegendTransient(
+    `SLA Intelligence Desk ${levelLabel}: p95 ${p95LatencyMs.toFixed(2)}ms • sucesso ${successRatePercent.toFixed(2)}%`,
+    nextAlertLevel === "critical" ? "error" : "warn",
+  );
+}
+
+function resolveIntelligenceSyncTelemetryStrategy(symbol) {
+  const pipelineStrategy = resolveChartPipelineStrategy(symbol);
+
+  if (pipelineStrategy === "institutional_macro") {
+    return canRunInstitutionalMacroForSymbol(symbol) ? "institutional_macro" : "external_symbol";
+  }
+
+  return "crypto";
+}
+
+function buildIntelligenceSyncTelemetryPayload(input = {}) {
+  const reason = typeof input.reason === "string" && input.reason.length > 0
+    ? input.reason
+    : "context-sync";
+  const latencyMs = Number.isFinite(input.latencyMs) ? Math.max(0, Number(input.latencyMs)) : 0;
+  const correlationId = typeof input.correlationId === "string" && input.correlationId.length > 0
+    ? input.correlationId
+    : getActiveIntelligenceSyncCorrelationId();
+  const contextId = typeof input.contextId === "string" && input.contextId.length > 0
+    ? input.contextId
+    : buildIntelligenceSyncContextId(reason);
+  const selectedAssetId = chartAssetSelect instanceof HTMLSelectElement
+    ? chartAssetSelect.value
+    : "";
+  const selectedRange = chartRangeSelect instanceof HTMLSelectElement
+    ? chartRangeSelect.value
+    : "";
+  const hasKnownRange = Object.prototype.hasOwnProperty.call(CHART_RANGE_LABELS, selectedRange);
+  const selectedTerminalSymbol = sanitizeTerminalSymbol(getSelectedTerminalSymbol());
+  const selectedRequestedBroker = normalizeRequestedBroker(getSelectedBroker());
+  const strategy = resolveIntelligenceSyncTelemetryStrategy(selectedTerminalSymbol);
+
+  return {
+    chartAssetId: selectedAssetId.length > 0 ? selectedAssetId : undefined,
+    chartRange: hasKnownRange ? selectedRange : undefined,
+    contextId,
+    correlationId,
+    exchange:
+      selectedRequestedBroker === "auto" || BROKER_FAILOVER_ORDER.includes(selectedRequestedBroker)
+        ? selectedRequestedBroker
+        : undefined,
+    latencyMs,
+    reason,
+    sessionId: chatSessionId,
+    strategy,
+    success: input.ok !== false,
+    terminalSymbol: selectedTerminalSymbol.length > 0 ? selectedTerminalSymbol : undefined,
+  };
+}
+
+async function publishIntelligenceSyncTelemetryToBackend(input = {}) {
+  if (typeof fetch !== "function") {
+    return;
+  }
+
+  const payload = buildIntelligenceSyncTelemetryPayload(input);
+
+  if (!payload.correlationId || !payload.contextId || !payload.sessionId) {
+    return;
+  }
+
+  try {
+    await fetch(buildApiUrl(INTELLIGENCE_SYNC_TELEMETRY_ENDPOINT), {
+      body: JSON.stringify(payload),
+      headers: {
+        "Content-Type": "application/json",
+      },
+      keepalive: true,
+      method: "POST",
+    });
+  } catch {
+    // Telemetria nunca deve interromper a UX do Desk.
+  }
+}
+
 function publishIntelligenceSyncTelemetry() {
   const safeSummary = {
+    alertLevel: intelligenceSyncMetrics.alertLevel,
     averageLatencyMs: intelligenceSyncMetrics.averageLatencyMs,
     failed: intelligenceSyncMetrics.failed,
+    lastContextId: intelligenceSyncMetrics.lastContextId,
+    lastCorrelationId: intelligenceSyncMetrics.lastCorrelationId,
     lastLatencyMs: intelligenceSyncMetrics.lastLatencyMs,
     lastReason: intelligenceSyncMetrics.lastReason,
     lastSyncedAt: intelligenceSyncMetrics.lastSyncedAt,
@@ -7812,14 +7976,27 @@ function publishIntelligenceSyncTelemetry() {
     requests: intelligenceSyncMetrics.requests,
     success: intelligenceSyncMetrics.success,
     successRatePercent: intelligenceSyncMetrics.successRatePercent,
+    thresholds: {
+      criticalP95LatencyMs: INTELLIGENCE_SYNC_ALERT_CRITICAL_P95_MS,
+      criticalSuccessRatePercent: INTELLIGENCE_SYNC_ALERT_CRITICAL_SUCCESS_RATE_PERCENT,
+      warningP95LatencyMs: INTELLIGENCE_SYNC_ALERT_WARNING_P95_MS,
+      warningSuccessRatePercent: INTELLIGENCE_SYNC_ALERT_WARNING_SUCCESS_RATE_PERCENT,
+    },
   };
+
+  const nextAlertLevel = resolveIntelligenceSyncAlertLevel(safeSummary);
+  safeSummary.alertLevel = nextAlertLevel;
+  intelligenceSyncMetrics.alertLevel = nextAlertLevel;
 
   if (analysisPanel instanceof HTMLElement) {
     analysisPanel.dataset.syncAvgMs = String(safeSummary.averageLatencyMs);
+    analysisPanel.dataset.syncAlertLevel = safeSummary.alertLevel;
     analysisPanel.dataset.syncP95Ms = String(safeSummary.p95LatencyMs);
     analysisPanel.dataset.syncRequests = String(safeSummary.requests);
     analysisPanel.dataset.syncSuccessRate = String(safeSummary.successRatePercent);
   }
+
+  maybeNotifyIntelligenceSyncBudgetAlert(safeSummary);
 
   if (typeof window === "object") {
     window.__botfinanceiroIntelligenceSyncTelemetry = safeSummary;
@@ -7836,19 +8013,30 @@ function publishIntelligenceSyncTelemetry() {
 
 function startIntelligenceSyncTelemetry(reason) {
   intelligenceSyncPendingStartedAtMs = performance.now();
+  intelligenceSyncActiveCorrelationId = createIntelligenceSyncCorrelationId();
   intelligenceSyncMetrics.requests += 1;
+  intelligenceSyncMetrics.lastCorrelationId = intelligenceSyncActiveCorrelationId;
   intelligenceSyncMetrics.lastReason = reason;
 }
 
 function finishIntelligenceSyncTelemetry(input = {}) {
   const ok = input.ok !== false;
   const reason = typeof input.reason === "string" ? input.reason : "context-sync";
+  const correlationId = typeof input.correlationId === "string" && input.correlationId.length > 0
+    ? input.correlationId
+    : (intelligenceSyncActiveCorrelationId || createIntelligenceSyncCorrelationId());
+  const contextId = typeof input.contextId === "string" && input.contextId.length > 0
+    ? input.contextId
+    : buildIntelligenceSyncContextId(reason);
   const endedAtMs = performance.now();
   const latencyMs = intelligenceSyncPendingStartedAtMs > 0
     ? Math.max(0, Number((endedAtMs - intelligenceSyncPendingStartedAtMs).toFixed(2)))
     : 0;
 
   intelligenceSyncPendingStartedAtMs = 0;
+  intelligenceSyncActiveCorrelationId = "";
+  intelligenceSyncMetrics.lastContextId = contextId;
+  intelligenceSyncMetrics.lastCorrelationId = correlationId;
   intelligenceSyncMetrics.lastReason = reason;
   intelligenceSyncMetrics.lastLatencyMs = latencyMs;
   intelligenceSyncMetrics.lastSyncedAt = new Date().toISOString();
@@ -7879,6 +8067,14 @@ function finishIntelligenceSyncTelemetry(input = {}) {
   intelligenceSyncMetrics.successRatePercent = Number(successRatePercent.toFixed(2));
 
   publishIntelligenceSyncTelemetry();
+
+  void publishIntelligenceSyncTelemetryToBackend({
+    contextId,
+    correlationId,
+    latencyMs,
+    ok,
+    reason,
+  });
 }
 
 function syncChartRangeWithTerminalInterval(interval, options = {}) {
@@ -9320,6 +9516,7 @@ function destroyInteractiveChart() {
   }
 
   pendingChartLoadRequest = null;
+  intelligenceSyncActiveCorrelationId = "";
 
   stopChartAutoRefresh();
   stopWatchlistAutoRefresh();
@@ -9783,6 +9980,18 @@ async function runMarketRequestWithRetry(requestFactory, options = {}) {
   throw lastError ?? new Error("Falha ao consultar provedor de mercado");
 }
 
+function buildIntelligenceSyncCorrelationHeaders() {
+  const correlationId = getActiveIntelligenceSyncCorrelationId();
+
+  if (!correlationId) {
+    return undefined;
+  }
+
+  return {
+    "x-intelligence-correlation-id": correlationId,
+  };
+}
+
 async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "binance") {
   return runMarketRequestWithRetry(async () => {
     const normalizedExchange = normalizeRequestedBroker(exchange);
@@ -9794,6 +10003,7 @@ async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "bina
       range,
     });
     const response = await fetch(buildApiUrl(`/v1/crypto/strategy-chart?${params.toString()}`), {
+      headers: buildIntelligenceSyncCorrelationHeaders(),
       method: "GET",
     });
 
@@ -9998,6 +10208,7 @@ async function requestInstitutionalMacroSnapshot(symbol, range, mode, moduleName
     timezone,
   });
   const response = await fetch(buildApiUrl(`/v1/forex/strategy-chart?${params.toString()}`), {
+    headers: buildIntelligenceSyncCorrelationHeaders(),
     method: "GET",
   });
 

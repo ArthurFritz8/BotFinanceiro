@@ -27,6 +27,7 @@ import {
   getOperationalHealthHistory,
   getReady,
   getSchedulerMetrics,
+  getIntelligenceSyncTelemetryHealth,
 } from "./system-controller.js";
 
 const internalRouteOptions = {
@@ -53,6 +54,7 @@ export function registerSystemRoutes(app: FastifyInstance): void {
   app.get("/internal/health/market-navigator/modules", internalRouteOptions, getMarketNavigatorModulesHealth);
   app.get("/internal/health/streams/brokers.csv", internalRouteOptions, exportBrokerLiveQuoteStreamHealthCsv);
   app.get("/internal/health/live-chart/crypto", internalRouteOptions, getCryptoLiveChartHealth);
+  app.get("/internal/health/intelligence-sync", internalRouteOptions, getIntelligenceSyncTelemetryHealth);
   app.get(
     "/internal/health/live-chart/crypto/resilience",
     internalRouteOptions,

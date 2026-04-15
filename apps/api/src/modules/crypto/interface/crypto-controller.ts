@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { env } from "../../../shared/config/env.js";
 import { buildSuccessResponse } from "../../../shared/http/api-response.js";
+import { intelligenceSyncTelemetryStore } from "../../../shared/observability/intelligence-sync-telemetry-store.js";
 import {
   CryptoChartService,
 } from "../application/crypto-chart-service.js";
@@ -82,6 +83,25 @@ const marketOverviewQuerySchema = z.object({
 const newsIntelligenceQuerySchema = z.object({
   assetId: z.string().trim().min(1).default("bitcoin"),
   limit: z.coerce.number().int().min(3).max(20).default(8),
+});
+
+const intelligenceSyncTelemetryBodySchema = z.object({
+  chartAssetId: z.string().trim().min(1).max(64).optional(),
+  chartRange: z.enum(["24h", "7d", "30d", "90d", "1y"]).optional(),
+  contextId: z.string().trim().min(8).max(180),
+  correlationId: z.string().trim().min(8).max(180),
+  exchange: liveChartExchangeSchema.optional(),
+  latencyMs: z.coerce.number().min(0).max(120000),
+  reason: z.string().trim().min(2).max(120),
+  sessionId: z
+    .string()
+    .trim()
+    .min(8)
+    .max(128)
+    .regex(/^[a-zA-Z0-9_-]+$/),
+  strategy: z.enum(["crypto", "institutional_macro", "external_symbol"]).default("crypto"),
+  success: z.coerce.boolean(),
+  terminalSymbol: z.string().trim().min(1).max(64).optional(),
 });
 
 const cryptoSyncPolicyService = new CryptoSyncPolicyService();
@@ -173,6 +193,26 @@ export async function getCryptoStrategyChart(request: FastifyRequest, reply: Fas
   });
 
   void reply.send(buildSuccessResponse(request.id, chart));
+}
+
+export function postIntelligenceSyncTelemetry(request: FastifyRequest, reply: FastifyReply): void {
+  const parsedBody = intelligenceSyncTelemetryBodySchema.parse(request.body ?? {});
+  const result = intelligenceSyncTelemetryStore.record({
+    chartAssetId: parsedBody.chartAssetId,
+    chartRange: parsedBody.chartRange,
+    contextId: parsedBody.contextId,
+    correlationId: parsedBody.correlationId,
+    exchange: parsedBody.exchange,
+    latencyMs: parsedBody.latencyMs,
+    reason: parsedBody.reason,
+    requestId: request.id,
+    sessionId: parsedBody.sessionId,
+    strategy: parsedBody.strategy,
+    success: parsedBody.success,
+    terminalSymbol: parsedBody.terminalSymbol,
+  });
+
+  void reply.code(202).send(buildSuccessResponse(request.id, result));
 }
 
 export function streamLiveChart(request: FastifyRequest, reply: FastifyReply): void {

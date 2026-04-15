@@ -25,6 +25,7 @@ const basePriceByAsset = {
 
 let delayedStrategyChartRequests = 0;
 let strategyChartDelayMs = 0;
+let intelligenceSyncTelemetryPosts = 0;
 
 function waitMs(durationMs) {
   return new Promise((resolve) => {
@@ -159,6 +160,19 @@ async function fulfillJson(route, body, status = 200) {
 async function handleApiRoute(route) {
   const url = new URL(route.request().url());
 
+  if (url.pathname === "/v1/crypto/intelligence-sync/telemetry") {
+    intelligenceSyncTelemetryPosts += 1;
+
+    return fulfillJson(route, {
+      data: {
+        accepted: true,
+        alertLevel: "ok",
+        generatedAt: new Date().toISOString(),
+      },
+      status: "success",
+    }, 202);
+  }
+
   if (url.pathname === "/v1/crypto/strategy-chart") {
     if (delayedStrategyChartRequests > 0 && strategyChartDelayMs > 0) {
       delayedStrategyChartRequests -= 1;
@@ -287,6 +301,7 @@ async function handleApiRoute(route) {
 test.beforeEach(async ({ page }) => {
   delayedStrategyChartRequests = 0;
   strategyChartDelayMs = 0;
+  intelligenceSyncTelemetryPosts = 0;
 
   await page.addInitScript(() => {
     const forceHideAuthGate = () => {
@@ -381,6 +396,7 @@ test("intelligence desk acompanha moeda, janela e simbolo com telemetria", async
   expect(telemetry.requests).toBeGreaterThan(0);
   expect(telemetry.successRatePercent).toBeGreaterThanOrEqual(0);
   expect(telemetry.p95LatencyMs).toBeGreaterThanOrEqual(0);
+  expect(intelligenceSyncTelemetryPosts).toBeGreaterThan(0);
 });
 
 test("intelligence desk preserva ultimo contexto com trocas durante loading", async ({ page }) => {

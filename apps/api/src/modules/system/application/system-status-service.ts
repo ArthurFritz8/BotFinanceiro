@@ -14,6 +14,10 @@ import {
   type CryptoLiveChartMetricsSnapshot,
 } from "../../../shared/observability/crypto-live-chart-metrics-store.js";
 import {
+  intelligenceSyncTelemetryStore,
+  type IntelligenceSyncTelemetrySnapshot,
+} from "../../../shared/observability/intelligence-sync-telemetry-store.js";
+import {
   airdropsIntelligenceMetricsStore,
   type AirdropsIntelligenceMetricsSnapshot,
 } from "../../../shared/observability/airdrops-intelligence-metrics-store.js";
@@ -235,6 +239,8 @@ export interface ReadinessStatus {
 export interface BrokerLiveQuoteStreamHealth extends BrokerLiveQuoteStreamMetricsSnapshot {}
 
 export interface CryptoLiveChartHealth extends CryptoLiveChartMetricsSnapshot {}
+
+export interface IntelligenceSyncTelemetryHealth extends IntelligenceSyncTelemetrySnapshot {}
 
 export interface CryptoLiveChartResilienceHealth extends CryptoChartLiveBrokerResilienceSnapshot {}
 
@@ -757,6 +763,10 @@ export class SystemStatusService {
 
   public getCryptoLiveChartHealth(): CryptoLiveChartHealth {
     return cryptoLiveChartMetricsStore.getSnapshot();
+  }
+
+  public getIntelligenceSyncTelemetryHealth(): IntelligenceSyncTelemetryHealth {
+    return intelligenceSyncTelemetryStore.getSnapshot();
   }
 
   public getCryptoLiveChartResilienceHealth(options?: {

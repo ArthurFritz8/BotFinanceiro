@@ -148,6 +148,11 @@ export function getCryptoLiveChartHealth(request: FastifyRequest, reply: Fastify
   void reply.send(buildSuccessResponse(request.id, data));
 }
 
+export function getIntelligenceSyncTelemetryHealth(request: FastifyRequest, reply: FastifyReply): void {
+  const data = systemStatusService.getIntelligenceSyncTelemetryHealth();
+  void reply.send(buildSuccessResponse(request.id, data));
+}
+
 export function getCryptoLiveChartResilienceHealth(request: FastifyRequest, reply: FastifyReply): void {
   const parsedQuery = cryptoLiveChartResilienceQuerySchema.parse(request.query);
   const data = systemStatusService.getCryptoLiveChartResilienceHealth({

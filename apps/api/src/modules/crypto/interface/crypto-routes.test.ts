@@ -9,6 +9,7 @@ process.env.INTERNAL_API_TOKEN ??= "test_internal_token_12345";
 const { buildApp } = await import("../../../main/app.js");
 const { memoryCache } = await import("../../../shared/cache/memory-cache.js");
 const { cryptoLiveChartMetricsStore } = await import("../../../shared/observability/crypto-live-chart-metrics-store.js");
+const { intelligenceSyncTelemetryStore } = await import("../../../shared/observability/intelligence-sync-telemetry-store.js");
 const { resetCryptoChartLiveBrokerResilienceState } = await import("../application/crypto-chart-service.js");
 
 const app = buildApp();
@@ -21,12 +22,84 @@ void beforeEach(() => {
   globalThis.fetch = originalFetch;
   memoryCache.clear();
   cryptoLiveChartMetricsStore.reset();
+  intelligenceSyncTelemetryStore.reset();
   resetCryptoChartLiveBrokerResilienceState();
 });
 
 void after(async () => {
   globalThis.fetch = originalFetch;
   await app.close();
+});
+
+void it("POST /v1/crypto/intelligence-sync/telemetry registra evento de sincronizacao", async () => {
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      chartAssetId: "ethereum",
+      chartRange: "30d",
+      contextId: "ctx_test_context_001",
+      correlationId: "sync_test_correlation_001",
+      exchange: "binance",
+      latencyMs: 328.44,
+      reason: "interval-chip",
+      sessionId: "sess_test_sync_001",
+      strategy: "crypto",
+      success: true,
+      terminalSymbol: "ETHUSDT",
+    },
+    url: "/v1/crypto/intelligence-sync/telemetry",
+  });
+
+  assert.equal(response.statusCode, 202);
+
+  const body = response.json<{
+    data: {
+      accepted: true;
+      alertLevel: "critical" | "ok" | "warning";
+      generatedAt: string;
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.accepted, true);
+  assert.ok(body.data.generatedAt.length > 0);
+
+  const snapshot = intelligenceSyncTelemetryStore.getSnapshot();
+  assert.equal(snapshot.summary.requests, 1);
+  assert.equal(snapshot.summary.successfulRequests, 1);
+  assert.equal(snapshot.summary.failedRequests, 0);
+  assert.equal(snapshot.summary.lastCorrelationId, "sync_test_correlation_001");
+  assert.equal(snapshot.summary.lastContextId, "ctx_test_context_001");
+});
+
+void it("POST /v1/crypto/intelligence-sync/telemetry retorna 400 para payload invalido", async () => {
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      contextId: "ctx_invalid",
+      correlationId: "sync_invalid",
+      latencyMs: -5,
+      reason: "x",
+      sessionId: "bad",
+      success: true,
+    },
+    url: "/v1/crypto/intelligence-sync/telemetry",
+  });
+
+  assert.equal(response.statusCode, 400);
+
+  const body = response.json<{
+    error: {
+      code: string;
+      message: string;
+    };
+    status: "error";
+  }>();
+
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "VALIDATION_ERROR");
+  assert.equal(body.error.message, "Invalid payload");
 });
 
 void it("GET /v1/crypto/spot-price usa fallback CoinCap quando CoinGecko falha", async () => {

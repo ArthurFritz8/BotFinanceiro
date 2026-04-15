@@ -20,6 +20,9 @@ const {
   cryptoLiveChartMetricsStore,
 } = await import("../../../shared/observability/crypto-live-chart-metrics-store.js");
 const {
+  intelligenceSyncTelemetryStore,
+} = await import("../../../shared/observability/intelligence-sync-telemetry-store.js");
+const {
   resetCryptoChartLiveBrokerResilienceState,
 } = await import("../../crypto/application/crypto-chart-service.js");
 const {
@@ -301,6 +304,36 @@ interface CryptoLiveChartResilienceHealthResponse {
   resolvedPreferredBroker: "binance" | "bybit" | "coinbase" | "kraken" | "okx";
 }
 
+interface IntelligenceSyncTelemetryHealthResponse {
+  generatedAt: string;
+  recent: Array<{
+    contextId: string;
+    correlationId: string;
+    latencyMs: number;
+    recordedAt: string;
+    reason: string;
+    sessionId: string;
+    success: boolean;
+  }>;
+  summary: {
+    alertLevel: "critical" | "ok" | "warning";
+    averageLatencyMs: number;
+    failedRequests: number;
+    lastContextId: string;
+    lastCorrelationId: string;
+    p95LatencyMs: number;
+    requests: number;
+    successRatePercent: number;
+    successfulRequests: number;
+  };
+  thresholds: {
+    criticalP95LatencyMs: number;
+    criticalSuccessRatePercent: number;
+    warningP95LatencyMs: number;
+    warningSuccessRatePercent: number;
+  };
+}
+
 interface AirdropsIntelligenceHealthResponse {
   generatedAt: string;
   global: {
@@ -446,6 +479,7 @@ const originalCopilotStoreState = {
 void beforeEach(() => {
   brokerLiveQuoteStreamMetricsStore.reset();
   cryptoLiveChartMetricsStore.reset();
+  intelligenceSyncTelemetryStore.reset();
   resetCryptoChartLiveBrokerResilienceState();
   airdropsIntelligenceMetricsStore.reset();
 
@@ -790,6 +824,74 @@ void it("GET /internal/health/live-chart/crypto retorna metricas agregadas por b
   assert.equal(body.data.brokers.okx.failedRequests, 1);
   assert.equal(body.data.brokers.okx.lastErrorMessage, "okx timeout");
   assert.equal(body.data.brokers.okx.lastLatencyMs, 420);
+});
+
+void it("GET /internal/health/intelligence-sync retorna 401 sem token", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/internal/health/intelligence-sync",
+  });
+
+  assert.equal(response.statusCode, 401);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "INTERNAL_AUTH_MISSING_TOKEN");
+  assert.equal(body.error.message, "Missing internal route token");
+});
+
+void it("GET /internal/health/intelligence-sync retorna telemetria agregada com token valido", async () => {
+  intelligenceSyncTelemetryStore.record({
+    chartAssetId: "ethereum",
+    chartRange: "7d",
+    contextId: "ctx_system_test_001",
+    correlationId: "sync_system_test_001",
+    exchange: "binance",
+    latencyMs: 380,
+    reason: "interval-chip",
+    sessionId: "sess_system_test_001",
+    strategy: "crypto",
+    success: true,
+    terminalSymbol: "ETHUSDT",
+  });
+
+  intelligenceSyncTelemetryStore.record({
+    chartAssetId: "ethereum",
+    chartRange: "7d",
+    contextId: "ctx_system_test_002",
+    correlationId: "sync_system_test_002",
+    exchange: "binance",
+    latencyMs: 2480,
+    reason: "symbol-enter",
+    sessionId: "sess_system_test_001",
+    strategy: "crypto",
+    success: false,
+    terminalSymbol: "ETHUSDT",
+  });
+
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/health/intelligence-sync",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<IntelligenceSyncTelemetryHealthResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(typeof body.data.generatedAt, "string");
+  assert.equal(body.data.summary.requests, 2);
+  assert.equal(body.data.summary.successfulRequests, 1);
+  assert.equal(body.data.summary.failedRequests, 1);
+  assert.equal(body.data.summary.lastCorrelationId, "sync_system_test_002");
+  assert.equal(body.data.summary.lastContextId, "ctx_system_test_002");
+  assert.equal(body.data.summary.alertLevel, "critical");
+  assert.ok(Array.isArray(body.data.recent));
+  assert.equal(body.data.recent.length, 2);
+  assert.equal(body.data.thresholds.warningP95LatencyMs, 1200);
+  assert.equal(body.data.thresholds.criticalP95LatencyMs, 2000);
 });
 
 void it("GET /internal/health/live-chart/crypto/resilience retorna 401 sem token", async () => {
