@@ -1480,11 +1480,22 @@ body.sidebar-collapsed .app-shell {
   padding: 0.38rem 0.42rem;
 }
 
+.watchlist-risk-summary.is-collapsed {
+  gap: 0.18rem;
+  padding-bottom: 0.34rem;
+}
+
 .watchlist-risk-head {
   align-items: center;
   display: flex;
   justify-content: space-between;
   gap: 0.3rem;
+}
+
+.watchlist-risk-actions {
+  align-items: center;
+  display: flex;
+  gap: 0.24rem;
 }
 
 .watchlist-risk-head strong {
@@ -1506,6 +1517,25 @@ body.sidebar-collapsed .app-shell {
   letter-spacing: 0.05em;
   padding: 0.14rem 0.36rem;
   text-transform: uppercase;
+}
+
+.watchlist-risk-collapse {
+  background: rgba(12, 39, 65, 0.72);
+  border: 1px solid rgba(115, 171, 232, 0.4);
+  border-radius: 999px;
+  color: #bdd8f8;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.54rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 0.14rem 0.36rem;
+  text-transform: uppercase;
+}
+
+.watchlist-risk-collapse:hover {
+  border-color: rgba(161, 216, 255, 0.68);
+  color: #e4f5ff;
 }
 
 .watchlist-risk-open:hover {
@@ -3703,6 +3733,17 @@ body.sidebar-collapsed .app-shell {
   .watchlist-risk-head {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .watchlist-risk-actions {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .watchlist-risk-collapse,
+  .watchlist-risk-open {
+    flex: 1 1 auto;
+    text-align: center;
   }
 
   .prop-desk-grid {

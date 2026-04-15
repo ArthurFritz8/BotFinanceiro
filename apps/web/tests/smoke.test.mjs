@@ -35,10 +35,15 @@ test("main.js inicializa estado, aba e render da gestao de risco", async () => {
   const mainSource = await readWebFile("src/main.js");
 
   assert.match(mainSource, /const PROP_DESK_STORAGE_KEY = "botfinanceiro\.chart\.propDesk\.v1"/);
+  assert.match(mainSource, /const WATCHLIST_RISK_SUMMARY_COLLAPSED_STORAGE_KEY = "botfinanceiro\.chart\.watchlistRiskSummaryCollapsed\.v1"/);
   assert.match(mainSource, /id:\s*"gestao_risco"/);
   assert.match(mainSource, /if \(activeAnalysisTabId === "gestao_risco"\)/);
   assert.match(mainSource, /analysisTabContentElement\.append\(riskManagementTabPanel\);/);
   assert.match(mainSource, /function renderWatchlistRiskSummary\(\)/);
+  assert.match(mainSource, /function readStoredWatchlistRiskSummaryCollapsed\(\)/);
+  assert.match(mainSource, /function saveWatchlistRiskSummaryCollapsed\(\)/);
+  assert.match(mainSource, /classList\.toggle\("is-collapsed", isCollapsed\)/);
+  assert.match(mainSource, /watchlist-risk-collapse/);
   assert.match(mainSource, /openRiskManagementTab\(\{[\s\S]*scroll: true,[\s\S]*\}\);/);
   assert.match(mainSource, /if \(lowerKey === "g"\)/);
   assert.match(mainSource, /function setupPropDesk\(\)/);
@@ -72,6 +77,9 @@ test("styles.css contem classes base do prop desk", async () => {
   assert.match(stylesSource, /\.prop-desk-risk-tab\s*\{/);
   assert.match(stylesSource, /\.prop-risk-card\s*\{/);
   assert.match(stylesSource, /\.watchlist-risk-summary\s*\{/);
+  assert.match(stylesSource, /\.watchlist-risk-summary\.is-collapsed\s*\{/);
+  assert.match(stylesSource, /\.watchlist-risk-actions\s*\{/);
+  assert.match(stylesSource, /\.watchlist-risk-collapse\s*\{/);
   assert.match(stylesSource, /\.watchlist-risk-open\s*\{/);
   assert.match(stylesSource, /\.watchlist-risk-grid\s*\{/);
   assert.match(stylesSource, /\.prop-tracker-status\[data-state="good"\]/);

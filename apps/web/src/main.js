@@ -136,6 +136,7 @@ const AIRDROP_PREFERENCES_STORAGE_KEY = "botfinanceiro.airdrop.preferences.v1";
 const MEMECOIN_PREFERENCES_STORAGE_KEY = "botfinanceiro.memecoin.preferences.v1";
 const MARKET_NAVIGATOR_FAVORITES_STORAGE_KEY = "botfinanceiro.marketNavigator.favorites.v1";
 const PROP_DESK_STORAGE_KEY = "botfinanceiro.chart.propDesk.v1";
+const WATCHLIST_RISK_SUMMARY_COLLAPSED_STORAGE_KEY = "botfinanceiro.chart.watchlistRiskSummaryCollapsed.v1";
 const MAX_STORED_MESSAGES = 60;
 const MAX_RECENT_HISTORY_ITEMS = 8;
 const MAX_CONVERSATIONS = 60;
@@ -1505,6 +1506,7 @@ let propDeskState = {
   ...PROP_DESK_DEFAULT_STATE,
 };
 let isPropDeskInitialized = false;
+let isWatchlistRiskSummaryCollapsed = false;
 
 function mapSymbolToExchange(symbol, exchange) {
   const normalizedSymbol = sanitizeTerminalSymbol(symbol);
@@ -7056,6 +7058,25 @@ function readStoredPropDeskPreferences() {
   }
 }
 
+function readStoredWatchlistRiskSummaryCollapsed() {
+  try {
+    return localStorage.getItem(WATCHLIST_RISK_SUMMARY_COLLAPSED_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveWatchlistRiskSummaryCollapsed() {
+  try {
+    localStorage.setItem(
+      WATCHLIST_RISK_SUMMARY_COLLAPSED_STORAGE_KEY,
+      isWatchlistRiskSummaryCollapsed ? "1" : "0",
+    );
+  } catch {
+    // Ignore storage errors and keep UX stateless.
+  }
+}
+
 function savePropDeskPreferences() {
   try {
     localStorage.setItem(PROP_DESK_STORAGE_KEY, JSON.stringify(propDeskState));
@@ -7552,6 +7573,14 @@ function renderWatchlistRiskSummary() {
     return;
   }
 
+  const isCollapsed = isWatchlistRiskSummaryCollapsed;
+  const collapseLabel = isCollapsed ? "Expandir" : "Recolher";
+  const collapseAriaLabel = isCollapsed
+    ? "Expandir snapshot de risco"
+    : "Recolher snapshot de risco";
+
+  watchlistRiskSummaryElement.classList.toggle("is-collapsed", isCollapsed);
+
   const effectiveRiskPercent = propDeskState.propModeEnabled
     ? Math.min(propDeskState.riskPercent, 1)
     : propDeskState.riskPercent;
@@ -7568,38 +7597,56 @@ function renderWatchlistRiskSummary() {
     ? `${trackerStatus.message.slice(0, 83)}...`
     : trackerStatus.message;
 
+  const riskGridHtml = isCollapsed
+    ? ""
+    : `
+      <div class="watchlist-risk-grid">
+        <div class="watchlist-risk-chip">
+          Modo
+          <span>${modeLabel}</span>
+        </div>
+        <div class="watchlist-risk-chip">
+          Estrategia
+          <span>${strategyLabel}</span>
+        </div>
+        <div class="watchlist-risk-chip">
+          Risco
+          <span>${effectiveRiskPercent.toFixed(2)}%</span>
+        </div>
+        <div class="watchlist-risk-chip">
+          Lote
+          <span>${recommendedLot.toFixed(2)}</span>
+        </div>
+        <div class="watchlist-risk-chip">
+          Perda max.
+          <span>USD ${riskBudget.toFixed(2)}</span>
+        </div>
+        <div class="watchlist-risk-chip">
+          Ciclo
+          <span>${propDeskState.trackerWins}W / ${propDeskState.trackerLosses}L (${Math.min(totalTrades, 10)}/10)</span>
+        </div>
+      </div>
+    `;
+
+  const riskNoteHtml = isCollapsed
+    ? ""
+    : `<p class="watchlist-risk-note" data-state="${statusMode}">${escapeHtml(trackerHint)}</p>`;
+
   watchlistRiskSummaryElement.innerHTML = `
     <div class="watchlist-risk-head">
       <strong>Risk Snapshot</strong>
-      <button type="button" class="watchlist-risk-open">Abrir gestao</button>
-    </div>
-    <div class="watchlist-risk-grid">
-      <div class="watchlist-risk-chip">
-        Modo
-        <span>${modeLabel}</span>
-      </div>
-      <div class="watchlist-risk-chip">
-        Estrategia
-        <span>${strategyLabel}</span>
-      </div>
-      <div class="watchlist-risk-chip">
-        Risco
-        <span>${effectiveRiskPercent.toFixed(2)}%</span>
-      </div>
-      <div class="watchlist-risk-chip">
-        Lote
-        <span>${recommendedLot.toFixed(2)}</span>
-      </div>
-      <div class="watchlist-risk-chip">
-        Perda max.
-        <span>USD ${riskBudget.toFixed(2)}</span>
-      </div>
-      <div class="watchlist-risk-chip">
-        Ciclo
-        <span>${propDeskState.trackerWins}W / ${propDeskState.trackerLosses}L (${Math.min(totalTrades, 10)}/10)</span>
+      <div class="watchlist-risk-actions">
+        <button
+          type="button"
+          class="watchlist-risk-collapse"
+          aria-expanded="${String(!isCollapsed)}"
+          aria-label="${collapseAriaLabel}"
+        >${collapseLabel}</button>
+        <button type="button" class="watchlist-risk-open">Abrir gestao</button>
       </div>
     </div>
-    <p class="watchlist-risk-note" data-state="${statusMode}">${escapeHtml(trackerHint)}</p>
+    ${riskGridHtml}
+    ${riskNoteHtml}
   `;
 }
 
@@ -10549,6 +10596,7 @@ function setupChartLab() {
       ? `Ultimo sync ${formatShortTime(watchlistLastUpdatedAt)}`
       : "Aguardando sync",
   );
+  isWatchlistRiskSummaryCollapsed = readStoredWatchlistRiskSummaryCollapsed();
   setupPropDesk();
   renderWatchlistRiskSummary();
 
@@ -10778,11 +10826,23 @@ function setupChartLab() {
     if (watchlistRiskSummaryElement instanceof HTMLElement) {
       watchlistRiskSummaryElement.addEventListener("click", (event) => {
         const target = event.target;
-        const button = target instanceof HTMLElement
+        const collapseButton = target instanceof HTMLElement
+          ? target.closest("button.watchlist-risk-collapse")
+          : null;
+
+        if (collapseButton instanceof HTMLButtonElement) {
+          isWatchlistRiskSummaryCollapsed = !isWatchlistRiskSummaryCollapsed;
+          saveWatchlistRiskSummaryCollapsed();
+          renderWatchlistRiskSummary();
+          setStatus("", isWatchlistRiskSummaryCollapsed ? "Snapshot de risco recolhido" : "Snapshot de risco expandido");
+          return;
+        }
+
+        const openButton = target instanceof HTMLElement
           ? target.closest("button.watchlist-risk-open")
           : null;
 
-        if (!(button instanceof HTMLButtonElement)) {
+        if (!(openButton instanceof HTMLButtonElement)) {
           return;
         }
 
