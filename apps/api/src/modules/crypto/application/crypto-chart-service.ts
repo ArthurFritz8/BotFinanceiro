@@ -147,6 +147,15 @@ export interface CryptoChartResponse {
 
 const liveChartFreshTtlSeconds = 8;
 const liveChartStaleSeconds = 20;
+const liveBrokerCircuitFailureThreshold = 3;
+const liveBrokerCircuitCooldownMs = 120_000;
+const liveBrokerFailoverOrder: LiveChartBroker[] = [
+  "binance",
+  "bybit",
+  "coinbase",
+  "kraken",
+  "okx",
+];
 const liveRangePointLimitMap: Record<CryptoChartRange, number> = {
   "1y": 365,
   "24h": 288,
@@ -170,6 +179,152 @@ interface BinanceLiveState {
 const binanceLiveStreamAdapter = new BinanceLiveStreamAdapter();
 const binanceLiveStates = new Map<string, BinanceLiveState>();
 const binanceLiveStatePromises = new Map<string, Promise<BinanceLiveState | null>>();
+const liveBrokerFailureStreakByName = new Map<LiveChartBroker, number>();
+const liveBrokerCircuitOpenUntilByName = new Map<LiveChartBroker, number>();
+
+interface RetryableErrorDetails {
+  retryable?: boolean;
+}
+
+function hasRetryableFlag(details: unknown): details is RetryableErrorDetails {
+  if (typeof details !== "object" || details === null) {
+    return false;
+  }
+
+  const detailsRecord = details as Record<string, unknown>;
+  return typeof detailsRecord.retryable === "boolean";
+}
+
+function isRetryableLiveBrokerError(error: unknown): boolean {
+  if (!(error instanceof AppError)) {
+    return true;
+  }
+
+  if (error.code === "BINANCE_UNAVAILABLE" || error.code === "BROKER_NATIVE_UNAVAILABLE") {
+    return true;
+  }
+
+  if (error.code === "BINANCE_EMPTY_CHART" || error.code === "BROKER_NATIVE_EMPTY_CHART") {
+    return true;
+  }
+
+  if (
+    (error.code === "BINANCE_BAD_STATUS" || error.code === "BROKER_NATIVE_BAD_STATUS")
+    && hasRetryableFlag(error.details)
+  ) {
+    return error.details.retryable === true;
+  }
+
+  return false;
+}
+
+function getLiveBrokerFailureStreak(broker: LiveChartBroker): number {
+  const streak = liveBrokerFailureStreakByName.get(broker);
+
+  if (typeof streak !== "number" || !Number.isInteger(streak) || streak <= 0) {
+    return 0;
+  }
+
+  return streak;
+}
+
+function getLiveBrokerCircuitRemainingMs(broker: LiveChartBroker, nowMs = Date.now()): number {
+  const openUntil = liveBrokerCircuitOpenUntilByName.get(broker);
+
+  if (typeof openUntil !== "number" || Number.isNaN(openUntil)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.round(openUntil - nowMs));
+}
+
+function isLiveBrokerCircuitOpen(broker: LiveChartBroker, nowMs = Date.now()): boolean {
+  return getLiveBrokerCircuitRemainingMs(broker, nowMs) > 0;
+}
+
+function markLiveBrokerSuccess(broker: LiveChartBroker): void {
+  liveBrokerFailureStreakByName.set(broker, 0);
+  liveBrokerCircuitOpenUntilByName.delete(broker);
+}
+
+function markLiveBrokerFailure(broker: LiveChartBroker, error: unknown): void {
+  if (!isRetryableLiveBrokerError(error)) {
+    return;
+  }
+
+  const nextStreak = getLiveBrokerFailureStreak(broker) + 1;
+  liveBrokerFailureStreakByName.set(broker, nextStreak);
+
+  if (nextStreak < liveBrokerCircuitFailureThreshold) {
+    return;
+  }
+
+  liveBrokerCircuitOpenUntilByName.set(
+    broker,
+    Date.now() + liveBrokerCircuitCooldownMs,
+  );
+  liveBrokerFailureStreakByName.set(broker, 0);
+}
+
+function computeLiveBrokerHealthScore(
+  broker: LiveChartBroker,
+  snapshot: ReturnType<typeof cryptoLiveChartMetricsStore.getSnapshot>,
+  nowMs: number,
+): number {
+  const brokerMetrics = snapshot.brokers[broker];
+
+  if (!brokerMetrics) {
+    return 0;
+  }
+
+  const successRateScore = brokerMetrics.successRatePercent;
+  const latencyPenalty = brokerMetrics.p95LatencyMs === null
+    ? 4
+    : Math.min(40, brokerMetrics.p95LatencyMs / 40);
+  const recentErrorPenalty = (() => {
+    if (typeof brokerMetrics.lastErrorAt !== "string" || brokerMetrics.lastErrorAt.length === 0) {
+      return 0;
+    }
+
+    const parsedErrorAt = Date.parse(brokerMetrics.lastErrorAt);
+
+    if (Number.isNaN(parsedErrorAt)) {
+      return 0;
+    }
+
+    return nowMs - parsedErrorAt <= 120_000 ? 18 : 0;
+  })();
+
+  return successRateScore - latencyPenalty - recentErrorPenalty;
+}
+
+function buildLiveBrokerFailoverChain(preferredBroker: LiveChartBroker): LiveChartBroker[] {
+  const normalizedPreferred = liveBrokerFailoverOrder.includes(preferredBroker)
+    ? preferredBroker
+    : "binance";
+  const nowMs = Date.now();
+  const metricsSnapshot = cryptoLiveChartMetricsStore.getSnapshot();
+  const alternativeBrokers = liveBrokerFailoverOrder
+    .filter((broker) => broker !== normalizedPreferred)
+    .sort((leftBroker, rightBroker) => {
+      const leftScore = computeLiveBrokerHealthScore(leftBroker, metricsSnapshot, nowMs);
+      const rightScore = computeLiveBrokerHealthScore(rightBroker, metricsSnapshot, nowMs);
+      return rightScore - leftScore;
+    });
+  const strictChain = [normalizedPreferred, ...alternativeBrokers];
+  const activeChain = strictChain.filter((broker) => !isLiveBrokerCircuitOpen(broker, nowMs));
+
+  if (activeChain.length > 0) {
+    return activeChain;
+  }
+
+  return strictChain;
+}
+
+export function resetCryptoChartLiveBrokerResilienceState(): void {
+  liveBrokerFailureStreakByName.clear();
+  liveBrokerCircuitOpenUntilByName.clear();
+}
 
 function resolveRangePointLimit(range: CryptoChartRange): number {
   return liveRangePointLimitMap[range] ?? 288;
@@ -1376,6 +1531,65 @@ export class CryptoChartService {
     currency: string;
     range: CryptoChartRange;
   }): Promise<CryptoChartResponse> {
+    const brokerChain = buildLiveBrokerFailoverChain(input.broker);
+    const failures: Array<{
+      broker: LiveChartBroker;
+      message: string;
+    }> = [];
+
+    for (const broker of brokerChain) {
+      try {
+        const payload = await this.refreshLiveChartByBroker({
+          ...input,
+          broker,
+        });
+        const cacheKey = buildCacheKey(
+          payload.mode,
+          payload.assetId,
+          payload.currency,
+          payload.range,
+          input.broker,
+        );
+
+        memoryCache.set(cacheKey, payload, liveChartFreshTtlSeconds, liveChartStaleSeconds);
+
+        return toResponse(payload, "refreshed", false);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "live-chart refresh failed";
+        failures.push({
+          broker,
+          message,
+        });
+
+        if (!isRetryableLiveBrokerError(error)) {
+          throw error;
+        }
+      }
+    }
+
+    const lastFailure = failures[failures.length - 1];
+
+    throw new AppError({
+      code: "LIVE_CHART_ALL_BROKERS_FAILED",
+      details: {
+        brokersTried: failures,
+        requestedBroker: input.broker,
+        retryable: true,
+      },
+      message:
+        lastFailure
+          ? `Live chart indisponivel apos failover (${lastFailure.broker}): ${lastFailure.message}`
+          : "Live chart indisponivel apos failover",
+      statusCode: 503,
+    });
+  }
+
+  private async refreshLiveChartByBroker(input: {
+    assetId: string;
+    broker: LiveChartBroker;
+    currency: string;
+    range: CryptoChartRange;
+  }): Promise<CachedChartPayload> {
     const startedAtMs = Date.now();
 
     try {
@@ -1441,22 +1655,15 @@ export class CryptoChartService {
         };
       }
 
-      const cacheKey = buildCacheKey(
-        normalizedPayload.mode,
-        normalizedPayload.assetId,
-        normalizedPayload.currency,
-        normalizedPayload.range,
-        input.broker,
-      );
-
-      memoryCache.set(cacheKey, normalizedPayload, liveChartFreshTtlSeconds, liveChartStaleSeconds);
+      markLiveBrokerSuccess(input.broker);
       cryptoLiveChartMetricsStore.onRefreshSuccess({
         broker: input.broker,
         latencyMs: Date.now() - startedAtMs,
       });
 
-      return toResponse(normalizedPayload, "refreshed", false);
+      return normalizedPayload;
     } catch (error) {
+      markLiveBrokerFailure(input.broker, error);
       cryptoLiveChartMetricsStore.onRefreshError({
         broker: input.broker,
         latencyMs: Date.now() - startedAtMs,
