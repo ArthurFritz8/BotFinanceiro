@@ -1466,6 +1466,7 @@ let chartLastTransientLegendMessage = "";
 let chartLastTransientLegendAtMs = 0;
 let chartLiveFallbackPollTimer = null;
 let chartContextSyncTimer = null;
+let pendingChartLoadRequest = null;
 let intelligenceSyncPendingStartedAtMs = 0;
 let intelligenceSyncLatencySamplesMs = [];
 let intelligenceSyncMetrics = {
@@ -7901,6 +7902,28 @@ function syncChartRangeWithTerminalInterval(interval, options = {}) {
   return true;
 }
 
+function queuePendingChartLoadRequest(options = {}) {
+  const nextRequest = {};
+
+  if (typeof options.assetId === "string" && options.assetId.length > 0) {
+    nextRequest.assetId = options.assetId;
+  }
+
+  if (typeof options.mode === "string" && options.mode.length > 0) {
+    nextRequest.mode = options.mode;
+  }
+
+  if (typeof options.range === "string" && options.range.length > 0) {
+    nextRequest.range = options.range;
+  }
+
+  if (options.silent === true) {
+    nextRequest.silent = true;
+  }
+
+  pendingChartLoadRequest = nextRequest;
+}
+
 async function syncIntelligenceDeskForCurrentContext(options = {}) {
   const silent = options.silent === true;
   const reason = typeof options.reason === "string" && options.reason.length > 0
@@ -9296,6 +9319,8 @@ function destroyInteractiveChart() {
     chartContextSyncTimer = null;
   }
 
+  pendingChartLoadRequest = null;
+
   stopChartAutoRefresh();
   stopWatchlistAutoRefresh();
 
@@ -10461,6 +10486,7 @@ async function loadChart(options = {}) {
   }
 
   if (isChartLoading) {
+    queuePendingChartLoadRequest(options);
     return;
   }
 
@@ -10631,6 +10657,12 @@ async function loadChart(options = {}) {
     }
 
     isChartLoading = false;
+
+    if (pendingChartLoadRequest !== null) {
+      const nextRequest = pendingChartLoadRequest;
+      pendingChartLoadRequest = null;
+      void loadChart(nextRequest);
+    }
   }
 }
 

@@ -120,9 +120,11 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /const INTELLIGENCE_SYNC_METRICS_MAX_SAMPLES = 60/);
   assert.match(mainSource, /const TERMINAL_INTERVAL_TO_CHART_RANGE = \{/);
   assert.match(mainSource, /let chartAutoPreferredBroker = "binance";/);
+  assert.match(mainSource, /let pendingChartLoadRequest = null;/);
   assert.match(mainSource, /function resolveAutoChartPrimaryBroker\(\)/);
   assert.match(mainSource, /function resolveChartRangeForTerminalInterval\(interval\)/);
   assert.match(mainSource, /function syncChartRangeWithTerminalInterval\(interval, options = \{\}\)/);
+  assert.match(mainSource, /function queuePendingChartLoadRequest\(options = \{\}\)/);
   assert.match(mainSource, /function canRunInstitutionalMacroForSymbol\(symbol\)/);
   assert.match(mainSource, /function syncIntelligenceDeskForCurrentContext\(options = \{\}\)/);
   assert.match(mainSource, /function scheduleChartContextSync\(options = \{\}\)/);
@@ -132,6 +134,8 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /window\.__botfinanceiroIntelligenceSyncTelemetry = safeSummary/);
   assert.match(mainSource, /botfinanceiro:intelligence-sync-metrics/);
   assert.match(mainSource, /if \(pipelineStrategy === "institutional_macro" && !canRunInstitutionalMacroForSymbol\(selectedTerminalSymbol\)\)/);
+  assert.match(mainSource, /if \(isChartLoading\) \{[\s\S]*queuePendingChartLoadRequest\(options\);[\s\S]*return;[\s\S]*\}/);
+  assert.match(mainSource, /if \(pendingChartLoadRequest !== null\) \{[\s\S]*const nextRequest = pendingChartLoadRequest;[\s\S]*pendingChartLoadRequest = null;[\s\S]*void loadChart\(nextRequest\);[\s\S]*\}/);
   assert.match(mainSource, /function updateAutoChartPreferredBroker\(nextBroker, options = \{\}\)/);
   assert.match(mainSource, /if \(requestedBroker === "auto"\) \{/);
   assert.match(mainSource, /const preferredBroker = resolveAutoChartPrimaryBroker\(\);/);

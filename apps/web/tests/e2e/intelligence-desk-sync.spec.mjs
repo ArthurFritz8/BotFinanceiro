@@ -23,6 +23,15 @@ const basePriceByAsset = {
   xrp: 1.38,
 };
 
+let delayedStrategyChartRequests = 0;
+let strategyChartDelayMs = 0;
+
+function waitMs(durationMs) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, durationMs);
+  });
+}
+
 function buildSyntheticPoints(basePrice, range) {
   const pointCount = range === "24h" ? 48 : range === "7d" ? 60 : 72;
   const now = Date.now();
@@ -151,6 +160,11 @@ async function handleApiRoute(route) {
   const url = new URL(route.request().url());
 
   if (url.pathname === "/v1/crypto/strategy-chart") {
+    if (delayedStrategyChartRequests > 0 && strategyChartDelayMs > 0) {
+      delayedStrategyChartRequests -= 1;
+      await waitMs(strategyChartDelayMs);
+    }
+
     const assetId = (url.searchParams.get("assetId") ?? "bitcoin").toLowerCase();
     const range = url.searchParams.get("range") ?? "7d";
     const exchange = (url.searchParams.get("exchange") ?? "auto").toLowerCase();
@@ -271,6 +285,9 @@ async function handleApiRoute(route) {
 }
 
 test.beforeEach(async ({ page }) => {
+  delayedStrategyChartRequests = 0;
+  strategyChartDelayMs = 0;
+
   await page.addInitScript(() => {
     const forceHideAuthGate = () => {
       const authGate = document.querySelector("#auth-gate");
@@ -364,4 +381,26 @@ test("intelligence desk acompanha moeda, janela e simbolo com telemetria", async
   expect(telemetry.requests).toBeGreaterThan(0);
   expect(telemetry.successRatePercent).toBeGreaterThanOrEqual(0);
   expect(telemetry.p95LatencyMs).toBeGreaterThanOrEqual(0);
+});
+
+test("intelligence desk preserva ultimo contexto com trocas durante loading", async ({ page }) => {
+  delayedStrategyChartRequests = 1;
+  strategyChartDelayMs = 800;
+
+  await page.goto("/");
+
+  const chartLabRouteButton = page.locator('#app-route-nav button[data-route="chart-lab"]');
+
+  if (await chartLabRouteButton.count()) {
+    await chartLabRouteButton.first().click();
+  }
+
+  await expect(page.locator("#chart-controls")).toBeVisible();
+
+  await page.selectOption("#chart-asset", "ethereum");
+  await page.selectOption("#chart-asset", "solana");
+
+  await expect(page.locator("#chart-status")).toContainText("SOLANA", {
+    timeout: 15000,
+  });
 });
