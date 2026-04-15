@@ -27,6 +27,11 @@ import {
 } from "../../futures/application/futures-market-service.js";
 import { B3MarketService } from "../../b3/application/b3-market-service.js";
 import { CommoditiesMarketService } from "../../commodities/application/commodities-market-service.js";
+import {
+  getCryptoChartLiveBrokerResilienceSnapshot,
+  type CryptoChartLiveBrokerResilienceSnapshot,
+  type LiveChartRequestedBroker,
+} from "../../crypto/application/crypto-chart-service.js";
 import { CryptoMarketOverviewService } from "../../crypto/application/crypto-market-overview-service.js";
 import { DefiMarketService } from "../../defi/application/defi-market-service.js";
 import { EquitiesMarketService } from "../../equities/application/equities-market-service.js";
@@ -230,6 +235,8 @@ export interface ReadinessStatus {
 export interface BrokerLiveQuoteStreamHealth extends BrokerLiveQuoteStreamMetricsSnapshot {}
 
 export interface CryptoLiveChartHealth extends CryptoLiveChartMetricsSnapshot {}
+
+export interface CryptoLiveChartResilienceHealth extends CryptoChartLiveBrokerResilienceSnapshot {}
 
 export interface AirdropsIntelligenceHealth extends AirdropsIntelligenceMetricsSnapshot {}
 
@@ -750,6 +757,14 @@ export class SystemStatusService {
 
   public getCryptoLiveChartHealth(): CryptoLiveChartHealth {
     return cryptoLiveChartMetricsStore.getSnapshot();
+  }
+
+  public getCryptoLiveChartResilienceHealth(options?: {
+    requestedBroker?: LiveChartRequestedBroker;
+  }): CryptoLiveChartResilienceHealth {
+    return getCryptoChartLiveBrokerResilienceSnapshot({
+      requestedBroker: options?.requestedBroker,
+    });
   }
 
   public getAirdropsIntelligenceHealth(): AirdropsIntelligenceHealth {

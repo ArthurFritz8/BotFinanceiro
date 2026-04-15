@@ -17,6 +17,7 @@ import {
   getAirdropsIntelligenceHealth,
   getBrokerLiveQuoteStreamHealth,
   getCryptoLiveChartHealth,
+  getCryptoLiveChartResilienceHealth,
   getCopilotAuditHistory,
   getFuturesMarketStreamHealth,
   getHealth,
@@ -52,6 +53,11 @@ export function registerSystemRoutes(app: FastifyInstance): void {
   app.get("/internal/health/market-navigator/modules", internalRouteOptions, getMarketNavigatorModulesHealth);
   app.get("/internal/health/streams/brokers.csv", internalRouteOptions, exportBrokerLiveQuoteStreamHealthCsv);
   app.get("/internal/health/live-chart/crypto", internalRouteOptions, getCryptoLiveChartHealth);
+  app.get(
+    "/internal/health/live-chart/crypto/resilience",
+    internalRouteOptions,
+    getCryptoLiveChartResilienceHealth,
+  );
   app.get("/internal/health/live-chart/crypto.csv", internalRouteOptions, exportCryptoLiveChartHealthCsv);
   app.get("/internal/health/airdrops", internalRouteOptions, getAirdropsIntelligenceHealth);
   app.get("/internal/health/airdrops.csv", internalRouteOptions, exportAirdropsIntelligenceHealthCsv);

@@ -20,6 +20,9 @@ const {
   cryptoLiveChartMetricsStore,
 } = await import("../../../shared/observability/crypto-live-chart-metrics-store.js");
 const {
+  resetCryptoChartLiveBrokerResilienceState,
+} = await import("../../crypto/application/crypto-chart-service.js");
+const {
   airdropsIntelligenceMetricsStore,
 } = await import("../../../shared/observability/airdrops-intelligence-metrics-store.js");
 const app = buildApp();
@@ -274,6 +277,30 @@ interface CryptoLiveChartHealthResponse {
   };
 }
 
+interface CryptoLiveChartResilienceHealthResponse {
+  brokers: Array<{
+    broker: "binance" | "bybit" | "coinbase" | "kraken" | "okx";
+    circuitOpen: boolean;
+    circuitRemainingMs: number;
+    failureStreak: number;
+    healthScore: number;
+    metrics: {
+      failedRequests: number;
+      lastErrorAt: string | null;
+      lastErrorMessage: string | null;
+      lastSuccessAt: string | null;
+      p95LatencyMs: number | null;
+      requests: number;
+      successRatePercent: number;
+      successfulRequests: number;
+    };
+  }>;
+  failoverChain: Array<"binance" | "bybit" | "coinbase" | "kraken" | "okx">;
+  generatedAt: string;
+  requestedBroker: "auto" | "binance" | "bybit" | "coinbase" | "kraken" | "okx";
+  resolvedPreferredBroker: "binance" | "bybit" | "coinbase" | "kraken" | "okx";
+}
+
 interface AirdropsIntelligenceHealthResponse {
   generatedAt: string;
   global: {
@@ -419,6 +446,7 @@ const originalCopilotStoreState = {
 void beforeEach(() => {
   brokerLiveQuoteStreamMetricsStore.reset();
   cryptoLiveChartMetricsStore.reset();
+  resetCryptoChartLiveBrokerResilienceState();
   airdropsIntelligenceMetricsStore.reset();
 
   storeInternal.initialized = true;
@@ -762,6 +790,65 @@ void it("GET /internal/health/live-chart/crypto retorna metricas agregadas por b
   assert.equal(body.data.brokers.okx.failedRequests, 1);
   assert.equal(body.data.brokers.okx.lastErrorMessage, "okx timeout");
   assert.equal(body.data.brokers.okx.lastLatencyMs, 420);
+});
+
+void it("GET /internal/health/live-chart/crypto/resilience retorna 401 sem token", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/internal/health/live-chart/crypto/resilience",
+  });
+
+  assert.equal(response.statusCode, 401);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "INTERNAL_AUTH_MISSING_TOKEN");
+  assert.equal(body.error.message, "Missing internal route token");
+});
+
+void it("GET /internal/health/live-chart/crypto/resilience retorna telemetria de auto-selecao e failover", async () => {
+  cryptoLiveChartMetricsStore.onRefreshError({
+    broker: "binance",
+    latencyMs: 480,
+    message: "binance timeout",
+  });
+  cryptoLiveChartMetricsStore.onRefreshSuccess({
+    broker: "bybit",
+    latencyMs: 90,
+  });
+  cryptoLiveChartMetricsStore.onRefreshSuccess({
+    broker: "bybit",
+    latencyMs: 110,
+  });
+
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/health/live-chart/crypto/resilience?requestedBroker=auto",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<CryptoLiveChartResilienceHealthResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.requestedBroker, "auto");
+  assert.equal(body.data.resolvedPreferredBroker, "bybit");
+  assert.equal(body.data.failoverChain[0], "bybit");
+  assert.equal(body.data.brokers.length, 5);
+
+  const bybit = body.data.brokers.find((item) => item.broker === "bybit");
+  const binance = body.data.brokers.find((item) => item.broker === "binance");
+
+  assert.ok(bybit);
+  assert.ok(binance);
+  assert.equal(bybit?.metrics.requests, 2);
+  assert.equal(bybit?.metrics.successfulRequests, 2);
+  assert.equal(bybit?.metrics.failedRequests, 0);
+  assert.equal(binance?.metrics.requests, 1);
+  assert.equal(binance?.metrics.failedRequests, 1);
+  assert.equal(binance?.metrics.lastErrorMessage, "binance timeout");
 });
 
 void it("GET /internal/health/live-chart/crypto.csv retorna 401 sem token", async () => {

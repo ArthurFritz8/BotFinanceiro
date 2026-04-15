@@ -1261,6 +1261,7 @@ const TERMINAL_STYLE_TO_TV = {
 };
 const TRADINGVIEW_EMBED_BASE_URL = "https://s.tradingview.com/widgetembed/";
 const EXCHANGE_TO_BROKER = {
+  AUTO: "auto",
   BINANCE: "binance",
   BYBIT: "bybit",
   COINBASE: "coinbase",
@@ -1268,7 +1269,7 @@ const EXCHANGE_TO_BROKER = {
   OKX: "okx",
 };
 const BROKER_FAILOVER_ORDER = ["binance", "bybit", "coinbase", "kraken", "okx"];
-const EXCHANGES_WITH_NATIVE_LIVE = new Set(["BINANCE", "BYBIT", "COINBASE", "KRAKEN", "OKX"]);
+const EXCHANGES_WITH_NATIVE_LIVE = new Set(["AUTO", "BINANCE", "BYBIT", "COINBASE", "KRAKEN", "OKX"]);
 const INSTITUTIONAL_MACRO_MODULES = new Set([
   "b3",
   "commodities",
@@ -7686,6 +7687,11 @@ function getSelectedTerminalExchange() {
   return "BINANCE";
 }
 
+function getTradingViewTerminalExchange() {
+  const exchange = getSelectedTerminalExchange();
+  return exchange === "AUTO" ? "BINANCE" : exchange;
+}
+
 function getSelectedTerminalInterval() {
   if (!(chartIntervalSwitch instanceof HTMLElement)) {
     return "60";
@@ -7732,7 +7738,7 @@ function resolveTradingViewExchangePrefix(symbol) {
   const normalizedSymbol = sanitizeTerminalSymbol(symbol);
 
   if (normalizedSymbol.length < 2) {
-    return getSelectedTerminalExchange();
+    return getTradingViewTerminalExchange();
   }
 
   if (chartSymbolSourceModule === "b3" || chartSymbolSourceModule === "fiis") {
@@ -7748,7 +7754,7 @@ function resolveTradingViewExchangePrefix(symbol) {
   }
 
   if (isLikelyCryptoTerminalSymbol(normalizedSymbol)) {
-    return getSelectedTerminalExchange();
+    return getTradingViewTerminalExchange();
   }
 
   if (/^(DXY|VIX|DJI|NDX|SPX|RUT|TNX|FVX|IRX|US0?2Y|US0?5Y|US10Y|US30Y)/.test(normalizedSymbol)) {
@@ -9254,6 +9260,20 @@ function normalizeBrokerName(broker) {
   return BROKER_FAILOVER_ORDER.includes(normalized) ? normalized : "binance";
 }
 
+function normalizeRequestedBroker(broker) {
+  if (typeof broker !== "string") {
+    return "binance";
+  }
+
+  const normalized = broker.trim().toLowerCase();
+
+  if (normalized === "auto") {
+    return "auto";
+  }
+
+  return normalizeBrokerName(normalized);
+}
+
 function resolveExchangeLabelFromBroker(broker) {
   const normalizedBroker = normalizeBrokerName(broker);
 
@@ -9466,7 +9486,7 @@ async function runMarketRequestWithRetry(requestFactory, options = {}) {
 
 async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "binance") {
   return runMarketRequestWithRetry(async () => {
-    const normalizedExchange = normalizeBrokerName(exchange);
+    const normalizedExchange = normalizeRequestedBroker(exchange);
     const normalizedMode = mode === "live" ? "live" : "delayed";
     const params = new URLSearchParams({
       assetId,
@@ -9496,7 +9516,36 @@ async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "bina
 }
 
 async function requestCryptoChart(assetId, range, mode, exchange) {
-  const requestedBroker = normalizeBrokerName(exchange);
+  const requestedBroker = normalizeRequestedBroker(exchange);
+
+  if (requestedBroker === "auto") {
+    try {
+      const targetMode = mode === "live" ? "live" : "delayed";
+      const snapshot = await requestCryptoChartEndpoint(assetId, range, targetMode, requestedBroker);
+      return {
+        fallbackReason: "",
+        resolvedBroker: normalizeBrokerName(snapshot?.provider),
+        resolvedMode: snapshot?.mode === "live" ? "live" : "delayed",
+        snapshot,
+      };
+    } catch (error) {
+      const message = getErrorMessage(error, "Falha ao consultar grafico");
+      const normalizedMessage = normalizeChartApiErrorMessage(message, "Falha ao consultar grafico");
+
+      if (mode !== "live" || !isRetryableMarketApiErrorMessage(message)) {
+        throw new Error(normalizedMessage);
+      }
+
+      const delayedSnapshot = await requestCryptoChartEndpoint(assetId, range, "delayed", requestedBroker);
+      return {
+        fallbackReason: "Live indisponivel, fallback delayed acionado (auto broker)",
+        resolvedBroker: normalizeBrokerName(delayedSnapshot?.provider),
+        resolvedMode: delayedSnapshot?.mode === "live" ? "live" : "delayed",
+        snapshot: delayedSnapshot,
+      };
+    }
+  }
+
   const primaryChain = buildBrokerFailoverChain(requestedBroker);
   const primarySkippedByCircuit =
     primaryChain.length > 0
@@ -9782,10 +9831,15 @@ function connectChartLiveStream(intervalMs) {
 
   const assetId = chartAssetSelect.value;
   const range = chartRangeSelect.value;
-  const selectedBroker = normalizeBrokerName(getSelectedBroker());
-  const streamFailoverChain = buildBrokerFailoverChain(selectedBroker);
+  const selectedRequestedBroker = normalizeRequestedBroker(getSelectedBroker());
+  const selectedBroker = selectedRequestedBroker === "auto"
+    ? "auto"
+    : normalizeBrokerName(selectedRequestedBroker);
+  const streamFailoverChain = selectedBroker === "auto"
+    ? ["auto"]
+    : buildBrokerFailoverChain(selectedBroker);
   const exchange = streamFailoverChain[0] ?? selectedBroker;
-  const streamKey = `${assetId}:${selectedBroker}:${exchange}:${range}:${intervalMs}`;
+  const streamKey = `${assetId}:${selectedRequestedBroker}:${exchange}:${range}:${intervalMs}`;
 
   if (chartLiveStream && chartLiveStreamKey === streamKey) {
     return true;
@@ -9798,7 +9852,7 @@ function connectChartLiveStream(intervalMs) {
   const eventSource = new EventSource(streamUrl);
   chartLiveStream = eventSource;
 
-  if (exchange !== selectedBroker) {
+  if (selectedBroker !== "auto" && exchange !== selectedBroker) {
     setChartLegend(
       `Stream live em contingencia: ${selectedBroker.toUpperCase()} -> ${exchange.toUpperCase()}.`,
       "warn",
@@ -9828,12 +9882,13 @@ function connectChartLiveStream(intervalMs) {
       return;
     }
 
-    markBrokerSuccess(exchange);
+    const resolvedStreamBroker = normalizeBrokerName(snapshot?.provider ?? exchange);
+    markBrokerSuccess(resolvedStreamBroker);
     stopChartLiveFallbackPolling();
     chartLiveStreamReconnectAttempt = 0;
 
     try {
-      const selectedExchangeForStatus = resolveExchangeLabelFromBroker(exchange);
+      const selectedExchangeForStatus = resolveExchangeLabelFromBroker(resolvedStreamBroker);
       applyChartSnapshot(snapshot, {
         selectedExchange: selectedExchangeForStatus,
         transport: "stream",
@@ -9855,7 +9910,11 @@ function connectChartLiveStream(intervalMs) {
     const message = typeof payload?.message === "string"
       ? payload.message
       : "Stream de chart reportou falha";
-    markBrokerFailure(exchange, message);
+
+    if (exchange !== "auto") {
+      markBrokerFailure(exchange, message);
+    }
+
     startChartLiveFallbackPolling();
     setChartStatus(
       normalizeBrokerApiErrorMessage(message, "Stream de chart reportou falha"),
@@ -9864,7 +9923,7 @@ function connectChartLiveStream(intervalMs) {
   });
 
   eventSource.onerror = () => {
-    if (normalizeBrokerName(getSelectedBroker()) !== selectedBroker) {
+    if (normalizeRequestedBroker(getSelectedBroker()) !== selectedRequestedBroker) {
       return;
     }
 
@@ -9872,7 +9931,10 @@ function connectChartLiveStream(intervalMs) {
       return;
     }
 
-    markBrokerFailure(exchange, "Stream live desconectado");
+    if (exchange !== "auto") {
+      markBrokerFailure(exchange, "Stream live desconectado");
+    }
+
     stopChartLiveStream();
     startChartLiveFallbackPolling();
     chartLiveStreamReconnectAttempt += 1;

@@ -24,6 +24,7 @@ export type CryptoChartRange = "24h" | "7d" | "30d" | "90d" | "1y";
 export type CryptoTrend = "bearish" | "bullish" | "sideways";
 export type TradeAction = "buy" | "sell" | "wait";
 export type LiveChartBroker = "binance" | ExchangeBroker;
+export type LiveChartRequestedBroker = "auto" | LiveChartBroker;
 export type CryptoChartProvider = "coingecko" | LiveChartBroker;
 export type MarketStructureSignal = "bearish" | "bullish" | "none";
 export type MarketStructureBias = "bearish" | "bullish" | "neutral";
@@ -266,9 +267,19 @@ function markLiveBrokerFailure(broker: LiveChartBroker, error: unknown): void {
   liveBrokerFailureStreakByName.set(broker, 0);
 }
 
+type LiveChartMetricsSnapshot = ReturnType<typeof cryptoLiveChartMetricsStore.getSnapshot>;
+
+function normalizeRequestedLiveBroker(requestedBroker: LiveChartRequestedBroker): LiveChartRequestedBroker {
+  if (requestedBroker === "auto") {
+    return "auto";
+  }
+
+  return liveBrokerFailoverOrder.includes(requestedBroker) ? requestedBroker : "binance";
+}
+
 function computeLiveBrokerHealthScore(
   broker: LiveChartBroker,
-  snapshot: ReturnType<typeof cryptoLiveChartMetricsStore.getSnapshot>,
+  snapshot: LiveChartMetricsSnapshot,
   nowMs: number,
 ): number {
   const brokerMetrics = snapshot.brokers[broker];
@@ -298,12 +309,53 @@ function computeLiveBrokerHealthScore(
   return successRateScore - latencyPenalty - recentErrorPenalty;
 }
 
-function buildLiveBrokerFailoverChain(preferredBroker: LiveChartBroker): LiveChartBroker[] {
+function resolveAutoLivePreferredBroker(options?: {
+  metricsSnapshot?: LiveChartMetricsSnapshot;
+  nowMs?: number;
+}): LiveChartBroker {
+  const nowMs = Number.isFinite(options?.nowMs) ? Number(options?.nowMs) : Date.now();
+  const metricsSnapshot = options?.metricsSnapshot ?? cryptoLiveChartMetricsStore.getSnapshot();
+  const rankedBrokers = [...liveBrokerFailoverOrder].sort((leftBroker, rightBroker) => {
+    const leftScore = computeLiveBrokerHealthScore(leftBroker, metricsSnapshot, nowMs);
+    const rightScore = computeLiveBrokerHealthScore(rightBroker, metricsSnapshot, nowMs);
+
+    if (rightScore !== leftScore) {
+      return rightScore - leftScore;
+    }
+
+    return liveBrokerFailoverOrder.indexOf(leftBroker) - liveBrokerFailoverOrder.indexOf(rightBroker);
+  });
+  const activeRankedBrokers = rankedBrokers.filter((broker) => !isLiveBrokerCircuitOpen(broker, nowMs));
+
+  if (activeRankedBrokers.length > 0) {
+    return activeRankedBrokers[0] ?? "binance";
+  }
+
+  return rankedBrokers[0] ?? "binance";
+}
+
+function resolvePreferredLiveBroker(requestedBroker: LiveChartRequestedBroker, options?: {
+  metricsSnapshot?: LiveChartMetricsSnapshot;
+  nowMs?: number;
+}): LiveChartBroker {
+  const normalizedRequestedBroker = normalizeRequestedLiveBroker(requestedBroker);
+
+  if (normalizedRequestedBroker === "auto") {
+    return resolveAutoLivePreferredBroker(options);
+  }
+
+  return normalizedRequestedBroker;
+}
+
+function buildLiveBrokerFailoverChain(preferredBroker: LiveChartBroker, options?: {
+  metricsSnapshot?: LiveChartMetricsSnapshot;
+  nowMs?: number;
+}): LiveChartBroker[] {
   const normalizedPreferred = liveBrokerFailoverOrder.includes(preferredBroker)
     ? preferredBroker
     : "binance";
-  const nowMs = Date.now();
-  const metricsSnapshot = cryptoLiveChartMetricsStore.getSnapshot();
+  const nowMs = Number.isFinite(options?.nowMs) ? Number(options?.nowMs) : Date.now();
+  const metricsSnapshot = options?.metricsSnapshot ?? cryptoLiveChartMetricsStore.getSnapshot();
   const alternativeBrokers = liveBrokerFailoverOrder
     .filter((broker) => broker !== normalizedPreferred)
     .sort((leftBroker, rightBroker) => {
@@ -319,6 +371,77 @@ function buildLiveBrokerFailoverChain(preferredBroker: LiveChartBroker): LiveCha
   }
 
   return strictChain;
+}
+
+export interface CryptoChartLiveBrokerResilienceBrokerSnapshot {
+  broker: LiveChartBroker;
+  circuitOpen: boolean;
+  circuitRemainingMs: number;
+  failureStreak: number;
+  healthScore: number;
+  metrics: {
+    failedRequests: number;
+    lastErrorAt: string | null;
+    lastErrorMessage: string | null;
+    lastSuccessAt: string | null;
+    p95LatencyMs: number | null;
+    requests: number;
+    successRatePercent: number;
+    successfulRequests: number;
+  };
+}
+
+export interface CryptoChartLiveBrokerResilienceSnapshot {
+  brokers: CryptoChartLiveBrokerResilienceBrokerSnapshot[];
+  failoverChain: LiveChartBroker[];
+  generatedAt: string;
+  requestedBroker: LiveChartRequestedBroker;
+  resolvedPreferredBroker: LiveChartBroker;
+}
+
+export function getCryptoChartLiveBrokerResilienceSnapshot(input?: {
+  requestedBroker?: LiveChartRequestedBroker;
+}): CryptoChartLiveBrokerResilienceSnapshot {
+  const requestedBroker = normalizeRequestedLiveBroker(input?.requestedBroker ?? "auto");
+  const nowMs = Date.now();
+  const metricsSnapshot = cryptoLiveChartMetricsStore.getSnapshot();
+  const resolvedPreferredBroker = resolvePreferredLiveBroker(requestedBroker, {
+    metricsSnapshot,
+    nowMs,
+  });
+
+  return {
+    brokers: liveBrokerFailoverOrder.map((broker) => {
+      const brokerMetrics = metricsSnapshot.brokers[broker];
+
+      return {
+        broker,
+        circuitOpen: isLiveBrokerCircuitOpen(broker, nowMs),
+        circuitRemainingMs: getLiveBrokerCircuitRemainingMs(broker, nowMs),
+        failureStreak: getLiveBrokerFailureStreak(broker),
+        healthScore: Number(
+          computeLiveBrokerHealthScore(broker, metricsSnapshot, nowMs).toFixed(2),
+        ),
+        metrics: {
+          failedRequests: brokerMetrics.failedRequests,
+          lastErrorAt: brokerMetrics.lastErrorAt,
+          lastErrorMessage: brokerMetrics.lastErrorMessage,
+          lastSuccessAt: brokerMetrics.lastSuccessAt,
+          p95LatencyMs: brokerMetrics.p95LatencyMs,
+          requests: brokerMetrics.requests,
+          successRatePercent: brokerMetrics.successRatePercent,
+          successfulRequests: brokerMetrics.successfulRequests,
+        },
+      };
+    }),
+    failoverChain: buildLiveBrokerFailoverChain(resolvedPreferredBroker, {
+      metricsSnapshot,
+      nowMs,
+    }),
+    generatedAt: new Date(nowMs).toISOString(),
+    requestedBroker,
+    resolvedPreferredBroker,
+  };
 }
 
 export function resetCryptoChartLiveBrokerResilienceState(): void {
@@ -362,7 +485,7 @@ function buildCacheKey(
   assetId: string,
   currency: string,
   range: CryptoChartRange,
-  broker?: LiveChartBroker,
+  broker?: LiveChartRequestedBroker,
 ): string {
   if (mode === "live") {
     return `crypto:chart:${mode}:${assetId}:${currency}:${range}:${broker ?? "binance"}`;
@@ -1397,13 +1520,15 @@ export class CryptoChartService {
   public async getLiveStreamSnapshot(input: {
     assetId: string;
     range: CryptoChartRange;
-    broker?: LiveChartBroker;
+    broker?: LiveChartRequestedBroker;
   }): Promise<CryptoChartResponse> {
-    const liveBroker = input.broker ?? "binance";
+    const requestedBroker = normalizeRequestedLiveBroker(input.broker ?? "binance");
+    const preferredBroker = resolvePreferredLiveBroker(requestedBroker);
     const normalizedInput = {
       assetId: input.assetId.toLowerCase(),
-      broker: liveBroker,
+      broker: preferredBroker,
       currency: "usd",
+      requestedBroker,
       range: input.range,
     };
 
@@ -1419,7 +1544,7 @@ export class CryptoChartService {
           livePayload.assetId,
           livePayload.currency,
           livePayload.range,
-          normalizedInput.broker,
+          normalizedInput.requestedBroker,
         );
 
         memoryCache.set(cacheKey, livePayload, liveChartFreshTtlSeconds, liveChartStaleSeconds);
@@ -1492,13 +1617,15 @@ export class CryptoChartService {
   public async getLiveChart(input: {
     assetId: string;
     range: CryptoChartRange;
-    broker?: LiveChartBroker;
+    broker?: LiveChartRequestedBroker;
   }): Promise<CryptoChartResponse> {
-    const liveBroker = input.broker ?? "binance";
+    const requestedBroker = normalizeRequestedLiveBroker(input.broker ?? "binance");
+    const preferredBroker = resolvePreferredLiveBroker(requestedBroker);
     const normalizedInput = {
       assetId: input.assetId.toLowerCase(),
-      broker: liveBroker,
+      broker: preferredBroker,
       currency: "usd",
+      requestedBroker,
       range: input.range,
     };
     const cacheKey = buildCacheKey(
@@ -1506,7 +1633,7 @@ export class CryptoChartService {
       normalizedInput.assetId,
       normalizedInput.currency,
       normalizedInput.range,
-      normalizedInput.broker,
+      normalizedInput.requestedBroker,
     );
     const cachedPayload = memoryCache.get<CachedChartPayload>(cacheKey);
 
@@ -1529,6 +1656,7 @@ export class CryptoChartService {
     assetId: string;
     broker: LiveChartBroker;
     currency: string;
+    requestedBroker: LiveChartRequestedBroker;
     range: CryptoChartRange;
   }): Promise<CryptoChartResponse> {
     const brokerChain = buildLiveBrokerFailoverChain(input.broker);
@@ -1548,7 +1676,7 @@ export class CryptoChartService {
           payload.assetId,
           payload.currency,
           payload.range,
-          input.broker,
+          input.requestedBroker,
         );
 
         memoryCache.set(cacheKey, payload, liveChartFreshTtlSeconds, liveChartStaleSeconds);
@@ -1573,7 +1701,7 @@ export class CryptoChartService {
       code: "LIVE_CHART_ALL_BROKERS_FAILED",
       details: {
         brokersTried: failures,
-        requestedBroker: input.broker,
+        requestedBroker: input.requestedBroker,
         retryable: true,
       },
       message:

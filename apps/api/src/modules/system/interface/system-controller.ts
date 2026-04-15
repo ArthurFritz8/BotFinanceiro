@@ -91,6 +91,10 @@ const marketNavigatorModulesHealthQuerySchema = z.object({
     .transform((value) => typeof value === "string" && value.toLowerCase() === "true"),
 });
 
+const cryptoLiveChartResilienceQuerySchema = z.object({
+  requestedBroker: z.enum(["auto", "binance", "bybit", "coinbase", "kraken", "okx"]).default("auto"),
+});
+
 export function getHealth(request: FastifyRequest, reply: FastifyReply): void {
   const data = systemStatusService.getHealthStatus();
   void reply.send(buildSuccessResponse(request.id, data));
@@ -141,6 +145,14 @@ export function exportBrokerLiveQuoteStreamHealthCsv(
 
 export function getCryptoLiveChartHealth(request: FastifyRequest, reply: FastifyReply): void {
   const data = systemStatusService.getCryptoLiveChartHealth();
+  void reply.send(buildSuccessResponse(request.id, data));
+}
+
+export function getCryptoLiveChartResilienceHealth(request: FastifyRequest, reply: FastifyReply): void {
+  const parsedQuery = cryptoLiveChartResilienceQuerySchema.parse(request.query);
+  const data = systemStatusService.getCryptoLiveChartResilienceHealth({
+    requestedBroker: parsedQuery.requestedBroker,
+  });
   void reply.send(buildSuccessResponse(request.id, data));
 }
 

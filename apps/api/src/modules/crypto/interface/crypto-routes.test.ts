@@ -8,6 +8,7 @@ process.env.INTERNAL_API_TOKEN ??= "test_internal_token_12345";
 
 const { buildApp } = await import("../../../main/app.js");
 const { memoryCache } = await import("../../../shared/cache/memory-cache.js");
+const { cryptoLiveChartMetricsStore } = await import("../../../shared/observability/crypto-live-chart-metrics-store.js");
 const { resetCryptoChartLiveBrokerResilienceState } = await import("../application/crypto-chart-service.js");
 
 const app = buildApp();
@@ -19,6 +20,7 @@ type LiveChartBroker = "binance" | "bybit" | "coinbase" | "kraken" | "okx";
 void beforeEach(() => {
   globalThis.fetch = originalFetch;
   memoryCache.clear();
+  cryptoLiveChartMetricsStore.reset();
   resetCryptoChartLiveBrokerResilienceState();
 });
 
@@ -626,6 +628,113 @@ void it("GET /v1/crypto/live-chart aplica failover para Bybit quando Binance fal
   assert.equal(response.statusCode, 200);
   assert.ok(binanceKlineCalls >= 1);
   assert.ok(binanceTickerCalls >= 1);
+  assert.equal(bybitKlineCalls, 1);
+  assert.equal(bybitTickerCalls, 1);
+
+  const body = response.json<{
+    data: {
+      live: {
+        source: LiveChartBroker;
+        symbol: string;
+      } | null;
+      mode: "live";
+      provider: LiveChartBroker;
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.mode, "live");
+  assert.equal(body.data.provider, "bybit");
+  assert.equal(body.data.live?.source, "bybit");
+  assert.equal(body.data.live?.symbol, "BTCUSDT");
+});
+
+void it("GET /v1/crypto/live-chart aceita exchange=auto e prioriza broker mais saudavel", async () => {
+  let binanceCalls = 0;
+  let bybitKlineCalls = 0;
+  let bybitTickerCalls = 0;
+
+  cryptoLiveChartMetricsStore.onRefreshError({
+    broker: "binance",
+    latencyMs: 500,
+    message: "binance degraded",
+  });
+  cryptoLiveChartMetricsStore.onRefreshSuccess({
+    broker: "bybit",
+    latencyMs: 80,
+  });
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("api.binance.com")) {
+      binanceCalls += 1;
+      return Promise.reject(new Error("Binance should not be called in auto mode after health ranking"));
+    }
+
+    if (requestUrl.includes("api.bybit.com/v5/market/kline") && requestUrl.includes("symbol=BTCUSDT")) {
+      bybitKlineCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            result: {
+              list: [
+                ["1712001200000", "65240", "65380", "65200", "65310", "1240"],
+                ["1712000900000", "65190", "65310", "65150", "65240", "1190"],
+                ["1712000600000", "65120", "65230", "65080", "65190", "1030"],
+                ["1712000300000", "65080", "65190", "65010", "65120", "980"],
+                ["1712000000000", "65000", "65140", "64920", "65080", "1100"],
+              ],
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.bybit.com/v5/market/tickers") && requestUrl.includes("symbol=BTCUSDT")) {
+      bybitTickerCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            result: {
+              list: [
+                {
+                  lastPrice: "65312.45",
+                  price24hPcnt: "0.0173",
+                  turnover24h: "65234.11",
+                },
+              ],
+            },
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=auto",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(binanceCalls, 0);
   assert.equal(bybitKlineCalls, 1);
   assert.equal(bybitTickerCalls, 1);
 

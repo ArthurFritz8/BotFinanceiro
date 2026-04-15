@@ -53,7 +53,7 @@ const chartQuerySchema = z.object({
   range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("7d"),
 });
 
-const liveChartExchangeSchema = z.enum(["binance", "bybit", "coinbase", "kraken", "okx"]);
+const liveChartExchangeSchema = z.enum(["auto", "binance", "bybit", "coinbase", "kraken", "okx"]);
 
 const liveChartQuerySchema = z.object({
   assetId: z.string().trim().min(1).default("bitcoin"),
