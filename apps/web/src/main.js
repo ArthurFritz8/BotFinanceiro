@@ -145,6 +145,7 @@ const MARKET_HTTP_RETRY_BASE_DELAY_MS = 280;
 const BROKER_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
 const BROKER_CIRCUIT_BREAKER_COOLDOWN_MS = 120000;
 const CHART_AUTO_BROKER_STICKY_MS = 180000;
+const CHART_TRANSIENT_LEGEND_MIN_INTERVAL_MS = 8000;
 const WATCHLIST_STREAM_FALLBACK_POLL_MS = 6000;
 const CHART_STREAM_FALLBACK_POLL_MS = 4000;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
@@ -1451,6 +1452,8 @@ let chartLiveStreamReconnectAttempt = 0;
 let chartLiveStreamKey = "";
 let chartAutoPreferredBroker = "binance";
 let chartAutoPreferredBrokerLockUntilMs = 0;
+let chartLastTransientLegendMessage = "";
+let chartLastTransientLegendAtMs = 0;
 let chartLiveFallbackPollTimer = null;
 let isChartLoading = false;
 let chartApi = null;
@@ -6828,6 +6831,21 @@ function setChartLegend(message, mode = "") {
   }
 }
 
+function setChartLegendTransient(message, mode = "warn") {
+  const nowMs = Date.now();
+
+  if (
+    message === chartLastTransientLegendMessage
+    && nowMs - chartLastTransientLegendAtMs < CHART_TRANSIENT_LEGEND_MIN_INTERVAL_MS
+  ) {
+    return;
+  }
+
+  chartLastTransientLegendMessage = message;
+  chartLastTransientLegendAtMs = nowMs;
+  setChartLegend(message, mode);
+}
+
 function sanitizeTerminalSymbol(value) {
   return String(value ?? "")
     .toUpperCase()
@@ -9838,9 +9856,7 @@ function applyChartSnapshot(snapshot, options = {}) {
     statusMode,
   );
 
-  if (chartViewMode === "tv") {
-    setChartLegend(buildTerminalReadyStatus());
-  } else if (combinedFallbackReason.length > 0) {
+  if (chartViewMode !== "tv" && combinedFallbackReason.length > 0) {
     setChartLegend(`Fallback ativo: ${combinedFallbackReason}. Exibindo delayed temporariamente.`, "warn");
   }
 }
@@ -10015,7 +10031,7 @@ function connectChartLiveStream(intervalMs) {
     const normalizedMessage = normalizeBrokerApiErrorMessage(message, "Stream de chart reportou falha");
 
     if (chartViewMode === "tv" && currentChartSnapshot) {
-      setChartLegend(`Stream com oscilacao: ${normalizedMessage}`, "warn");
+      setChartLegendTransient(`Stream com oscilacao: ${normalizedMessage}`, "warn");
     } else {
       setChartStatus(normalizedMessage, "error");
     }
@@ -10049,7 +10065,7 @@ function connectChartLiveStream(intervalMs) {
     const backoffMs = Math.min(30000, 1200 * 2 ** chartLiveStreamReconnectAttempt);
 
     if (chartViewMode === "tv" && currentChartSnapshot) {
-      setChartLegend(`Reconectando stream live em ${Math.round(backoffMs / 1000)}s...`, "warn");
+      setChartLegendTransient(`Reconectando stream live em ${Math.round(backoffMs / 1000)}s...`, "warn");
     } else {
       setChartStatus(`Reconectando stream live em ${Math.round(backoffMs / 1000)}s...`, "loading");
     }
