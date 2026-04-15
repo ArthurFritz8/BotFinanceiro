@@ -375,6 +375,145 @@ void it("GET /v1/crypto/chart usa fallback Binance quando CoinGecko falha", asyn
   assert.equal(body.data.points[4]?.close, 64920);
 });
 
+void it("GET /v1/crypto/strategy-chart usa pipeline delayed por padrao", async () => {
+  let coinGeckoCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("api.coingecko.com/api/v3/coins/bitcoin/market_chart")) {
+      coinGeckoCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            prices: [
+              [1712000000000, 64210],
+              [1712003600000, 64480],
+              [1712007200000, 64620],
+              [1712010800000, 64755],
+              [1712014400000, 64905],
+            ],
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/strategy-chart?assetId=bitcoin&currency=usd&range=24h",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(coinGeckoCalls, 1);
+
+  const body = response.json<{
+    data: {
+      mode: "delayed";
+      points: Array<{
+        close: number;
+      }>;
+      provider: "binance" | "coingecko";
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.mode, "delayed");
+  assert.equal(body.data.provider, "coingecko");
+  assert.equal(body.data.points.length, 5);
+});
+
+void it("GET /v1/crypto/strategy-chart usa pipeline live quando mode=live", async () => {
+  let klineCalls = 0;
+  let tickerCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("api.binance.com/api/v3/klines") && requestUrl.includes("symbol=BTCUSDT")) {
+      klineCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify([
+            [1712000000000, "65000", "65140", "64920", "65080", "1100"],
+            [1712000300000, "65080", "65190", "65010", "65120", "980"],
+            [1712000600000, "65120", "65230", "65080", "65190", "1030"],
+            [1712000900000, "65190", "65310", "65150", "65240", "1190"],
+            [1712001200000, "65240", "65380", "65200", "65310", "1240"],
+          ]),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.binance.com/api/v3/ticker/24hr") && requestUrl.includes("symbol=BTCUSDT")) {
+      tickerCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            lastPrice: "65312.45",
+            priceChangePercent: "1.73",
+            symbol: "BTCUSDT",
+            volume: "65234.11",
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/strategy-chart?assetId=bitcoin&range=24h&mode=live&exchange=binance",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(klineCalls, 1);
+  assert.equal(tickerCalls, 1);
+
+  const body = response.json<{
+    data: {
+      live: {
+        source: LiveChartBroker;
+        symbol: string;
+      } | null;
+      mode: "live";
+      provider: LiveChartBroker;
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.mode, "live");
+  assert.equal(body.data.provider, "binance");
+  assert.equal(body.data.live?.source, "binance");
+  assert.equal(body.data.live?.symbol, "BTCUSDT");
+});
+
 void it("GET /v1/crypto/live-chart retorna snapshot ao vivo com Binance", async () => {
   let klineCalls = 0;
   let tickerCalls = 0;

@@ -231,7 +231,7 @@ function resolveCanonicalChainId(value: string | null | undefined): string | nul
 }
 
 function extractChainHintFromQuery(query: string): string | null {
-  const match = query.match(/(?:rede|chain|network|na|on)\s*[:\-]?\s*([a-zA-Z0-9_-]{2,24})/i);
+  const match = query.match(/(?:rede|chain|network|na|on)\s*[:-]?\s*([a-zA-Z0-9_-]{2,24})/i);
 
   if (match && typeof match[1] === "string") {
     const resolvedChain = resolveCanonicalChainId(match[1]);

@@ -178,6 +178,8 @@ const environmentSchema = z
     MEME_RADAR_CONSENSUS_WEIGHT_LIQUIDITY_DEPTH: z.coerce.number().min(0).max(100).default(20),
     MEME_RADAR_CONSENSUS_WEIGHT_WEB_SIGNAL: z.coerce.number().min(0).max(100).default(10),
     MEME_RADAR_CONSENSUS_WEIGHT_COMMUNITY_HEALTH: z.coerce.number().min(0).max(100).default(10),
+    FOREX_MACRO_CALENDAR_URL: z.union([z.string().url(), z.literal("")]).default(""),
+    FOREX_MACRO_CALENDAR_API_KEY: z.string().trim().default(""),
     IQOPTION_ENABLED: booleanFromString.default("false"),
     IQOPTION_API_BASE_URL: z.union([z.string().url(), z.literal("")]).default(""),
     IQOPTION_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),

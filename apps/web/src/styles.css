@@ -1526,9 +1526,178 @@ body.sidebar-collapsed .app-shell {
 
 .watchlist-grid {
   display: grid;
+  flex: 1;
   gap: 0.35rem;
   margin-top: 0.45rem;
+  min-height: 0;
   overflow: auto;
+}
+
+.prop-desk {
+  background: rgba(8, 24, 41, 0.72);
+  border: 1px solid rgba(118, 170, 230, 0.36);
+  border-radius: 10px;
+  display: grid;
+  gap: 0.42rem;
+  margin-top: 0.52rem;
+  padding: 0.48rem;
+}
+
+.prop-desk-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.42rem;
+}
+
+.prop-desk-head h4 {
+  color: #e6f4ff;
+  font-family: "Space Grotesk", "Arial Narrow", sans-serif;
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.prop-desk-toggle {
+  align-items: center;
+  color: #9fbfe4;
+  display: inline-flex;
+  font-size: 0.58rem;
+  font-weight: 700;
+  gap: 0.28rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.prop-desk-toggle input {
+  accent-color: #36c5ff;
+}
+
+.prop-mode-status,
+.prop-lot-result,
+.prop-strategy-hint,
+.prop-tracker-status {
+  color: #9db9dd;
+  font-size: 0.62rem;
+  line-height: 1.36;
+  margin: 0;
+}
+
+.prop-desk-grid {
+  display: grid;
+  gap: 0.34rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.prop-desk-field {
+  color: #9fbde0;
+  display: grid;
+  font-size: 0.55rem;
+  font-weight: 700;
+  gap: 0.2rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.prop-desk-field input,
+.prop-desk-field select {
+  background: rgba(4, 14, 26, 0.78);
+  border: 1px solid rgba(118, 170, 230, 0.35);
+  border-radius: 7px;
+  color: #e7f4ff;
+  font: inherit;
+  font-size: 0.62rem;
+  padding: 0.24rem 0.3rem;
+}
+
+.prop-desk-field select {
+  text-transform: none;
+}
+
+.prop-lot-result {
+  color: #d5e8ff;
+  font-weight: 700;
+}
+
+.prop-exit-strategy {
+  border-top: 1px solid rgba(124, 177, 236, 0.22);
+  display: grid;
+  gap: 0.26rem;
+  padding-top: 0.34rem;
+}
+
+.prop-tracker {
+  border-top: 1px solid rgba(124, 177, 236, 0.22);
+  display: grid;
+  gap: 0.24rem;
+  padding-top: 0.34rem;
+}
+
+.prop-tracker-head {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+}
+
+.prop-tracker-head strong {
+  color: #e6f4ff;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.prop-tracker-head span,
+.prop-tracker-stats span {
+  color: #9db9dd;
+  font-size: 0.56rem;
+  letter-spacing: 0.02em;
+}
+
+.prop-tracker-stats {
+  display: flex;
+  gap: 0.62rem;
+}
+
+.prop-tracker-stats strong {
+  color: #e8f3ff;
+  font-size: 0.64rem;
+}
+
+.prop-tracker-actions {
+  display: flex;
+  gap: 0.26rem;
+}
+
+.prop-tracker-actions button {
+  background: rgba(42, 191, 255, 0.2);
+  border: 1px solid rgba(114, 223, 255, 0.44);
+  border-radius: 999px;
+  color: #d9f4ff;
+  cursor: pointer;
+  flex: 1;
+  font-family: inherit;
+  font-size: 0.56rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.18rem 0.26rem;
+  text-transform: uppercase;
+}
+
+.prop-tracker-actions button:hover {
+  border-color: rgba(165, 236, 255, 0.72);
+}
+
+.prop-tracker-status[data-state="good"] {
+  color: #8fefcc;
+}
+
+.prop-tracker-status[data-state="warn"] {
+  color: #ffd78e;
+}
+
+.prop-tracker-status[data-state="alert"] {
+  color: #ffb2c4;
 }
 
 .watch-item {
@@ -3187,6 +3356,18 @@ body.sidebar-collapsed .app-shell {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .prop-desk-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .prop-tracker-actions {
+    flex-wrap: wrap;
+  }
+
+  .prop-tracker-actions button {
+    flex: 1 1 calc(50% - 0.3rem);
+  }
+
   .chart-metrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -3320,6 +3501,21 @@ body.sidebar-collapsed .app-shell {
 
   .watchlist-grid {
     grid-template-columns: 1fr;
+  }
+
+  .prop-desk-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .prop-desk-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .prop-tracker-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.1rem;
   }
 
   .chat-panel {

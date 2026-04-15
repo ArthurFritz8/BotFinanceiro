@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 
 import {
+  getInstitutionalMacroSnapshot,
   getForexMarketOverview,
   getForexSpotRate,
   getForexSpotRateBatch,
@@ -8,6 +9,8 @@ import {
 
 export function registerForexRoutes(app: FastifyInstance): void {
   app.get("/forex/market-overview", getForexMarketOverview);
+  app.get("/forex/strategy-chart", getInstitutionalMacroSnapshot);
+  app.get("/forex/institutional-macro/snapshot", getInstitutionalMacroSnapshot);
   app.get("/forex/spot-rate", getForexSpotRate);
   app.get("/forex/spot-rate/batch", getForexSpotRateBatch);
 }

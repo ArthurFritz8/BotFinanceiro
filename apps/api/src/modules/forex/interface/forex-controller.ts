@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { buildSuccessResponse } from "../../../shared/http/api-response.js";
 import { ForexMarketService } from "../application/forex-market-service.js";
+import { InstitutionalMacroService } from "../application/institutional-macro-service.js";
 
 const pairSchema = z
   .string()
@@ -41,7 +42,20 @@ const marketOverviewQuerySchema = z.object({
   preset: z.enum(["majors", "latam", "europe", "asia", "global"]).default("majors"),
 });
 
+const institutionalMacroQuerySchema = z.object({
+  mode: z.enum(["delayed", "live"]).default("delayed"),
+  module: z.string().trim().min(1).max(32).optional(),
+  range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("7d"),
+  symbol: z.string().trim().min(2).max(32)
+    .transform((value) => value.toUpperCase().replace(/[^A-Z0-9]/g, ""))
+    .refine((value) => value.length >= 2, {
+      message: "symbol must contain at least 2 alphanumeric characters",
+    }),
+  timezone: z.string().trim().min(2).max(64).optional(),
+});
+
 const forexMarketService = new ForexMarketService();
+const institutionalMacroService = new InstitutionalMacroService();
 
 export async function getForexSpotRate(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const parsedQuery = spotRateQuerySchema.parse(request.query);
@@ -70,4 +84,20 @@ export async function getForexMarketOverview(request: FastifyRequest, reply: Fas
   });
 
   void reply.send(buildSuccessResponse(request.id, overview));
+}
+
+export async function getInstitutionalMacroSnapshot(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const parsedQuery = institutionalMacroQuerySchema.parse(request.query);
+  const snapshot = await institutionalMacroService.getStrategySnapshot({
+    mode: parsedQuery.mode,
+    module: parsedQuery.module,
+    range: parsedQuery.range,
+    symbol: parsedQuery.symbol,
+    timezone: parsedQuery.timezone,
+  });
+
+  void reply.send(buildSuccessResponse(request.id, snapshot));
 }

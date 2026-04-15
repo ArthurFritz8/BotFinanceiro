@@ -111,11 +111,19 @@ function toRawText(rawData: RawData): string {
     return rawData;
   }
 
+  if (Buffer.isBuffer(rawData)) {
+    return rawData.toString("utf8");
+  }
+
   if (Array.isArray(rawData)) {
     return Buffer.concat(rawData).toString("utf8");
   }
 
-  return rawData.toString("utf8");
+  if (rawData instanceof ArrayBuffer) {
+    return Buffer.from(rawData).toString("utf8");
+  }
+
+  return "";
 }
 
 function normalizeStreamSymbol(value: string): string {

@@ -1018,7 +1018,7 @@ export class OpenRouterChatAdapter {
       return false;
     };
 
-    while (true) {
+    for (;;) {
       const { done, value } = await reader.read();
 
       if (done) {
@@ -1029,7 +1029,7 @@ export class OpenRouterChatAdapter {
         stream: true,
       });
 
-      while (true) {
+      for (;;) {
         const eventDelimiterIndex = streamBuffer.indexOf("\n\n");
 
         if (eventDelimiterIndex < 0) {

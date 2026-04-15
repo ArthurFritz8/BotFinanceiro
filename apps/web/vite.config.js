@@ -16,6 +16,27 @@ function normalizeBasePath(value) {
 
 export default defineConfig({
   base: normalizedBasePath,
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) {
+            return undefined;
+          }
+
+          if (id.includes("lightweight-charts")) {
+            return "vendor-charts";
+          }
+
+          if (id.includes("@supabase")) {
+            return "vendor-supabase";
+          }
+
+          return "vendor";
+        },
+      },
+    },
+  },
   plugins: [
     VitePWA({
       devOptions: {

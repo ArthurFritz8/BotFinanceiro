@@ -395,6 +395,75 @@
               <button type="button" id="watchlist-refresh">Sync</button>
             </div>
             <div id="watchlist-diagnostics" class="watchlist-diagnostics"></div>
+
+            <section id="prop-desk" class="prop-desk" aria-label="Risk e Prop Firm Desk">
+              <div class="prop-desk-head">
+                <h4>Risk &amp; Prop Firm Desk</h4>
+                <label class="prop-desk-toggle" for="prop-mode-toggle">
+                  <input id="prop-mode-toggle" type="checkbox" />
+                  Modo Mesa Proprietaria
+                </label>
+              </div>
+
+              <p id="prop-mode-status" class="prop-mode-status">
+                Modo padrao ativo. Use controle de risco fixo para preservar capital.
+              </p>
+
+              <div class="prop-desk-grid">
+                <label class="prop-desk-field" for="prop-account-size">
+                  Conta (USD)
+                  <input id="prop-account-size" type="number" min="100" step="100" value="10000" />
+                </label>
+
+                <label class="prop-desk-field" for="prop-risk-percent">
+                  Risco (%)
+                  <input id="prop-risk-percent" type="number" min="0.1" max="5" step="0.1" value="1" />
+                </label>
+
+                <label class="prop-desk-field" for="prop-stop-loss">
+                  Stop (pips/pontos)
+                  <input id="prop-stop-loss" type="number" min="0.1" step="0.1" value="12" />
+                </label>
+              </div>
+
+              <p id="prop-lot-result" class="prop-lot-result">
+                Informe o stop para calcular lote e risco automaticamente.
+              </p>
+
+              <div class="prop-exit-strategy">
+                <label class="prop-desk-field" for="prop-exit-strategy">
+                  Estrategia de saida
+                  <select id="prop-exit-strategy">
+                    <option value="three_by_seven" selected>3x7 (3 acertos em 10)</option>
+                    <option value="arbitrage_ab">Arbitragem AB (hedge live)</option>
+                  </select>
+                </label>
+                <p id="prop-strategy-hint" class="prop-strategy-hint"></p>
+              </div>
+
+              <div class="prop-tracker">
+                <div class="prop-tracker-head">
+                  <strong>Tracker 3x7</strong>
+                  <span>Meta: 3 wins em 10 operacoes</span>
+                </div>
+
+                <div class="prop-tracker-stats">
+                  <span>Wins <strong id="prop-3x7-wins">0</strong></span>
+                  <span>Losses <strong id="prop-3x7-losses">0</strong></span>
+                </div>
+
+                <div class="prop-tracker-actions">
+                  <button type="button" id="prop-3x7-win">+ Win</button>
+                  <button type="button" id="prop-3x7-loss">+ Loss</button>
+                  <button type="button" id="prop-3x7-reset">Reset</button>
+                </div>
+
+                <p id="prop-3x7-status" class="prop-tracker-status">
+                  Ciclo pronto. Comece a registrar resultados.
+                </p>
+              </div>
+            </section>
+
             <div id="watchlist-grid" class="watchlist-grid"></div>
           </aside>
         </div>

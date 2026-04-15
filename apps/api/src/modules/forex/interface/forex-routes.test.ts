@@ -237,3 +237,62 @@ void it("GET /v1/forex/spot-rate retorna 400 para par invalido", async () => {
   assert.equal(body.error.code, "VALIDATION_ERROR");
   assert.equal(body.error.message, "Invalid payload");
 });
+
+void it("GET /v1/forex/strategy-chart retorna snapshot institucional com macro radar", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/forex/strategy-chart?symbol=EURUSD&range=7d&mode=delayed",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<{
+    data: {
+      institutional: {
+        macroRadar: {
+          alertLevel: "green" | "red" | "yellow";
+          upcomingEvents: Array<{
+            hoursToEvent: number;
+            impact: "high" | "medium";
+            name: string;
+          }>;
+        };
+      };
+      mode: "delayed" | "live";
+      strategy: "institutional_macro";
+      symbol: string;
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.symbol, "EURUSD");
+  assert.equal(body.data.strategy, "institutional_macro");
+  assert.equal(body.data.mode, "delayed");
+  assert.ok(body.data.institutional.macroRadar.upcomingEvents.length >= 1);
+  assert.equal(typeof body.data.institutional.macroRadar.upcomingEvents[0]?.hoursToEvent, "number");
+  assert.ok(["green", "yellow", "red"].includes(body.data.institutional.macroRadar.alertLevel));
+});
+
+void it("GET /v1/forex/institutional-macro/snapshot suporta modo live", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/forex/institutional-macro/snapshot?symbol=XAUUSD&mode=live&range=24h",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<{
+    data: {
+      mode: "delayed" | "live";
+      strategy: "institutional_macro";
+      symbol: string;
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.equal(body.data.symbol, "XAUUSD");
+  assert.equal(body.data.mode, "live");
+  assert.equal(body.data.strategy, "institutional_macro");
+});

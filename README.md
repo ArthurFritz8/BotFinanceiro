@@ -97,6 +97,8 @@ Politica de retencao:
 ## Relatorio completo desta entrega
 
 1. `docs/runbooks/relatorio-completo-publicacao-e-resiliencia-2026-04-01.md`
+2. `docs/runbooks/checklist-deploy-macro-radar-institucional-2026-04-14.md`
+3. `docs/runbooks/checklist-mudanca-strategy-routing-macro-radar-2026-04-14.md`
 
 ## Exemplos de chamadas internas
 
@@ -294,6 +296,14 @@ Endpoints tecnicos para forex:
 curl "http://localhost:3000/v1/forex/spot-rate?pair=EURUSD"
 curl "http://localhost:3000/v1/forex/spot-rate/batch?pairs=EURUSD,USDBRL,USDJPY"
 curl "http://localhost:3000/v1/forex/market-overview?preset=latam&limit=6"
+curl "http://localhost:3000/v1/forex/strategy-chart?symbol=EURUSD&range=7d&mode=delayed"
+curl "http://localhost:3000/v1/forex/institutional-macro/snapshot?symbol=XAUUSD&range=24h&mode=live"
+```
+
+Endpoint tecnico para strategy chart cripto:
+
+```bash
+curl "http://localhost:3000/v1/crypto/strategy-chart?assetId=bitcoin&range=24h&mode=live&exchange=binance"
 ```
 
 Endpoints tecnicos para futuros:
@@ -426,6 +436,11 @@ Variaveis de ambiente para futuros:
 
 1. `BINANCE_FUTURES_API_BASE_URL`
 2. `BINANCE_FUTURES_TIMEOUT_MS`
+
+Variaveis de ambiente para macro radar institucional (opcional):
+
+1. `FOREX_MACRO_CALENDAR_URL`
+2. `FOREX_MACRO_CALENDAR_API_KEY`
 
 Variaveis de ambiente para inteligencia de airdrops:
 

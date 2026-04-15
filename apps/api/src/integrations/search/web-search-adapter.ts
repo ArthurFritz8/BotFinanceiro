@@ -383,17 +383,6 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
-function buildTitleFromUrl(url: string): string {
-  try {
-    const parsedUrl = new URL(url);
-    const domain = parsedUrl.hostname.replace(/^www\./, "");
-
-    return domain.length > 0 ? domain : url;
-  } catch {
-    return url;
-  }
-}
-
 function ensureAbsoluteUrl(url: string): string {
   if (isHttpUrl(url)) {
     return url;

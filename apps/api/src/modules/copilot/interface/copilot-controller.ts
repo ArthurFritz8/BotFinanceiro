@@ -77,7 +77,7 @@ export async function postCopilotChatStream(request: FastifyRequest, reply: Fast
     reply.raw.setHeader("Vary", "Origin");
   }
 
-  reply.hijack();
+  void reply.hijack();
 
   if (typeof reply.raw.flushHeaders === "function") {
     reply.raw.flushHeaders();
@@ -108,7 +108,7 @@ export async function postCopilotChatStream(request: FastifyRequest, reply: Fast
   });
 
   try {
-    const completion = await copilotChatService.chatStream(parsedBody, async (chunk) => {
+    const completion = await copilotChatService.chatStream(parsedBody, (chunk) => {
       if (isClosed || chunk.length === 0) {
         return;
       }

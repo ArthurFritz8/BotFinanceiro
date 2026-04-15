@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 
 import {
   getChart,
+  getCryptoStrategyChart,
   getLiveChart,
   getMarketOverview,
   getNewsIntelligence,
@@ -13,6 +14,7 @@ import {
 
 export function registerCryptoRoutes(app: FastifyInstance): void {
   app.get("/crypto/chart", getChart);
+  app.get("/crypto/strategy-chart", getCryptoStrategyChart);
   app.get("/crypto/live-chart", getLiveChart);
   app.get("/crypto/live-stream", streamLiveChart);
   app.get("/crypto/market-overview", getMarketOverview);

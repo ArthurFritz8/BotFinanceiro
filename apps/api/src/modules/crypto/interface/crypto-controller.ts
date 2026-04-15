@@ -61,6 +61,13 @@ const liveChartQuerySchema = z.object({
   range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("24h"),
 });
 
+const strategyChartQuerySchema = z.object({
+  assetId: z.string().trim().min(1).default("bitcoin"),
+  exchange: liveChartExchangeSchema.default("binance"),
+  mode: z.enum(["delayed", "live"]).default("delayed"),
+  range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("7d"),
+});
+
 const liveStreamQuerySchema = z.object({
   assetId: z.string().trim().min(1).default("bitcoin"),
   exchange: liveChartExchangeSchema.default("binance"),
@@ -145,7 +152,30 @@ export async function getLiveChart(request: FastifyRequest, reply: FastifyReply)
   void reply.send(buildSuccessResponse(request.id, chart));
 }
 
-export async function streamLiveChart(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+export async function getCryptoStrategyChart(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const parsedQuery = strategyChartQuerySchema.parse(request.query);
+
+  if (parsedQuery.mode === "live") {
+    const chart = await cryptoChartService.getLiveChart({
+      assetId: parsedQuery.assetId,
+      broker: parsedQuery.exchange,
+      range: parsedQuery.range,
+    });
+
+    void reply.send(buildSuccessResponse(request.id, chart));
+    return;
+  }
+
+  const chart = await cryptoChartService.getChart({
+    assetId: parsedQuery.assetId,
+    currency: "usd",
+    range: parsedQuery.range,
+  });
+
+  void reply.send(buildSuccessResponse(request.id, chart));
+}
+
+export function streamLiveChart(request: FastifyRequest, reply: FastifyReply): void {
   const parsedQuery = liveStreamQuerySchema.parse(request.query);
   const requestOrigin =
     typeof request.headers.origin === "string" ? normalizeOrigin(request.headers.origin) : "";
@@ -170,7 +200,7 @@ export async function streamLiveChart(request: FastifyRequest, reply: FastifyRep
     reply.raw.setHeader("Vary", "Origin");
   }
 
-  reply.hijack();
+  void reply.hijack();
 
   if (typeof reply.raw.flushHeaders === "function") {
     reply.raw.flushHeaders();

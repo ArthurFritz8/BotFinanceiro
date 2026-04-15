@@ -1761,9 +1761,9 @@ function extractScenarioLevels(scenarioSlice: string): {
   stopLoss: number;
   takeProfit1: number;
 } | null {
-  const entryToken = scenarioSlice.match(/gatilho[^0-9]{0,40}([0-9][0-9\.,\s]{0,24})/)?.[1] ?? null;
-  const stopToken = scenarioSlice.match(/invalida[^0-9]{0,40}([0-9][0-9\.,\s]{0,24})/)?.[1] ?? null;
-  const takeProfitToken = scenarioSlice.match(/tp1[^0-9]{0,40}([0-9][0-9\.,\s]{0,24})/)?.[1] ?? null;
+  const entryToken = scenarioSlice.match(/gatilho[^0-9]{0,40}([0-9][0-9.,\s]{0,24})/)?.[1] ?? null;
+  const stopToken = scenarioSlice.match(/invalida[^0-9]{0,40}([0-9][0-9.,\s]{0,24})/)?.[1] ?? null;
+  const takeProfitToken = scenarioSlice.match(/tp1[^0-9]{0,40}([0-9][0-9.,\s]{0,24})/)?.[1] ?? null;
 
   if (entryToken === null || stopToken === null || takeProfitToken === null) {
     return null;
@@ -1833,8 +1833,8 @@ function hasMinimumInstitutionalRiskRewardAnswer(answer: string, minimumRatio = 
 function parseScenarioProbability(normalizedAnswer: string, scenario: "bear" | "bull"): number | null {
   const pattern =
     scenario === "bull"
-      ? /cenario\s+bull[\s\S]{0,220}?probabilidade\s*([0-9]+(?:[\.,][0-9]+)?)\s*%/
-      : /cenario\s+bear[\s\S]{0,220}?probabilidade\s*([0-9]+(?:[\.,][0-9]+)?)\s*%/;
+      ? /cenario\s+bull[\s\S]{0,220}?probabilidade\s*([0-9]+(?:[.,][0-9]+)?)\s*%/
+      : /cenario\s+bear[\s\S]{0,220}?probabilidade\s*([0-9]+(?:[.,][0-9]+)?)\s*%/;
   const match = normalizedAnswer.match(pattern);
   const valueToken = match?.[1] ?? null;
 
@@ -3621,7 +3621,8 @@ export class CopilotChatService {
     return copilotChatAuditStore.getSessionHistory(input);
   }
 
-  private shouldUseEmergencyLocalFallback(_error: unknown): boolean {
+  private shouldUseEmergencyLocalFallback(error: unknown): boolean {
+    void error;
     return false;
   }
 

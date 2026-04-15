@@ -64,6 +64,20 @@ const watchlistGrid = document.querySelector("#watchlist-grid");
 const watchlistRefreshButton = document.querySelector("#watchlist-refresh");
 const watchlistStatusElement = document.querySelector("#watchlist-status");
 const watchlistDiagnosticsElement = document.querySelector("#watchlist-diagnostics");
+const propModeToggle = document.querySelector("#prop-mode-toggle");
+const propModeStatusElement = document.querySelector("#prop-mode-status");
+const propAccountSizeInput = document.querySelector("#prop-account-size");
+const propRiskPercentInput = document.querySelector("#prop-risk-percent");
+const propStopLossInput = document.querySelector("#prop-stop-loss");
+const propLotResultElement = document.querySelector("#prop-lot-result");
+const propExitStrategySelect = document.querySelector("#prop-exit-strategy");
+const propStrategyHintElement = document.querySelector("#prop-strategy-hint");
+const prop3x7WinsElement = document.querySelector("#prop-3x7-wins");
+const prop3x7LossesElement = document.querySelector("#prop-3x7-losses");
+const prop3x7StatusElement = document.querySelector("#prop-3x7-status");
+const prop3x7WinButton = document.querySelector("#prop-3x7-win");
+const prop3x7LossButton = document.querySelector("#prop-3x7-loss");
+const prop3x7ResetButton = document.querySelector("#prop-3x7-reset");
 const chartViewport = document.querySelector("#chart-viewport");
 const chartMetricsElement = document.querySelector("#chart-metrics");
 const chartAnalyzeButton = document.querySelector("#chart-analyze-button");
@@ -119,6 +133,7 @@ const CHART_PREFERENCES_STORAGE_KEY = "botfinanceiro.chart.preferences.v1";
 const AIRDROP_PREFERENCES_STORAGE_KEY = "botfinanceiro.airdrop.preferences.v1";
 const MEMECOIN_PREFERENCES_STORAGE_KEY = "botfinanceiro.memecoin.preferences.v1";
 const MARKET_NAVIGATOR_FAVORITES_STORAGE_KEY = "botfinanceiro.marketNavigator.favorites.v1";
+const PROP_DESK_STORAGE_KEY = "botfinanceiro.chart.propDesk.v1";
 const MAX_STORED_MESSAGES = 60;
 const MAX_RECENT_HISTORY_ITEMS = 8;
 const MAX_CONVERSATIONS = 60;
@@ -1240,6 +1255,20 @@ const EXCHANGE_TO_BROKER = {
   OKX: "okx",
 };
 const EXCHANGES_WITH_NATIVE_LIVE = new Set(["BINANCE", "BYBIT", "COINBASE", "KRAKEN", "OKX"]);
+const INSTITUTIONAL_MACRO_MODULES = new Set([
+  "b3",
+  "commodities",
+  "equities",
+  "etfs",
+  "fiis",
+  "fixed-income",
+  "forex",
+  "futures",
+  "global-sectors",
+  "macro-rates",
+  "options",
+  "wall-street",
+]);
 const FOREX_FIAT_CODES = new Set([
   "AED",
   "ARS",
@@ -1371,6 +1400,21 @@ const TERMINAL_WATCHLIST = [
 const ASSET_TO_TERMINAL_SYMBOL = Object.fromEntries(
   TERMINAL_WATCHLIST.map((entry) => [entry.assetId, entry.symbol]),
 );
+const PROP_DESK_EXIT_STRATEGY_LABELS = {
+  arbitrage_ab:
+    "AB: prefira pares correlacionados e reduza risco direcional quando o macro radar estiver em amarelo/vermelho.",
+  three_by_seven:
+    "3x7: alvo operacional de 3 wins em 10 trades, com foco em consistencia e controle de drawdown.",
+};
+const PROP_DESK_DEFAULT_STATE = Object.freeze({
+  accountSize: 10000,
+  exitStrategy: "three_by_seven",
+  propModeEnabled: false,
+  riskPercent: 1,
+  stopLoss: 12,
+  trackerLosses: 0,
+  trackerWins: 0,
+});
 
 const messages = [];
 let isSending = false;
@@ -1402,6 +1446,7 @@ let chartCandleByTime = new Map();
 let chartHasInitialFit = false;
 let chartViewMode = "tv";
 let chartSymbolSourceModule = "crypto";
+let currentChartStrategy = "crypto";
 let tvMountIdCounter = 0;
 let terminalRefreshTimer = null;
 let watchlistAutoRefreshTimer = null;
@@ -1450,6 +1495,10 @@ let marketNavigatorSearchInFlight = false;
 let marketNavigatorRegionFilter = "all";
 let marketNavigatorFavoritesOnly = false;
 let marketNavigatorFavoriteKeys = new Set();
+let propDeskState = {
+  ...PROP_DESK_DEFAULT_STATE,
+};
+let isPropDeskInitialized = false;
 
 function mapSymbolToExchange(symbol, exchange) {
   const normalizedSymbol = sanitizeTerminalSymbol(symbol);
@@ -1524,6 +1573,24 @@ function shouldUseCryptoChartPipeline(symbol) {
   }
 
   return false;
+}
+
+function resolveChartPipelineStrategy(symbol) {
+  if (shouldUseCryptoChartPipeline(symbol)) {
+    return "crypto";
+  }
+
+  if (INSTITUTIONAL_MACRO_MODULES.has(chartSymbolSourceModule)) {
+    return "institutional_macro";
+  }
+
+  const normalizedSymbol = sanitizeTerminalSymbol(symbol);
+
+  if (isLikelyForexPairSymbol(normalizedSymbol)) {
+    return "institutional_macro";
+  }
+
+  return "institutional_macro";
 }
 
 function applyExternalSymbolChartState(symbol, options = {}) {
@@ -5088,14 +5155,6 @@ function openMarketItemInChart(item) {
     chartSymbolInput.value = mapSymbolToExchange(target.symbol, getSelectedTerminalExchange());
   }
 
-  if (!shouldUseCryptoChartPipeline(target.symbol)) {
-    applyExternalSymbolChartState(target.symbol);
-  }
-
-  if (!target.hasNativeAsset && chartViewMode !== "tv") {
-    setChartViewMode("tv");
-  }
-
   renderWatchlist();
   chartHasInitialFit = false;
 
@@ -6320,6 +6379,40 @@ function renderAnalysisTabContent(analysis, snapshot) {
   }
 
   if (activeAnalysisTabId === "smc") {
+    const institutional = snapshot?.institutional;
+
+    if (institutional && typeof institutional === "object") {
+      const topDown = institutional.topDown && typeof institutional.topDown === "object"
+        ? institutional.topDown
+        : {};
+      const daily = topDown.daily && typeof topDown.daily === "object" ? topDown.daily : {};
+      const h4 = topDown.h4 && typeof topDown.h4 === "object" ? topDown.h4 : {};
+      const m5 = topDown.m5 && typeof topDown.m5 === "object" ? topDown.m5 : {};
+      const vote = topDown.vote && typeof topDown.vote === "object" ? topDown.vote : {};
+      const killzones = institutional.killzones && typeof institutional.killzones === "object"
+        ? institutional.killzones
+        : {};
+
+      analysisTabContentElement.innerHTML = `
+        <div class="analysis-grid">
+          <article class="analysis-block">
+            <h4>Top-Down 3x1 (D1 + H4 + M5)</h4>
+            <p><strong>D1 Bias:</strong> ${escapeHtml(String(daily.bias ?? "neutral"))} • PDH ${escapeHtml(formatPrice(daily.pdh, currency))} • PDL ${escapeHtml(formatPrice(daily.pdl, currency))}</p>
+            <p><strong>H4:</strong> Bias ${escapeHtml(String(h4.bias ?? "neutral"))} • FVG ${escapeHtml(String(h4.fvgCount ?? 0))} • ERL ${escapeHtml(formatPrice(h4.erl, currency))} • IRL ${escapeHtml(formatPrice(h4.irl, currency))} • CRT ${escapeHtml(String(h4.crt ?? "inactive"))}</p>
+            <p><strong>M5:</strong> Bias ${escapeHtml(String(m5.bias ?? "neutral"))} • MSS ${escapeHtml(String(m5.mss ?? "none"))} • BOS ${escapeHtml(String(m5.bos ?? "none"))}</p>
+          </article>
+          <article class="analysis-block">
+            <h4>Confluencia institucional</h4>
+            <p>Votacao: Bull ${escapeHtml(String(vote.bullish ?? 0))} • Bear ${escapeHtml(String(vote.bearish ?? 0))} • Neutral ${escapeHtml(String(vote.neutral ?? 0))}</p>
+            <p>Status 3x1: ${escapeHtml(String(vote.confluence ?? "mixed"))}</p>
+            <p>Killzone: ${escapeHtml(String(killzones.session ?? "off_session"))} • Fase: ${escapeHtml(String(killzones.phase ?? "transition"))} • UTC ${escapeHtml(String(killzones.utcHour ?? "--"))}</p>
+            <p>${escapeHtml(String(killzones.narrative ?? "Sem narrativa institucional disponivel"))}</p>
+          </article>
+        </div>
+      `;
+      return;
+    }
+
     analysisTabContentElement.innerHTML = `
       <div class="analysis-grid">
         <article class="analysis-block">
@@ -6463,6 +6556,45 @@ function renderAnalysisTabContent(analysis, snapshot) {
         <h4>Checklist visual inteligente</h4>
         <ul class="analysis-list">
           ${analysis.visualChecklist.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+      </article>
+    `;
+    return;
+  }
+
+  const institutional = snapshot?.institutional;
+
+  if (institutional && typeof institutional === "object") {
+    const macroRadar = institutional.macroRadar && typeof institutional.macroRadar === "object"
+      ? institutional.macroRadar
+      : null;
+    const upcomingEvents = Array.isArray(macroRadar?.upcomingEvents) ? macroRadar.upcomingEvents : [];
+    const alertLevel = typeof macroRadar?.alertLevel === "string" ? macroRadar.alertLevel : "green";
+    const blockDirectionalRisk = macroRadar?.blockDirectionalRisk === true;
+    const radarMessage = typeof macroRadar?.message === "string"
+      ? macroRadar.message
+      : "Sem risco macro critico identificado para a janela atual.";
+    const safeHavenBias = typeof macroRadar?.safeHavenBias === "string"
+      ? macroRadar.safeHavenBias
+      : "neutral";
+
+    analysisTabContentElement.innerHTML = `
+      <article class="analysis-block">
+        <h4>Radar Macro</h4>
+        <p>Nivel: ${escapeHtml(alertLevel.toUpperCase())} • Bloqueio direcional: ${blockDirectionalRisk ? "ativo" : "inativo"} • Refugio: ${escapeHtml(safeHavenBias)}</p>
+        <p>${escapeHtml(radarMessage)}</p>
+        <ul class="analysis-list">
+          ${upcomingEvents
+            .map((eventItem) => {
+              const name = typeof eventItem?.name === "string" ? eventItem.name : "Evento macro";
+              const impact = typeof eventItem?.impact === "string" ? eventItem.impact : "medium";
+              const hoursToEvent = typeof eventItem?.hoursToEvent === "number" && Number.isFinite(eventItem.hoursToEvent)
+                ? `${eventItem.hoursToEvent}h`
+                : "n/d";
+
+              return `<li><strong>${escapeHtml(name)}</strong> • impacto ${escapeHtml(String(impact))} • em ${escapeHtml(hoursToEvent)}</li>`;
+            })
+            .join("")}
         </ul>
       </article>
     `;
@@ -6770,6 +6902,353 @@ function hydrateChartPreferences() {
 
   if (preferences.viewMode === "copilot" || preferences.viewMode === "tv") {
     chartViewMode = preferences.viewMode;
+  }
+}
+
+function parseOptionalNumber(value, fallback) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.replace(",", ".").trim();
+
+    if (normalized.length > 0) {
+      const parsed = Number.parseFloat(normalized);
+
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  return fallback;
+}
+
+function sanitizePropDeskState(candidate) {
+  const accountSize = roundNumber(
+    clampNumber(
+      parseOptionalNumber(candidate?.accountSize, PROP_DESK_DEFAULT_STATE.accountSize),
+      100,
+      100000000,
+    ),
+    2,
+  );
+  const riskPercent = roundNumber(
+    clampNumber(
+      parseOptionalNumber(candidate?.riskPercent, PROP_DESK_DEFAULT_STATE.riskPercent),
+      0.1,
+      5,
+    ),
+    2,
+  );
+  const stopLoss = roundNumber(
+    clampNumber(
+      parseOptionalNumber(candidate?.stopLoss, PROP_DESK_DEFAULT_STATE.stopLoss),
+      0.1,
+      10000,
+    ),
+    2,
+  );
+  const trackerWins = Math.round(
+    clampNumber(
+      parseOptionalNumber(candidate?.trackerWins, PROP_DESK_DEFAULT_STATE.trackerWins),
+      0,
+      10,
+    ),
+  );
+  let trackerLosses = Math.round(
+    clampNumber(
+      parseOptionalNumber(candidate?.trackerLosses, PROP_DESK_DEFAULT_STATE.trackerLosses),
+      0,
+      10,
+    ),
+  );
+
+  if (trackerWins + trackerLosses > 10) {
+    trackerLosses = Math.max(0, 10 - trackerWins);
+  }
+
+  const exitStrategy = candidate?.exitStrategy === "arbitrage_ab"
+    ? "arbitrage_ab"
+    : "three_by_seven";
+
+  return {
+    accountSize,
+    exitStrategy,
+    propModeEnabled: candidate?.propModeEnabled === true,
+    riskPercent,
+    stopLoss,
+    trackerLosses,
+    trackerWins,
+  };
+}
+
+function readStoredPropDeskPreferences() {
+  try {
+    const raw = localStorage.getItem(PROP_DESK_STORAGE_KEY);
+
+    if (!raw) {
+      return {
+        ...PROP_DESK_DEFAULT_STATE,
+      };
+    }
+
+    const parsed = JSON.parse(raw);
+
+    if (!parsed || typeof parsed !== "object") {
+      return {
+        ...PROP_DESK_DEFAULT_STATE,
+      };
+    }
+
+    return sanitizePropDeskState(parsed);
+  } catch {
+    return {
+      ...PROP_DESK_DEFAULT_STATE,
+    };
+  }
+}
+
+function savePropDeskPreferences() {
+  try {
+    localStorage.setItem(PROP_DESK_STORAGE_KEY, JSON.stringify(propDeskState));
+  } catch {
+    // Ignore storage errors and keep UX stateless.
+  }
+}
+
+function updatePropStrategyHint(exitStrategy) {
+  if (!(propStrategyHintElement instanceof HTMLElement)) {
+    return;
+  }
+
+  propStrategyHintElement.textContent = PROP_DESK_EXIT_STRATEGY_LABELS[exitStrategy]
+    ?? PROP_DESK_EXIT_STRATEGY_LABELS.three_by_seven;
+}
+
+function derivePropTrackerStatus(state) {
+  const totalTrades = state.trackerWins + state.trackerLosses;
+
+  if (totalTrades === 0) {
+    return {
+      message: "Ciclo pronto. Comece a registrar resultados.",
+      mode: "",
+    };
+  }
+
+  if (state.trackerWins >= 3 && totalTrades <= 10) {
+    return {
+      message: `Meta alcançada: ${state.trackerWins} wins em ${totalTrades} trades. Foque em preservar o ganho.`,
+      mode: "good",
+    };
+  }
+
+  const tradesLeft = Math.max(0, 10 - totalTrades);
+  const winsNeeded = Math.max(0, 3 - state.trackerWins);
+
+  if (tradesLeft === 0) {
+    return {
+      message: `Ciclo encerrado com ${state.trackerWins} wins e ${state.trackerLosses} losses.`,
+      mode: state.trackerWins >= 3 ? "good" : "alert",
+    };
+  }
+
+  if (winsNeeded > tradesLeft) {
+    return {
+      message: `Alerta: meta 3x7 quase inviavel (${winsNeeded} wins faltando para ${tradesLeft} trades restantes).`,
+      mode: "alert",
+    };
+  }
+
+  return {
+    message: `${winsNeeded} wins necessarios nos proximos ${tradesLeft} trades para fechar o ciclo.`,
+    mode: "warn",
+  };
+}
+
+function renderPropDesk() {
+  const effectiveRiskPercent = propDeskState.propModeEnabled
+    ? Math.min(propDeskState.riskPercent, 1)
+    : propDeskState.riskPercent;
+  const riskBudget = propDeskState.accountSize * (effectiveRiskPercent / 100);
+  const stopLoss = Math.max(0.1, propDeskState.stopLoss);
+  const usdPerPointPerLot = 10;
+  const recommendedLot = Math.max(0.01, roundNumber(riskBudget / (stopLoss * usdPerPointPerLot), 2));
+  const maxLossAtLot = roundNumber(recommendedLot * stopLoss * usdPerPointPerLot, 2);
+  const modeLabel = propDeskState.propModeEnabled
+    ? "Mesa proprietaria ativa: risco efetivo limitado a 1% por trade."
+    : "Modo padrao ativo. Use controle de risco fixo para preservar capital.";
+  const lotLabel = `Lote sugerido: ${recommendedLot.toFixed(2)} | risco maximo: USD ${maxLossAtLot.toFixed(2)} (${effectiveRiskPercent.toFixed(2)}%)`;
+  const trackerStatus = derivePropTrackerStatus(propDeskState);
+  const totalTrades = propDeskState.trackerWins + propDeskState.trackerLosses;
+  const canRegisterTrade = totalTrades < 10;
+
+  if (propModeToggle instanceof HTMLInputElement) {
+    propModeToggle.checked = propDeskState.propModeEnabled;
+  }
+
+  if (propAccountSizeInput instanceof HTMLInputElement) {
+    propAccountSizeInput.value = String(propDeskState.accountSize);
+  }
+
+  if (propRiskPercentInput instanceof HTMLInputElement) {
+    propRiskPercentInput.value = String(propDeskState.riskPercent);
+  }
+
+  if (propStopLossInput instanceof HTMLInputElement) {
+    propStopLossInput.value = String(propDeskState.stopLoss);
+  }
+
+  if (propExitStrategySelect instanceof HTMLSelectElement) {
+    propExitStrategySelect.value = propDeskState.exitStrategy;
+  }
+
+  if (propModeStatusElement instanceof HTMLElement) {
+    propModeStatusElement.textContent = modeLabel;
+  }
+
+  if (propLotResultElement instanceof HTMLElement) {
+    propLotResultElement.textContent = lotLabel;
+  }
+
+  if (prop3x7WinsElement instanceof HTMLElement) {
+    prop3x7WinsElement.textContent = String(propDeskState.trackerWins);
+  }
+
+  if (prop3x7LossesElement instanceof HTMLElement) {
+    prop3x7LossesElement.textContent = String(propDeskState.trackerLosses);
+  }
+
+  if (prop3x7StatusElement instanceof HTMLElement) {
+    prop3x7StatusElement.textContent = trackerStatus.message;
+
+    if (trackerStatus.mode.length > 0) {
+      prop3x7StatusElement.setAttribute("data-state", trackerStatus.mode);
+    } else {
+      prop3x7StatusElement.removeAttribute("data-state");
+    }
+  }
+
+  if (prop3x7WinButton instanceof HTMLButtonElement) {
+    prop3x7WinButton.disabled = !canRegisterTrade;
+  }
+
+  if (prop3x7LossButton instanceof HTMLButtonElement) {
+    prop3x7LossButton.disabled = !canRegisterTrade;
+  }
+
+  updatePropStrategyHint(propDeskState.exitStrategy);
+}
+
+function updatePropDeskStateFromInputs() {
+  propDeskState = sanitizePropDeskState({
+    ...propDeskState,
+    accountSize: propAccountSizeInput instanceof HTMLInputElement
+      ? propAccountSizeInput.value
+      : propDeskState.accountSize,
+    exitStrategy: propExitStrategySelect instanceof HTMLSelectElement
+      ? propExitStrategySelect.value
+      : propDeskState.exitStrategy,
+    propModeEnabled: propModeToggle instanceof HTMLInputElement
+      ? propModeToggle.checked
+      : propDeskState.propModeEnabled,
+    riskPercent: propRiskPercentInput instanceof HTMLInputElement
+      ? propRiskPercentInput.value
+      : propDeskState.riskPercent,
+    stopLoss: propStopLossInput instanceof HTMLInputElement
+      ? propStopLossInput.value
+      : propDeskState.stopLoss,
+  });
+
+  savePropDeskPreferences();
+  renderPropDesk();
+}
+
+function setupPropDesk() {
+  const hasRequiredFields =
+    propModeToggle instanceof HTMLInputElement
+    && propAccountSizeInput instanceof HTMLInputElement
+    && propRiskPercentInput instanceof HTMLInputElement
+    && propStopLossInput instanceof HTMLInputElement
+    && propExitStrategySelect instanceof HTMLSelectElement;
+
+  if (!hasRequiredFields) {
+    return;
+  }
+
+  propDeskState = readStoredPropDeskPreferences();
+  renderPropDesk();
+
+  if (isPropDeskInitialized) {
+    return;
+  }
+
+  isPropDeskInitialized = true;
+
+  propModeToggle.addEventListener("change", () => {
+    updatePropDeskStateFromInputs();
+  });
+
+  propAccountSizeInput.addEventListener("input", () => {
+    updatePropDeskStateFromInputs();
+  });
+
+  propRiskPercentInput.addEventListener("input", () => {
+    updatePropDeskStateFromInputs();
+  });
+
+  propStopLossInput.addEventListener("input", () => {
+    updatePropDeskStateFromInputs();
+  });
+
+  propExitStrategySelect.addEventListener("change", () => {
+    updatePropDeskStateFromInputs();
+  });
+
+  if (prop3x7WinButton instanceof HTMLButtonElement) {
+    prop3x7WinButton.addEventListener("click", () => {
+      if (propDeskState.trackerWins + propDeskState.trackerLosses >= 10) {
+        return;
+      }
+
+      propDeskState = sanitizePropDeskState({
+        ...propDeskState,
+        trackerWins: propDeskState.trackerWins + 1,
+      });
+
+      savePropDeskPreferences();
+      renderPropDesk();
+    });
+  }
+
+  if (prop3x7LossButton instanceof HTMLButtonElement) {
+    prop3x7LossButton.addEventListener("click", () => {
+      if (propDeskState.trackerWins + propDeskState.trackerLosses >= 10) {
+        return;
+      }
+
+      propDeskState = sanitizePropDeskState({
+        ...propDeskState,
+        trackerLosses: propDeskState.trackerLosses + 1,
+      });
+
+      savePropDeskPreferences();
+      renderPropDesk();
+    });
+  }
+
+  if (prop3x7ResetButton instanceof HTMLButtonElement) {
+    prop3x7ResetButton.addEventListener("click", () => {
+      propDeskState = sanitizePropDeskState({
+        ...propDeskState,
+        trackerLosses: 0,
+        trackerWins: 0,
+      });
+
+      savePropDeskPreferences();
+      renderPropDesk();
+    });
   }
 }
 
@@ -8484,12 +8963,15 @@ function renderChartMetrics(snapshot) {
 }
 
 async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "binance") {
-  const endpoint = mode === "live" ? "/v1/crypto/live-chart" : "/v1/crypto/chart";
   const normalizedExchange = typeof exchange === "string" && exchange.length > 0 ? exchange : "binance";
-  const query = mode === "live"
-    ? `assetId=${encodeURIComponent(assetId)}&range=${encodeURIComponent(range)}&exchange=${encodeURIComponent(normalizedExchange)}`
-    : `assetId=${encodeURIComponent(assetId)}&currency=usd&range=${encodeURIComponent(range)}`;
-  const response = await fetch(buildApiUrl(`${endpoint}?${query}`), {
+  const normalizedMode = mode === "live" ? "live" : "delayed";
+  const params = new URLSearchParams({
+    assetId,
+    exchange: normalizedExchange,
+    mode: normalizedMode,
+    range,
+  });
+  const response = await fetch(buildApiUrl(`/v1/crypto/strategy-chart?${params.toString()}`), {
     method: "GET",
   });
 
@@ -8532,6 +9014,49 @@ async function requestCryptoChart(assetId, range, mode, exchange) {
   }
 }
 
+async function requestInstitutionalMacroSnapshot(symbol, range, mode, moduleName = "forex") {
+  const sanitizedSymbol = sanitizeTerminalSymbol(symbol);
+
+  if (sanitizedSymbol.length < 2) {
+    throw new Error("Simbolo institucional invalido para analise");
+  }
+
+  const safeMode = mode === "live" ? "live" : "delayed";
+  const normalizedModule = typeof moduleName === "string" && moduleName.length > 0
+    ? moduleName
+    : "forex";
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "Etc/UTC";
+  const params = new URLSearchParams({
+    mode: safeMode,
+    module: normalizedModule,
+    range,
+    symbol: sanitizedSymbol,
+    timezone,
+  });
+  const response = await fetch(buildApiUrl(`/v1/forex/strategy-chart?${params.toString()}`), {
+    method: "GET",
+  });
+
+  let payload = null;
+
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const errorMessage = payload?.error?.message;
+    throw new Error(
+      typeof errorMessage === "string"
+        ? errorMessage
+        : "Nao foi possivel carregar o motor institucional",
+    );
+  }
+
+  return payload?.data ?? null;
+}
+
 function buildCryptoLiveStreamUrl(assetId, exchange, range, intervalMs) {
   const params = new URLSearchParams({
     assetId,
@@ -8549,7 +9074,15 @@ function applyChartSnapshot(snapshot, options = {}) {
   }
 
   currentChartSnapshot = snapshot;
-  void loadNewsIntelligence(snapshot.assetId);
+  currentChartStrategy = snapshot?.strategy === "institutional_macro" ? "institutional_macro" : "crypto";
+
+  if (currentChartStrategy === "crypto") {
+    void loadNewsIntelligence(snapshot.assetId);
+  } else {
+    newsIntelligencePayload = null;
+    newsIntelligenceLastAssetId = "";
+    newsIntelligenceLastFetchedAtMs = 0;
+  }
 
   if (chartViewMode === "copilot") {
     renderInteractiveChart(snapshot);
@@ -8570,6 +9103,7 @@ function applyChartSnapshot(snapshot, options = {}) {
   const styleLabel = chartViewMode === "tv"
     ? CHART_STYLE_LABELS[getSelectedTerminalStyle()] ?? getSelectedTerminalStyle()
     : CHART_STYLE_LABELS[resolveChartStyle()] ?? resolveChartStyle();
+  const strategyLabel = currentChartStrategy === "institutional_macro" ? "institucional" : "crypto";
   const providerLabel = String(snapshot.provider ?? "n/d").toUpperCase();
   const refreshIntervalMs = resolveAutoRefreshIntervalMs();
   const refreshLabel =
@@ -8593,7 +9127,7 @@ function applyChartSnapshot(snapshot, options = {}) {
   const transportLabel = transport === "stream" ? " • transporte stream" : "";
 
   setChartStatus(
-    `Grafico ${snapshot.assetId.toUpperCase()} (${modeLabel}, ${rangeLabel}, ${styleLabel}) • exchange ${selectedExchange} • provider ${providerLabel} • ${cacheLabel}${refreshLabel}${liveLabel}${transportLabel}${fallbackLabel} • atualizado ${updatedAtLabel}`,
+    `Grafico ${snapshot.assetId.toUpperCase()} (${modeLabel}, ${rangeLabel}, ${styleLabel}) • estrategia ${strategyLabel} • exchange ${selectedExchange} • provider ${providerLabel} • ${cacheLabel}${refreshLabel}${liveLabel}${transportLabel}${fallbackLabel} • atualizado ${updatedAtLabel}`,
   );
 
   if (chartViewMode === "tv") {
@@ -8625,6 +9159,13 @@ function connectChartLiveStream(intervalMs) {
   }
 
   if (!(chartAssetSelect instanceof HTMLSelectElement) || !(chartRangeSelect instanceof HTMLSelectElement)) {
+    return false;
+  }
+
+  const selectedTerminalSymbol = getSelectedTerminalSymbol();
+
+  if (resolveChartPipelineStrategy(selectedTerminalSymbol) !== "crypto") {
+    stopChartLiveStream();
     return false;
   }
 
@@ -8886,14 +9427,28 @@ async function loadChart(options = {}) {
 
   const assetId = options.assetId ?? chartAssetSelect.value;
   const requestedMode = options.mode ?? chartModeSelect?.value ?? "delayed";
+  const selectedTerminalSymbol = getSelectedTerminalSymbol();
+  const pipelineStrategy = resolveChartPipelineStrategy(selectedTerminalSymbol);
   const selectedExchange = getSelectedTerminalExchange();
   const selectedBroker = getSelectedBroker();
-  const mode = requestedMode === "live" && !isNativeLiveModeSupported()
+  const mode = requestedMode === "live" && pipelineStrategy === "crypto" && !isNativeLiveModeSupported()
     ? "delayed"
     : requestedMode;
-  const forcedModeReason = requestedMode === "live" && mode !== "live"
-    ? `Live nativo ainda em rollout para ${selectedExchange}; exibindo delayed resiliente`
-    : "";
+  const forcedModeReason = (() => {
+    if (requestedMode !== "live") {
+      return "";
+    }
+
+    if (pipelineStrategy !== "crypto") {
+      return "Modo institucional live em rollout; mantendo analise institucional em polling resiliente";
+    }
+
+    if (mode !== "live") {
+      return `Live nativo ainda em rollout para ${selectedExchange}; exibindo delayed resiliente`;
+    }
+
+    return "";
+  })();
   const range = options.range ?? chartRangeSelect.value;
   const silent = options.silent === true;
 
@@ -8909,11 +9464,20 @@ async function loadChart(options = {}) {
   }
 
   try {
-    const selectedTerminalSymbol = getSelectedTerminalSymbol();
+    currentChartStrategy = pipelineStrategy;
 
-    if (!shouldUseCryptoChartPipeline(selectedTerminalSymbol)) {
-      applyExternalSymbolChartState(selectedTerminalSymbol, {
-        silent,
+    if (pipelineStrategy === "institutional_macro") {
+      const snapshot = await requestInstitutionalMacroSnapshot(
+        selectedTerminalSymbol,
+        range,
+        mode,
+        chartSymbolSourceModule,
+      );
+
+      applyChartSnapshot(snapshot, {
+        forcedModeReason,
+        selectedExchange,
+        transport: "polling",
       });
       return;
     }
@@ -8927,6 +9491,23 @@ async function loadChart(options = {}) {
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Erro ao carregar grafico";
+
+    if (pipelineStrategy === "institutional_macro") {
+      setChartStatus(errorMessage, "error");
+
+      if (currentChartSnapshot && chartViewMode === "copilot") {
+        renderInteractiveChart(currentChartSnapshot);
+        setChartLegend("Falha na atualizacao institucional. Mantendo ultimo snapshot valido.", "error");
+      } else {
+        clearChartSurface();
+        setChartLegend("Falha ao carregar o motor institucional. Tente atualizar.", "error");
+        renderChartMetrics(null);
+        currentChartSnapshot = null;
+      }
+
+      return;
+    }
+
     let spotQuote = null;
 
     try {
@@ -9795,6 +10376,7 @@ function setupChartLab() {
       ? `Ultimo sync ${formatShortTime(watchlistLastUpdatedAt)}`
       : "Aguardando sync",
   );
+  setupPropDesk();
 
   chartControlsForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -10107,7 +10689,7 @@ function setupChartLab() {
       activeAnalysisTabId = tabId;
       renderDeepAnalysisPanel(currentChartSnapshot);
 
-      if (tabId === "noticias" && chartAssetSelect instanceof HTMLSelectElement) {
+      if (tabId === "noticias" && currentChartStrategy === "crypto" && chartAssetSelect instanceof HTMLSelectElement) {
         void loadNewsIntelligence(chartAssetSelect.value);
       }
     });
