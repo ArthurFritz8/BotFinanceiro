@@ -10,6 +10,7 @@ import { getPostgresPool } from "../persistence/postgres-pool.js";
 
 const ghostOutcomeSchema = z.enum(["win", "loss", "push"]);
 const ghostDirectionSchema = z.enum(["call", "put"]);
+const ghostOperationalModeSchema = z.enum(["binary_options", "spot_margin"]);
 const ghostTriggerHeatSchema = z.enum(["cold", "warm", "hot"]);
 const ghostRangeSchema = z.enum(["24h", "7d", "30d", "90d", "1y"]);
 const ghostResolutionSchema = z.enum([
@@ -43,6 +44,7 @@ const ghostResolutionSchema = z.enum([
   "M",
 ]);
 const exchangeSchema = z.enum(["auto", "binance", "bybit", "coinbase", "kraken", "okx"]);
+const exchangeProviderSchema = z.enum(["binance", "bybit", "coinbase", "kraken", "okx"]);
 const isoDatetimeSchema = z
   .string()
   .trim()
@@ -62,15 +64,16 @@ const appendInputSchema = z.object({
   direction: ghostDirectionSchema,
   entryPrice: z.number().positive(),
   exchangeRequested: exchangeSchema.optional(),
-  exchangeResolved: z.enum(["binance"]).optional(),
+  exchangeResolved: exchangeProviderSchema.optional(),
   expiryPrice: z.number().positive(),
   expirySeconds: z.number().int().min(5).max(600),
   momentumStrength: z.number().min(0).max(100).optional(),
   neutralProbability: z.number().min(0).max(100).optional(),
   openedAt: isoDatetimeSchema.optional(),
+  operationalMode: ghostOperationalModeSchema.optional(),
   outcome: ghostOutcomeSchema,
   probability: z.number().min(0).max(100),
-  provider: z.enum(["binance"]).optional(),
+  provider: exchangeProviderSchema.optional(),
   putProbability: z.number().min(0).max(100).optional(),
   range: ghostRangeSchema.optional(),
   requestId: z.string().trim().min(1).max(128).optional(),
@@ -93,6 +96,7 @@ const persistedPayloadSchema = z.object({
 
 export type BinaryOptionsGhostAuditDirection = z.infer<typeof ghostDirectionSchema>;
 export type BinaryOptionsGhostAuditOutcome = z.infer<typeof ghostOutcomeSchema>;
+export type BinaryOptionsGhostAuditOperationalMode = z.infer<typeof ghostOperationalModeSchema>;
 export type BinaryOptionsGhostAuditTriggerHeat = z.infer<typeof ghostTriggerHeatSchema>;
 export type BinaryOptionsGhostAuditRecord = z.infer<typeof recordSchema>;
 export type BinaryOptionsGhostAuditAppendInput = z.infer<typeof appendInputSchema>;
@@ -101,6 +105,7 @@ export interface BinaryOptionsGhostAuditQueryOptions {
   assetId?: string;
   from?: Date;
   limit?: number;
+  operationalMode?: BinaryOptionsGhostAuditOperationalMode;
   offset?: number;
   outcome?: BinaryOptionsGhostAuditOutcome;
   sessionId?: string;
@@ -140,6 +145,7 @@ export interface BinaryOptionsGhostAuditHistory {
   filters: {
     assetId: string | null;
     from: string | null;
+    operationalMode: BinaryOptionsGhostAuditOperationalMode | null;
     outcome: BinaryOptionsGhostAuditOutcome | null;
     sessionId: string | null;
     to: string | null;
@@ -211,6 +217,7 @@ function applyFilters(
 ): BinaryOptionsGhostAuditRecord[] {
   const assetId = normalizeOptionalTrimmed(options.assetId)?.toLowerCase();
   const fromMs = options.from?.getTime();
+  const operationalMode = options.operationalMode;
   const outcome = options.outcome;
   const sessionId = normalizeOptionalTrimmed(options.sessionId);
   const toMs = options.to?.getTime();
@@ -236,6 +243,10 @@ function applyFilters(
     }
 
     if (assetId && record.assetId.toLowerCase() !== assetId) {
+      return false;
+    }
+
+    if (operationalMode && (record.operationalMode ?? "binary_options") !== operationalMode) {
       return false;
     }
 
@@ -333,6 +344,7 @@ function buildHistoryFilters(options: BinaryOptionsGhostAuditQueryOptions): Bina
   return {
     assetId,
     from: options.from ? options.from.toISOString() : null,
+    operationalMode: options.operationalMode ?? null,
     outcome: options.outcome ?? null,
     sessionId,
     to: options.to ? options.to.toISOString() : null,
@@ -400,11 +412,15 @@ export class BinaryOptionsGhostAuditStore {
     }
 
     const parsedInput = appendInputSchema.parse(input);
+    const normalizedInput = {
+      ...parsedInput,
+      operationalMode: parsedInput.operationalMode ?? "binary_options",
+    };
 
     if (this.mode === "postgres") {
       const duplicateInPostgres = await this.hasDuplicateInPostgres(
-        parsedInput.sessionId,
-        parsedInput.signalId,
+        normalizedInput.sessionId,
+        normalizedInput.signalId,
       );
 
       if (duplicateInPostgres === null) {
@@ -422,7 +438,7 @@ export class BinaryOptionsGhostAuditStore {
     if (
       this.mode === "file"
       && this.records.some((record) =>
-        record.sessionId === parsedInput.sessionId && record.signalId === parsedInput.signalId)
+        record.sessionId === normalizedInput.sessionId && record.signalId === normalizedInput.signalId)
     ) {
       return {
         accepted: true,
@@ -433,7 +449,7 @@ export class BinaryOptionsGhostAuditStore {
     }
 
     const record = recordSchema.parse({
-      ...parsedInput,
+      ...normalizedInput,
       recordedAt: new Date().toISOString(),
     });
 
@@ -651,6 +667,7 @@ export class BinaryOptionsGhostAuditStore {
       const whereParts: string[] = [];
       const params: unknown[] = [];
       const assetId = normalizeOptionalTrimmed(options.assetId)?.toLowerCase();
+      const operationalMode = options.operationalMode;
       const sessionId = normalizeOptionalTrimmed(options.sessionId);
 
       if (options.from) {
@@ -671,6 +688,11 @@ export class BinaryOptionsGhostAuditStore {
       if (assetId) {
         params.push(assetId);
         whereParts.push(`LOWER(payload ->> 'assetId') = $${params.length}`);
+      }
+
+      if (operationalMode) {
+        params.push(operationalMode);
+        whereParts.push(`COALESCE(payload ->> 'operationalMode', 'binary_options') = $${params.length}`);
       }
 
       if (options.outcome) {

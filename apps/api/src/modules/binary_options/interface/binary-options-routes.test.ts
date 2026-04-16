@@ -231,6 +231,7 @@ void it("POST /v1/binary-options/ghost-audit/settlements registra liquidacao e r
     momentumStrength: 54.2,
     neutralProbability: 11.4,
     openedAt: "2026-01-10T10:00:00.000Z",
+    operationalMode: "binary_options",
     outcome: "win",
     probability: 78.5,
     provider: "binance",
@@ -293,7 +294,7 @@ void it("POST /v1/binary-options/ghost-audit/settlements registra liquidacao e r
       "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
     },
     method: "GET",
-    url: "/v1/binary-options/ghost-audit/history?sessionId=sess_binary_audit_001&limit=10&offset=0",
+    url: "/v1/binary-options/ghost-audit/history?sessionId=sess_binary_audit_001&operationalMode=binary_options&limit=10&offset=0",
   });
 
   assert.equal(historyResponse.statusCode, 200);
@@ -326,6 +327,94 @@ void it("POST /v1/binary-options/ghost-audit/settlements registra liquidacao e r
   assert.equal(historyBody.data.summary.pushes, 0);
   assert.equal(historyBody.data.summary.resolvedTrades, 1);
   assert.equal(historyBody.data.summary.winRatePercent, 100);
+});
+
+void it("GET /v1/binary-options/ghost-audit/history filtra por operationalMode", async () => {
+  const binaryPayload = {
+    assetId: "bitcoin",
+    direction: "call",
+    entryPrice: 64000,
+    expiryPrice: 64080,
+    expirySeconds: 60,
+    operationalMode: "binary_options",
+    outcome: "win",
+    probability: 79,
+    sessionId: "sess_binary_mode_001",
+    signalId: "ghost_binary_mode_001",
+  } as const;
+
+  const spotPayload = {
+    assetId: "bitcoin",
+    direction: "put",
+    entryPrice: 64020,
+    expiryPrice: 63920,
+    expirySeconds: 60,
+    operationalMode: "spot_margin",
+    outcome: "win",
+    probability: 74,
+    sessionId: "sess_spot_mode_001",
+    signalId: "ghost_spot_mode_001",
+  } as const;
+
+  const binaryPost = await app.inject({
+    method: "POST",
+    payload: binaryPayload,
+    url: "/v1/binary-options/ghost-audit/settlements",
+  });
+  assert.equal(binaryPost.statusCode, 202);
+
+  const spotPost = await app.inject({
+    method: "POST",
+    payload: spotPayload,
+    url: "/v1/binary-options/ghost-audit/settlements",
+  });
+  assert.equal(spotPost.statusCode, 202);
+
+  const historyBinaryResponse = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/v1/binary-options/ghost-audit/history?assetId=bitcoin&operationalMode=binary_options&limit=20&offset=0",
+  });
+  assert.equal(historyBinaryResponse.statusCode, 200);
+
+  const historyBinaryBody = historyBinaryResponse.json<{
+    data: {
+      records: Array<{
+        operationalMode?: "binary_options" | "spot_margin";
+      }>;
+      totalMatched: number;
+    };
+    status: "success";
+  }>();
+
+  assert.equal(historyBinaryBody.status, "success");
+  assert.equal(historyBinaryBody.data.totalMatched, 1);
+  assert.equal(historyBinaryBody.data.records[0]?.operationalMode, "binary_options");
+
+  const historySpotResponse = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/v1/binary-options/ghost-audit/history?assetId=bitcoin&operationalMode=spot_margin&limit=20&offset=0",
+  });
+  assert.equal(historySpotResponse.statusCode, 200);
+
+  const historySpotBody = historySpotResponse.json<{
+    data: {
+      records: Array<{
+        operationalMode?: "binary_options" | "spot_margin";
+      }>;
+      totalMatched: number;
+    };
+    status: "success";
+  }>();
+
+  assert.equal(historySpotBody.status, "success");
+  assert.equal(historySpotBody.data.totalMatched, 1);
+  assert.equal(historySpotBody.data.records[0]?.operationalMode, "spot_margin");
 });
 
 void it("GET /v1/binary-options/ghost-audit/history retorna 401 sem token interno", async () => {

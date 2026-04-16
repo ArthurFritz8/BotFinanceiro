@@ -175,6 +175,8 @@ const BINARY_OPTIONS_GHOST_AUDIT_SETTLEMENT_ENDPOINT = "/v1/binary-options/ghost
 const BINARY_OPTIONS_GHOST_AUDIT_HISTORY_ENDPOINT = "/v1/binary-options/ghost-audit/history";
 const BINARY_OPTIONS_GHOST_AUDIT_HISTORY_REFRESH_MS = 20000;
 const BINARY_OPTIONS_GHOST_AUDIT_HISTORY_LIMIT = 300;
+const GHOST_AUDIT_OPERATIONAL_MODE_BINARY_OPTIONS = "binary_options";
+const GHOST_AUDIT_OPERATIONAL_MODE_SPOT_MARGIN = "spot_margin";
 const BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION = "session";
 const BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_INSTITUTIONAL = "institutional";
 const INTELLIGENCE_SYNC_HEALTH_ENDPOINT = "/internal/health/intelligence-sync";
@@ -1758,6 +1760,15 @@ const BINARY_OPTIONS_GHOST_TRACKER_DEFAULTS = Object.freeze({
   minProbabilityEdge: 6,
   resultHistoryLimit: 30,
 });
+const SPOT_MARGIN_GHOST_TRACKER_DEFAULTS = Object.freeze({
+  cooldownSeconds: 45,
+  fallbackExpirySeconds: 300,
+  maxConcurrentSignals: 3,
+  maxNeutralProbability: 32,
+  minDirectionalProbability: 63,
+  minProbabilityEdge: 7,
+  resultHistoryLimit: 40,
+});
 
 const messages = [];
 let isSending = false;
@@ -1883,6 +1894,7 @@ let binaryOptionsRiskState = {
   ...BINARY_OPTIONS_RISK_DEFAULT_STATE,
 };
 let binaryOptionsGhostTrackerState = createBinaryOptionsGhostTrackerState();
+let spotMarginGhostTrackerState = createSpotMarginGhostTrackerState();
 let binaryOptionsGhostAuditBackendState = createBinaryOptionsGhostAuditBackendState();
 let binaryOptionsGhostAuditViewMode = BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION;
 let isPropDeskInitialized = false;
@@ -2014,6 +2026,22 @@ function isBinaryOptionsOperationalMode(mode = chartOperationalMode) {
   return normalizeChartOperationalMode(mode) === CHART_OPERATIONAL_MODE_BINARY_OPTIONS;
 }
 
+function isSpotMarginOperationalMode(mode = chartOperationalMode) {
+  return normalizeChartOperationalMode(mode) === CHART_OPERATIONAL_MODE_SPOT_MARGIN;
+}
+
+function resolveGhostAuditOperationalMode(mode = chartOperationalMode) {
+  if (isBinaryOptionsOperationalMode(mode)) {
+    return GHOST_AUDIT_OPERATIONAL_MODE_BINARY_OPTIONS;
+  }
+
+  if (isSpotMarginOperationalMode(mode)) {
+    return GHOST_AUDIT_OPERATIONAL_MODE_SPOT_MARGIN;
+  }
+
+  return null;
+}
+
 function isAnalysisTabVisible(tabId, mode = chartOperationalMode) {
   const normalizedMode = normalizeChartOperationalMode(mode);
 
@@ -2060,6 +2088,7 @@ function setChartOperationalMode(nextMode, options = {}) {
 
   if (hasChanged) {
     resetBinaryOptionsGhostTrackerSession();
+    resetSpotMarginGhostTrackerSession();
     resetBinaryOptionsGhostAuditBackendState();
   }
 
@@ -6977,6 +7006,20 @@ function createBinaryOptionsGhostTrackerState() {
   };
 }
 
+function createSpotMarginGhostTrackerState() {
+  return {
+    lastSignalAtMs: 0,
+    lastSettledAtMs: 0,
+    losses: 0,
+    openSignals: [],
+    pushes: 0,
+    recentResults: [],
+    sessionKey: "",
+    startedAtMs: Date.now(),
+    wins: 0,
+  };
+}
+
 function createBinaryOptionsGhostAuditBackendState() {
   return {
     error: "",
@@ -7002,6 +7045,10 @@ function resetBinaryOptionsGhostTrackerSession() {
   binaryOptionsGhostTrackerState = createBinaryOptionsGhostTrackerState();
 }
 
+function resetSpotMarginGhostTrackerSession() {
+  spotMarginGhostTrackerState = createSpotMarginGhostTrackerState();
+}
+
 function resetBinaryOptionsGhostAuditBackendState() {
   binaryOptionsGhostAuditBackendState = createBinaryOptionsGhostAuditBackendState();
   binaryOptionsGhostAuditViewMode = BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION;
@@ -7025,6 +7072,26 @@ function setBinaryOptionsGhostAuditViewMode(nextMode, options = {}) {
   if (options.refresh !== false && currentChartSnapshot) {
     void refreshBinaryOptionsGhostAuditHistory(currentChartSnapshot, {
       force: true,
+    });
+  }
+}
+
+function bindGhostAuditViewModeButtons(container) {
+  if (!(container instanceof HTMLElement)) {
+    return;
+  }
+
+  const ghostViewModeButtons = container.querySelectorAll("[data-ghost-audit-view-mode]");
+
+  for (const ghostViewModeButton of ghostViewModeButtons) {
+    if (!(ghostViewModeButton instanceof HTMLButtonElement)) {
+      continue;
+    }
+
+    ghostViewModeButton.addEventListener("click", () => {
+      setBinaryOptionsGhostAuditViewMode(ghostViewModeButton.dataset.ghostAuditViewMode, {
+        refresh: true,
+      });
     });
   }
 }
@@ -7147,7 +7214,12 @@ function buildBinaryOptionsGhostBackendStatusMessage(ghostBackendStats) {
 function buildBinaryOptionsGhostAuditHistoryQuery(snapshot) {
   const params = new URLSearchParams();
   const assetId = typeof snapshot?.assetId === "string" ? snapshot.assetId.trim() : "";
+  const ghostAuditOperationalMode = resolveGhostAuditOperationalMode();
   const ghostAuditViewMode = normalizeBinaryOptionsGhostAuditViewMode(binaryOptionsGhostAuditViewMode);
+
+  if (ghostAuditOperationalMode) {
+    params.set("operationalMode", ghostAuditOperationalMode);
+  }
 
   if (ghostAuditViewMode === BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION) {
     const sessionId = getBinaryOptionsGhostAuditSessionId();
@@ -7168,20 +7240,24 @@ function buildBinaryOptionsGhostAuditHistoryQuery(snapshot) {
 
 function buildBinaryOptionsGhostAuditHistoryRequestKey(snapshot) {
   const baseSessionKey = buildBinaryOptionsGhostSessionKey(snapshot);
+  const ghostAuditOperationalMode = resolveGhostAuditOperationalMode();
   const ghostAuditViewMode = normalizeBinaryOptionsGhostAuditViewMode(binaryOptionsGhostAuditViewMode);
+  const operationalModeKey = ghostAuditOperationalMode ?? "unknown";
 
   if (ghostAuditViewMode === BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION) {
     const sessionId = getBinaryOptionsGhostAuditSessionId();
     return sessionId.length > 0
-      ? `${baseSessionKey}:${BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION}:${sessionId}`
-      : `${baseSessionKey}:${BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION}:invalid`;
+      ? `${baseSessionKey}:${operationalModeKey}:${BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION}:${sessionId}`
+      : `${baseSessionKey}:${operationalModeKey}:${BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION}:invalid`;
   }
 
-  return `${baseSessionKey}:${BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_INSTITUTIONAL}`;
+  return `${baseSessionKey}:${operationalModeKey}:${BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_INSTITUTIONAL}`;
 }
 
 async function refreshBinaryOptionsGhostAuditHistory(snapshot, options = {}) {
-  if (!isBinaryOptionsOperationalMode() || snapshot?.mode !== "live") {
+  const ghostAuditOperationalMode = resolveGhostAuditOperationalMode();
+
+  if (!ghostAuditOperationalMode || snapshot?.mode !== "live") {
     return;
   }
 
@@ -7275,6 +7351,7 @@ function buildBinaryOptionsGhostAuditSettlementPayload(input) {
 
   const signal = input?.signal;
   const snapshot = input?.snapshot;
+  const operationalMode = resolveGhostAuditOperationalMode(input?.operationalMode ?? chartOperationalMode);
   const settledAtMs = toFiniteNumber(input?.nowMs, Date.now());
   const expiryPrice = toFiniteNumber(input?.currentPrice, Number.NaN);
 
@@ -7303,6 +7380,7 @@ function buildBinaryOptionsGhostAuditSettlementPayload(input) {
     momentumStrength: Number.isFinite(signal.momentumStrength) ? signal.momentumStrength : undefined,
     neutralProbability: Number.isFinite(signal.neutralProbability) ? signal.neutralProbability : undefined,
     openedAt,
+    operationalMode: operationalMode ?? undefined,
     outcome: input?.outcome,
     probability: signal.probability,
     provider: typeof snapshot?.provider === "string" ? snapshot.provider : undefined,
@@ -7396,6 +7474,7 @@ function settleBinaryOptionsGhostSignals(currentPrice, snapshot, nowMs = Date.no
     void publishBinaryOptionsGhostSettlementToBackend({
       currentPrice,
       nowMs,
+      operationalMode: GHOST_AUDIT_OPERATIONAL_MODE_BINARY_OPTIONS,
       outcome,
       signal,
       snapshot,
@@ -7500,6 +7579,221 @@ function updateBinaryOptionsGhostTracker(snapshot, microTiming) {
   const nowMs = Date.now();
   settleBinaryOptionsGhostSignals(currentPrice, snapshot, nowMs);
   registerBinaryOptionsGhostSignal(snapshot, microTiming, currentPrice, nowMs);
+}
+
+function resolveSpotMarginTriggerHeat(input) {
+  const directionalProbability = Math.max(input.buyProbability, input.sellProbability);
+  const score = clampNumber(
+    roundNumber(
+      directionalProbability * 0.72
+      + input.confidenceScore * 0.2
+      - input.neutralProbability * 0.26
+      - Math.max(0, input.volatilityPercent - 3.2) * 2.1,
+      1,
+    ),
+    0,
+    100,
+  );
+  const dominantSide = input.buyProbability >= input.sellProbability ? "BUY" : "SELL";
+
+  if (directionalProbability >= 72 && input.neutralProbability <= 24 && input.confidenceScore >= 58) {
+    return {
+      dominantSide,
+      guidance: `Fluxo spot/margem aquecido para ${dominantSide}. Priorize execucao com risco controlado e sem aumentar alavancagem no impulso.`,
+      score,
+      state: "hot",
+      title: "Viés quente",
+    };
+  }
+
+  if (directionalProbability >= 64 && input.neutralProbability <= 32 && input.confidenceScore >= 48) {
+    return {
+      dominantSide,
+      guidance: `Viés moderado para ${dominantSide}. Aguarde confirmacao de continuidade antes de aumentar exposicao.`,
+      score,
+      state: "warm",
+      title: "Viés em aquecimento",
+    };
+  }
+
+  return {
+    dominantSide,
+    guidance: "Viés frio para spot/margem. Melhor reduzir frequencia e aguardar assimetria mais clara.",
+    score,
+    state: "cold",
+    title: "Viés frio",
+  };
+}
+
+function settleSpotMarginGhostSignals(currentPrice, snapshot, nowMs = Date.now()) {
+  if (!Number.isFinite(currentPrice) || spotMarginGhostTrackerState.openSignals.length === 0) {
+    return;
+  }
+
+  const epsilon = Math.max(1e-8, Math.abs(currentPrice) * 0.00001);
+  const pendingSignals = [];
+  let hasSettlement = false;
+
+  for (const signal of spotMarginGhostTrackerState.openSignals) {
+    if (nowMs < signal.expiresAtMs) {
+      pendingSignals.push(signal);
+      continue;
+    }
+
+    const priceDelta = currentPrice - signal.entryPrice;
+    let outcome = "push";
+
+    if (signal.direction === "call") {
+      outcome = priceDelta > epsilon ? "win" : priceDelta < -epsilon ? "loss" : "push";
+    } else {
+      outcome = priceDelta < -epsilon ? "win" : priceDelta > epsilon ? "loss" : "push";
+    }
+
+    if (outcome === "win") {
+      spotMarginGhostTrackerState.wins += 1;
+    } else if (outcome === "loss") {
+      spotMarginGhostTrackerState.losses += 1;
+    } else {
+      spotMarginGhostTrackerState.pushes += 1;
+    }
+
+    spotMarginGhostTrackerState.recentResults.unshift({
+      direction: signal.direction,
+      entryPrice: signal.entryPrice,
+      expiryPrice: currentPrice,
+      expirySeconds: signal.expirySeconds,
+      outcome,
+      probability: signal.probability,
+      signalId: signal.signalId,
+      settledAtMs: nowMs,
+      triggerHeat: signal.triggerHeat ?? "unknown",
+    });
+
+    void publishBinaryOptionsGhostSettlementToBackend({
+      currentPrice,
+      nowMs,
+      operationalMode: GHOST_AUDIT_OPERATIONAL_MODE_SPOT_MARGIN,
+      outcome,
+      signal,
+      snapshot,
+    });
+
+    hasSettlement = true;
+  }
+
+  if (!hasSettlement) {
+    return;
+  }
+
+  spotMarginGhostTrackerState.lastSettledAtMs = nowMs;
+  spotMarginGhostTrackerState.openSignals = pendingSignals;
+  spotMarginGhostTrackerState.recentResults = spotMarginGhostTrackerState.recentResults.slice(
+    0,
+    SPOT_MARGIN_GHOST_TRACKER_DEFAULTS.resultHistoryLimit,
+  );
+}
+
+function registerSpotMarginGhostSignal(snapshot, analysis, currentPrice, nowMs = Date.now()) {
+  const signalTone = typeof analysis?.signal?.tone === "string" ? analysis.signal.tone : "neutral";
+
+  if (signalTone !== "buy" && signalTone !== "sell") {
+    return false;
+  }
+
+  const buyProbability = clampNumber(toFiniteNumber(analysis?.buyProbability, 0), 0, 100);
+  const sellProbability = clampNumber(toFiniteNumber(analysis?.sellProbability, 0), 0, 100);
+  const neutralProbability = clampNumber(toFiniteNumber(analysis?.neutralProbability, 0), 0, 100);
+  const directionalProbability = signalTone === "buy" ? buyProbability : sellProbability;
+  const probabilityEdge = Math.abs(buyProbability - sellProbability);
+  const confidenceScore = clampNumber(toFiniteNumber(analysis?.signal?.confidence, 0), 0, 100);
+
+  if (directionalProbability < SPOT_MARGIN_GHOST_TRACKER_DEFAULTS.minDirectionalProbability) {
+    return false;
+  }
+
+  if (probabilityEdge < SPOT_MARGIN_GHOST_TRACKER_DEFAULTS.minProbabilityEdge) {
+    return false;
+  }
+
+  if (neutralProbability > SPOT_MARGIN_GHOST_TRACKER_DEFAULTS.maxNeutralProbability) {
+    return false;
+  }
+
+  if (spotMarginGhostTrackerState.openSignals.length >= SPOT_MARGIN_GHOST_TRACKER_DEFAULTS.maxConcurrentSignals) {
+    return false;
+  }
+
+  const cooldownMs = SPOT_MARGIN_GHOST_TRACKER_DEFAULTS.cooldownSeconds * 1000;
+
+  if (nowMs - spotMarginGhostTrackerState.lastSignalAtMs < cooldownMs) {
+    return false;
+  }
+
+  const points = Array.isArray(snapshot?.points) ? snapshot.points : [];
+  const barSpacingSeconds = estimateMedianPointSpacingSeconds(points);
+  const suggestedExpirySeconds = toFiniteNumber(
+    barSpacingSeconds * 10,
+    SPOT_MARGIN_GHOST_TRACKER_DEFAULTS.fallbackExpirySeconds,
+  );
+  const expirySeconds = Math.round(clampNumber(suggestedExpirySeconds, 120, 600));
+  const signalId = buildBinaryOptionsGhostSignalId(nowMs);
+  const triggerHeat = resolveSpotMarginTriggerHeat({
+    buyProbability,
+    confidenceScore,
+    neutralProbability,
+    sellProbability,
+    volatilityPercent: toFiniteNumber(snapshot?.insights?.volatilityPercent, 0),
+  });
+  const momentumStrength = clampNumber(
+    Math.abs(toFiniteNumber(analysis?.wegd?.pressure, 0)) * 1.2 + Math.abs(toFiniteNumber(analysis?.fearGreed?.delta7d, 0)) * 0.8,
+    0,
+    100,
+  );
+
+  spotMarginGhostTrackerState.openSignals.push({
+    callProbability: buyProbability,
+    direction: signalTone === "buy" ? "call" : "put",
+    entryPrice: currentPrice,
+    expiresAtMs: nowMs + expirySeconds * 1000,
+    expirySeconds,
+    momentumStrength,
+    neutralProbability,
+    openedAtMs: nowMs,
+    probability: directionalProbability,
+    putProbability: sellProbability,
+    resolution: typeof snapshot?.resolution === "string"
+      ? snapshot.resolution
+      : (normalizeRequestedChartResolution(getSelectedTerminalInterval()) ?? "1"),
+    signalId,
+    triggerHeat: triggerHeat.state,
+  });
+  spotMarginGhostTrackerState.lastSignalAtMs = nowMs;
+  return true;
+}
+
+function updateSpotMarginGhostTracker(snapshot, analysis) {
+  if (!isSpotMarginOperationalMode() || snapshot?.mode !== "live") {
+    return;
+  }
+
+  const points = Array.isArray(snapshot?.points) ? snapshot.points : [];
+  const lastPoint = points[points.length - 1];
+  const currentPrice = toFiniteNumber(lastPoint?.close, Number.NaN);
+
+  if (!Number.isFinite(currentPrice)) {
+    return;
+  }
+
+  const sessionKey = `${buildBinaryOptionsGhostSessionKey(snapshot)}:${GHOST_AUDIT_OPERATIONAL_MODE_SPOT_MARGIN}`;
+
+  if (spotMarginGhostTrackerState.sessionKey !== sessionKey) {
+    spotMarginGhostTrackerState = createSpotMarginGhostTrackerState();
+    spotMarginGhostTrackerState.sessionKey = sessionKey;
+  }
+
+  const nowMs = Date.now();
+  settleSpotMarginGhostSignals(currentPrice, snapshot, nowMs);
+  registerSpotMarginGhostSignal(snapshot, analysis, currentPrice, nowMs);
 }
 
 function sanitizeBinaryOptionsRiskState(candidate) {
@@ -7770,7 +8064,7 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
   }
 
   if (activeAnalysisTabId === "resumo") {
-    analysisTabContentElement.innerHTML = `
+    const baseResumoHtml = `
       <div class="analysis-grid">
         <article class="analysis-block">
           <h4>Leitura executiva</h4>
@@ -7786,6 +8080,101 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
         </article>
       </div>
     `;
+
+    if (!isBinaryMode && isSpotMarginOperationalMode()) {
+      const spotGhostStats = getBinaryOptionsGhostTrackerStats(spotMarginGhostTrackerState);
+      const spotTriggerHeat = resolveSpotMarginTriggerHeat({
+        buyProbability: analysis.buyProbability,
+        confidenceScore: toFiniteNumber(analysis.signal?.confidence, 0),
+        neutralProbability: analysis.neutralProbability,
+        sellProbability: analysis.sellProbability,
+        volatilityPercent: toFiniteNumber(snapshot?.insights?.volatilityPercent, 0),
+      });
+      const spotSummaryLabel = spotGhostStats.pushes > 0
+        ? `${spotGhostStats.wins}W - ${spotGhostStats.losses}L - ${spotGhostStats.pushes}D`
+        : `${spotGhostStats.wins}W - ${spotGhostStats.losses}L`;
+      const ghostBackendStats = getBinaryOptionsGhostBackendStats();
+      const ghostBackendViewMode = normalizeBinaryOptionsGhostAuditViewMode(binaryOptionsGhostAuditViewMode);
+      const isSessionBackendView = ghostBackendViewMode === BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION;
+      const ghostBackendSummaryLabel = ghostBackendStats.hasSnapshot
+        ? ghostBackendStats.pushes > 0
+          ? `${ghostBackendStats.wins}W - ${ghostBackendStats.losses}L - ${ghostBackendStats.pushes}D`
+          : `${ghostBackendStats.wins}W - ${ghostBackendStats.losses}L`
+        : ghostBackendStats.inFlight
+          ? "SYNC"
+          : "SEM DADOS";
+      const ghostBackendTitle = isSessionBackendView
+        ? "Ghost Persistido Spot/Margem (Sessao Atual)"
+        : "Ghost Institucional Spot/Margem";
+      const ghostBackendState = !ghostBackendStats.enabled
+        ? "cold"
+        : ghostBackendStats.winRate >= 56
+          ? "hot"
+          : ghostBackendStats.winRate >= 46
+            ? "warm"
+            : "cold";
+      const ghostBackendStatusMessage = buildBinaryOptionsGhostBackendStatusMessage(ghostBackendStats);
+      const ghostBackendScopeMessage = isSessionBackendView
+        ? "Escopo: filtros por sessionId ativo + assetId atual."
+        : "Escopo: agregacao Spot/Margem por assetId na base persistida.";
+      const ghostBackendUpdatedLabel = ghostBackendStats.fetchedAtMs > 0
+        ? `Atualizado ${formatShortTime(new Date(ghostBackendStats.fetchedAtMs).toISOString())}`
+        : "Sem snapshot backend ainda";
+
+      analysisTabContentElement.innerHTML = `
+        ${baseResumoHtml}
+        <article class="analysis-block analysis-binary-ghost" data-state="${escapeHtml(spotTriggerHeat.state)}">
+          <div class="analysis-binary-ghost-head">
+            <h4>Ghost Tracker Spot/Margem (Sessao)</h4>
+            <span class="analysis-binary-ghost-badge">${escapeHtml(spotSummaryLabel)}</span>
+          </div>
+          <div class="analysis-binary-ghost-metrics">
+            <article><span>Win rate auditada</span><strong>${spotGhostStats.winRate.toFixed(1)}%</strong></article>
+            <article><span>Sinais encerrados</span><strong>${spotGhostStats.resolvedTrades}</strong></article>
+            <article><span>Sinais em aberto</span><strong>${spotGhostStats.openSignals}</strong></article>
+            <article><span>Qualidade amostral</span><strong>${escapeHtml(spotGhostStats.sampleState)}</strong></article>
+          </div>
+          <p>${escapeHtml(spotTriggerHeat.guidance)}</p>
+          <p>
+            Regras ativas: probabilidade direcional >= ${SPOT_MARGIN_GHOST_TRACKER_DEFAULTS.minDirectionalProbability}%,
+            edge minimo ${SPOT_MARGIN_GHOST_TRACKER_DEFAULTS.minProbabilityEdge} p.p.,
+            cooldown ${SPOT_MARGIN_GHOST_TRACKER_DEFAULTS.cooldownSeconds}s.
+          </p>
+        </article>
+        <article class="analysis-block analysis-binary-ghost" data-state="${escapeHtml(ghostBackendState)}">
+          <div class="analysis-binary-ghost-head">
+            <h4>${escapeHtml(ghostBackendTitle)}</h4>
+            <span class="analysis-binary-ghost-badge">${escapeHtml(ghostBackendSummaryLabel)}</span>
+          </div>
+          <div class="analysis-binary-ghost-view-toggle" role="tablist" aria-label="Escopo da auditoria ghost persistida">
+            <button
+              type="button"
+              class="analysis-binary-ghost-view-button ${isSessionBackendView ? "is-active" : ""}"
+              data-ghost-audit-view-mode="${BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION}"
+            >Sessao atual</button>
+            <button
+              type="button"
+              class="analysis-binary-ghost-view-button ${isSessionBackendView ? "" : "is-active"}"
+              data-ghost-audit-view-mode="${BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_INSTITUTIONAL}"
+            >Institucional</button>
+          </div>
+          <div class="analysis-binary-ghost-metrics">
+            <article><span>Win rate backend</span><strong>${ghostBackendStats.winRate.toFixed(1)}%</strong></article>
+            <article><span>Sinais encerrados</span><strong>${ghostBackendStats.resolvedTrades}</strong></article>
+            <article><span>Registros filtrados</span><strong>${ghostBackendStats.totalMatched}</strong></article>
+            <article><span>Qualidade amostral</span><strong>${escapeHtml(ghostBackendStats.sampleState)}</strong></article>
+          </div>
+          <p>${escapeHtml(ghostBackendScopeMessage)}</p>
+          <p>${escapeHtml(ghostBackendStatusMessage)}</p>
+          <p>${escapeHtml(ghostBackendUpdatedLabel)}</p>
+        </article>
+      `;
+
+      bindGhostAuditViewModeButtons(analysisTabContentElement);
+      return;
+    }
+
+    analysisTabContentElement.innerHTML = baseResumoHtml;
     return;
   }
 
@@ -8061,19 +8450,7 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
       </article>
     `;
 
-    const ghostViewModeButtons = analysisTabContentElement.querySelectorAll("[data-ghost-audit-view-mode]");
-
-    for (const ghostViewModeButton of ghostViewModeButtons) {
-      if (!(ghostViewModeButton instanceof HTMLButtonElement)) {
-        continue;
-      }
-
-      ghostViewModeButton.addEventListener("click", () => {
-        setBinaryOptionsGhostAuditViewMode(ghostViewModeButton.dataset.ghostAuditViewMode, {
-          refresh: true,
-        });
-      });
-    }
+    bindGhostAuditViewModeButtons(analysisTabContentElement);
 
     return;
   }
@@ -8316,6 +8693,11 @@ function renderDeepAnalysisPanel(snapshot) {
 
   if (precomputedMicroTiming) {
     updateBinaryOptionsGhostTracker(snapshot, precomputedMicroTiming);
+    void refreshBinaryOptionsGhostAuditHistory(snapshot);
+  }
+
+  if (!precomputedMicroTiming && isSpotMarginOperationalMode()) {
+    updateSpotMarginGhostTracker(snapshot, analysis);
     void refreshBinaryOptionsGhostAuditHistory(snapshot);
   }
 
