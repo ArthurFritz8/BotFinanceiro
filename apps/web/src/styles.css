@@ -1153,6 +1153,37 @@ body.sidebar-collapsed .app-shell {
   color: #ffe6be;
 }
 
+.chart-desk-tags {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 0.38rem;
+}
+
+.chart-lab-fallback-badge {
+  background: rgba(94, 143, 255, 0.2);
+  border: 1px solid rgba(148, 194, 255, 0.46);
+  border-radius: 999px;
+  color: #d7e9ff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 0.22rem 0.52rem;
+  text-transform: uppercase;
+}
+
+.chart-lab-fallback-badge[data-mode="interval"] {
+  background: rgba(244, 167, 68, 0.2);
+  border-color: rgba(255, 206, 128, 0.58);
+  color: #ffe4b8;
+}
+
+.chart-lab-fallback-badge[data-mode="delayed"] {
+  background: rgba(255, 118, 118, 0.2);
+  border-color: rgba(255, 170, 170, 0.5);
+  color: #ffd6d6;
+}
+
 .chart-controls {
   align-items: end;
   display: grid;
@@ -4138,6 +4169,11 @@ body.sidebar-collapsed .app-shell {
 
   .chart-desk-top {
     flex-direction: column;
+  }
+
+  .chart-desk-tags {
+    align-items: flex-start;
+    width: 100%;
   }
 
   .chart-controls {

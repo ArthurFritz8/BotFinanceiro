@@ -61,6 +61,7 @@ const chartIntervalMenu = document.querySelector("#chart-interval-menu");
 const chartIntervalMenuList = document.querySelector("#chart-interval-menu-list");
 const chartIntervalMenuCurrent = document.querySelector("#chart-interval-menu-current");
 const chartOperationalModeTagElement = document.querySelector("#chart-operational-mode-tag");
+const chartFallbackBadgeElement = document.querySelector("#chart-fallback-badge");
 const chartStatusElement = document.querySelector("#chart-status");
 const chartLegendElement = document.querySelector("#chart-legend");
 const chartCopilotStage = document.querySelector("#chart-copilot-stage");
@@ -478,13 +479,14 @@ const TERMINAL_INTERVAL_TO_CHART_RANGE = {
   ),
 };
 const TERMINAL_INTERVAL_BACKEND_FALLBACK = "1";
+const TERMINAL_INTERVAL_BINARY_OPTIONS_FALLBACK = "1S";
 const TERMINAL_INTERVAL_MENU_MAX_FAVORITES = 8;
 const TERMINAL_INTERVAL_MENU_MIN_FAVORITES = 1;
 const TERMINAL_INTERVAL_MENU_TV_ONLY_META = "Somente Terminal PRO";
 const TERMINAL_INTERVAL_MENU_INSTITUTIONAL_META = "Recalcula IA nesta granularidade";
 const TERMINAL_INTERVAL_MENU_SHORTCUT_META = "Atalho Alt+1..6";
 const TERMINAL_INTERVAL_MENU_FALLBACK_MESSAGE =
-  "A corretora atual nao fornece dados de [%INTERVAL%] para este ativo. Fallback automatico para 1m.";
+  "A corretora atual nao fornece dados de [%INTERVAL%] para este ativo. Fallback automatico para [%FALLBACK%].";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").trim().replace(/\/$/, "");
 const CHART_RANGE_LABELS = {
   "1y": "1 ano",
@@ -2087,6 +2089,10 @@ function setChartOperationalMode(nextMode, options = {}) {
   chartOperationalMode = normalizedMode;
 
   if (hasChanged) {
+    setChartFallbackBadge("", "");
+  }
+
+  if (hasChanged) {
     resetBinaryOptionsGhostTrackerSession();
     resetSpotMarginGhostTrackerSession();
     resetBinaryOptionsGhostAuditBackendState();
@@ -2125,6 +2131,7 @@ function applyExternalSymbolChartState(symbol, options = {}) {
   const silent = options.silent === true;
 
   currentChartSnapshot = null;
+  setChartFallbackBadge("", "");
 
   if (chartViewMode === "copilot") {
     clearChartSurface();
@@ -6894,6 +6901,161 @@ function estimateMomentumPerSecondPercent(points) {
   return variationPercent / Math.max(elapsedSeconds, 1e-6);
 }
 
+function normalizeBinaryOptionsInstitutionalPoiTag(value) {
+  if (
+    value === "cluster"
+    || value === "midnight_open"
+    || value === "previous_high"
+    || value === "previous_low"
+  ) {
+    return value;
+  }
+
+  return "none";
+}
+
+function normalizeBinaryOptionsKineticExhaustionState(value) {
+  if (value === "cooling" || value === "explosive") {
+    return value;
+  }
+
+  return "neutral";
+}
+
+function resolveBinaryOptionsInstitutionalDirectionalBias(input) {
+  if (!input.poiHit) {
+    return 0;
+  }
+
+  if (input.poiTag === "previous_low") {
+    return 1;
+  }
+
+  if (input.poiTag === "previous_high") {
+    return -1;
+  }
+
+  if (input.poiTag === "midnight_open") {
+    return input.backendMomentumVelocity >= 0 ? 0.45 : -0.45;
+  }
+
+  if (input.poiTag === "cluster") {
+    if (input.rejectionSignal === "bullish" || input.tradeAction === "buy") {
+      return 0.65;
+    }
+
+    if (input.rejectionSignal === "bearish" || input.tradeAction === "sell") {
+      return -0.65;
+    }
+  }
+
+  return 0;
+}
+
+function buildBinaryOptionsInstitutionalKineticContext(snapshot) {
+  const insights = snapshot?.insights && typeof snapshot.insights === "object"
+    ? snapshot.insights
+    : null;
+  const poiHit = insights?.institutionalPoiHit === true;
+  const poiTag = normalizeBinaryOptionsInstitutionalPoiTag(insights?.institutionalPoiTag);
+  const kineticState = normalizeBinaryOptionsKineticExhaustionState(insights?.kineticExhaustionState);
+  const kineticAccelerationPercentPerSecond2 = toFiniteNumber(insights?.kineticAccelerationPercentPerSecond2, 0);
+  const kineticDecelerationStrength = clampNumber(toFiniteNumber(insights?.kineticDecelerationStrength, 0), 0, 100);
+  const rejectionSignal =
+    insights?.rejectionSignal === "bullish" || insights?.rejectionSignal === "bearish"
+      ? insights.rejectionSignal
+      : "none";
+  const tradeAction =
+    insights?.tradeAction === "buy" || insights?.tradeAction === "sell"
+      ? insights.tradeAction
+      : "wait";
+  const backendMomentumVelocity = toFiniteNumber(insights?.momentumVelocityPercentPerSecond, Number.NaN);
+  const institutionalBias = resolveBinaryOptionsInstitutionalDirectionalBias({
+    backendMomentumVelocity,
+    poiHit,
+    poiTag,
+    rejectionSignal,
+    tradeAction,
+  });
+  const accelerationBias = clampNumber(kineticAccelerationPercentPerSecond2 * 7000, -3.5, 3.5);
+  const kineticDirectionalBias =
+    kineticState === "cooling"
+      ? clampNumber(kineticDecelerationStrength * 0.06, 0, 3.4)
+      : kineticState === "explosive"
+        ? -2.8
+        : 0;
+  const directionalBias = clampNumber(institutionalBias * 5 + accelerationBias + kineticDirectionalBias, -9, 9);
+  const momentumStrengthBoost = clampNumber(
+    (poiHit ? 4 : 0)
+      + (kineticState === "cooling" ? kineticDecelerationStrength * 0.2 : 0)
+      + (kineticState === "explosive" ? -6 : 0),
+    -10,
+    24,
+  );
+  const neutralProbabilityAdjustment =
+    kineticState === "explosive"
+      ? 8
+      : poiHit && kineticState === "cooling"
+        ? -6
+        : poiHit
+          ? -2
+          : 0;
+  const poiTagLabel =
+    poiTag === "cluster"
+      ? "Cluster de liquidez"
+      : poiTag === "previous_low"
+        ? "Previous low"
+        : poiTag === "previous_high"
+          ? "Previous high"
+          : poiTag === "midnight_open"
+            ? "Midnight open"
+            : "Nao detectado";
+  const poiBiasLabel =
+    directionalBias >= 2
+      ? "Comprador"
+      : directionalBias <= -2
+        ? "Vendedor"
+        : "Equilibrado";
+  const kineticStateLabel =
+    kineticState === "cooling"
+      ? "Cooling"
+      : kineticState === "explosive"
+        ? "Explosive"
+        : "Neutral";
+  const contextualGuidance =
+    kineticState === "explosive" && !poiHit
+      ? "Explosao sem POI confirmado: priorize espera para evitar clique em ruido de expansao."
+      : kineticState === "cooling" && poiHit
+        ? "Cooling com POI ativo: fluxo mais seletivo e favoravel para gatilhos curtos apos confirmacao."
+        : poiHit
+          ? "POI ativo sem exaustao forte: manter disciplina e aguardar confirmacao do proximo candle."
+          : "Sem POI claro: opere apenas com edge de probabilidade e momentum consistente.";
+
+  return {
+    backendMomentumVelocityPercentPerSecond: Number.isFinite(backendMomentumVelocity)
+      ? backendMomentumVelocity
+      : null,
+    callBiasAdjustment: directionalBias,
+    contextualGuidance,
+    institutionalContext: {
+      biasLabel: poiBiasLabel,
+      hit: poiHit,
+      hitLabel: poiHit ? "ativo" : "inativo",
+      tag: poiTag,
+      tagLabel: poiTagLabel,
+    },
+    kineticContext: {
+      accelerationPercentPerSecond2: kineticAccelerationPercentPerSecond2,
+      decelerationStrength: kineticDecelerationStrength,
+      state: kineticState,
+      stateLabel: kineticStateLabel,
+    },
+    momentumStrengthBoost,
+    neutralProbabilityAdjustment,
+    putBiasAdjustment: -directionalBias,
+  };
+}
+
 function resolveBinaryOptionsTriggerHeat(input) {
   const directionalProbability = Math.max(input.callProbability, input.putProbability);
   const score = clampNumber(
@@ -6939,8 +7101,21 @@ function resolveBinaryOptionsTriggerHeat(input) {
 
 function buildMicroTimingAnalysis(analysis, snapshot) {
   const points = Array.isArray(snapshot?.points) ? snapshot.points : [];
-  const momentumPerSecondPercent = estimateMomentumPerSecondPercent(points);
-  const momentumStrength = clampNumber(roundNumber(Math.abs(momentumPerSecondPercent) * 1400, 1), 0, 100);
+  const context = buildBinaryOptionsInstitutionalKineticContext(snapshot);
+  const estimatedMomentumPerSecondPercent = estimateMomentumPerSecondPercent(points);
+  const blendedMomentumPerSecondPercent = context.backendMomentumVelocityPercentPerSecond === null
+    ? estimatedMomentumPerSecondPercent
+    : estimatedMomentumPerSecondPercent * 0.6 + context.backendMomentumVelocityPercentPerSecond * 0.4;
+  const momentumPerSecondPercent = roundNumber(
+    blendedMomentumPerSecondPercent + context.kineticContext.accelerationPercentPerSecond2 * 4,
+    6,
+  );
+  const momentumStrengthBase = clampNumber(roundNumber(Math.abs(momentumPerSecondPercent) * 1400, 1), 0, 100);
+  const momentumStrength = clampNumber(
+    roundNumber(momentumStrengthBase + context.momentumStrengthBoost, 1),
+    0,
+    100,
+  );
   const momentumDirection =
     momentumPerSecondPercent >= 0.004
       ? "comprador"
@@ -6949,16 +7124,26 @@ function buildMicroTimingAnalysis(analysis, snapshot) {
         : "neutro";
   const momentumBias = clampNumber(momentumPerSecondPercent * 1200, -14, 14);
   const rawCall = clampNumber(
-    analysis.buyProbability + momentumBias + (analysis.signal.tone === "buy" ? 4 : 0),
+    analysis.buyProbability
+      + momentumBias
+      + context.callBiasAdjustment
+      + (analysis.signal.tone === "buy" ? 4 : 0),
     1,
     98,
   );
   const rawPut = clampNumber(
-    analysis.sellProbability - momentumBias + (analysis.signal.tone === "sell" ? 4 : 0),
+    analysis.sellProbability
+      - momentumBias
+      + context.putBiasAdjustment
+      + (analysis.signal.tone === "sell" ? 4 : 0),
     1,
     98,
   );
-  const rawNeutral = clampNumber(analysis.neutralProbability + (momentumStrength < 28 ? 6 : 2), 1, 40);
+  const rawNeutral = clampNumber(
+    analysis.neutralProbability + (momentumStrength < 28 ? 6 : 2) + context.neutralProbabilityAdjustment,
+    1,
+    45,
+  );
   const total = rawCall + rawPut + rawNeutral;
   const callProbability = roundNumber((rawCall / total) * 100, 1);
   const putProbability = roundNumber((rawPut / total) * 100, 1);
@@ -6986,6 +7171,9 @@ function buildMicroTimingAnalysis(analysis, snapshot) {
     momentumPerSecondPercent,
     momentumStrength,
     neutralProbability,
+    contextualGuidance: context.contextualGuidance,
+    institutionalContext: context.institutionalContext,
+    kineticContext: context.kineticContext,
     putProbability,
     suggestedExpirySeconds,
     triggerHeat,
@@ -8328,6 +8516,17 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
     const isSessionBackendView = ghostBackendViewMode === BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION;
     const triggerHeat = microTiming.triggerHeat;
     const momentumPerSecondLabel = `${microTiming.momentumPerSecondPercent >= 0 ? "+" : ""}${microTiming.momentumPerSecondPercent.toFixed(4)}%/s`;
+    const institutionalContext = microTiming.institutionalContext ?? {
+      biasLabel: "Equilibrado",
+      hitLabel: "inativo",
+      tagLabel: "Nao detectado",
+    };
+    const kineticContext = microTiming.kineticContext ?? {
+      accelerationPercentPerSecond2: 0,
+      decelerationStrength: 0,
+      stateLabel: "Neutral",
+    };
+    const kineticAccelerationLabel = `${kineticContext.accelerationPercentPerSecond2 >= 0 ? "+" : ""}${kineticContext.accelerationPercentPerSecond2.toFixed(6)}%/s2`;
     const ghostSummaryLabel = ghostStats.pushes > 0
       ? `${ghostStats.wins}W - ${ghostStats.losses}L - ${ghostStats.pushes}D`
       : `${ghostStats.wins}W - ${ghostStats.losses}L`;
@@ -8439,6 +8638,14 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
             <p>${escapeHtml(triggerHeat.guidance)}</p>
           </div>
         </article>
+        <article class="analysis-block">
+          <h4>Contexto institucional e cinetico</h4>
+          <p>POI institucional: ${escapeHtml(institutionalContext.hitLabel)} (${escapeHtml(institutionalContext.tagLabel)}).</p>
+          <p>Bias institucional: ${escapeHtml(institutionalContext.biasLabel)}.</p>
+          <p>Exaustao cinetica: ${escapeHtml(kineticContext.stateLabel)} • desaceleracao ${kineticContext.decelerationStrength.toFixed(1)} / 100.</p>
+          <p>Aceleracao instantanea: ${escapeHtml(kineticAccelerationLabel)}</p>
+          <p>${escapeHtml(microTiming.contextualGuidance)}</p>
+        </article>
       </div>
       <article class="analysis-block">
         <h4>Checklist de execucao binaria</h4>
@@ -8446,6 +8653,7 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
           <li>Evite entrada quando momentum estiver neutro e payout abaixo de 70%.</li>
           <li>Em aceleracao forte, prefira expiracoes curtas alinhadas ao fluxo dominante.</li>
           <li>Se CALL/PUT estiverem muito proximos, reduzir stake e aguardar confirmacao.</li>
+          <li>Se exaustao estiver explosive sem POI ativo, trate como ruido e preserve capital.</li>
         </ul>
       </article>
     `;
@@ -8783,6 +8991,32 @@ function setChartLegend(message, mode = "") {
     chartLegendElement.setAttribute("data-mode", mode);
   } else {
     chartLegendElement.removeAttribute("data-mode");
+  }
+}
+
+function setChartFallbackBadge(message = "", mode = "") {
+  if (!(chartFallbackBadgeElement instanceof HTMLElement)) {
+    return;
+  }
+
+  const normalizedMessage = typeof message === "string" ? message.trim() : "";
+
+  if (normalizedMessage.length === 0) {
+    chartFallbackBadgeElement.classList.add("is-hidden");
+    chartFallbackBadgeElement.textContent = "";
+    chartFallbackBadgeElement.removeAttribute("data-mode");
+    chartFallbackBadgeElement.setAttribute("aria-hidden", "true");
+    return;
+  }
+
+  chartFallbackBadgeElement.textContent = normalizedMessage;
+  chartFallbackBadgeElement.classList.remove("is-hidden");
+  chartFallbackBadgeElement.setAttribute("aria-hidden", "false");
+
+  if (mode) {
+    chartFallbackBadgeElement.setAttribute("data-mode", mode);
+  } else {
+    chartFallbackBadgeElement.removeAttribute("data-mode");
   }
 }
 
@@ -11922,6 +12156,7 @@ function fitChartContent() {
 function clearChartSurface() {
   chartLatestCandles = [];
   chartCandleByTime = new Map();
+  setChartFallbackBadge("", "");
 
   if (!chartApi) {
     setChartLegend("Sem dados para exibir no momento.");
@@ -12488,9 +12723,27 @@ function shouldUseResolutionFallback(interval, message) {
   return hasUnsupportedHint;
 }
 
-function buildResolutionFallbackMessage(interval) {
+function buildResolutionFallbackMessage(interval, fallbackInterval = TERMINAL_INTERVAL_BACKEND_FALLBACK) {
   const label = getTerminalIntervalDisplayLabel(interval);
-  return TERMINAL_INTERVAL_MENU_FALLBACK_MESSAGE.replace("%INTERVAL%", label);
+  const fallbackLabel = getTerminalIntervalDisplayLabel(fallbackInterval);
+
+  return TERMINAL_INTERVAL_MENU_FALLBACK_MESSAGE
+    .replace("%INTERVAL%", label)
+    .replace("%FALLBACK%", fallbackLabel);
+}
+
+function hasDelayedFallbackReason(message) {
+  const normalizedMessage = String(message ?? "").toLowerCase();
+
+  return normalizedMessage.includes("live indisponivel")
+    || normalizedMessage.includes("fallback delayed");
+}
+
+function hasIntervalFallbackReason(message) {
+  const normalizedMessage = String(message ?? "").toLowerCase();
+
+  return normalizedMessage.includes("corretora atual nao fornece dados")
+    || normalizedMessage.includes("fallback automatico para");
 }
 
 async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "binance", resolution = null) {
@@ -12567,29 +12820,85 @@ async function requestBinaryOptionsChartEndpoint(assetId, range, mode, exchange 
 async function requestBinaryOptionsChart(assetId, range, mode, exchange, interval) {
   const normalizedInterval = normalizeTerminalInterval(interval);
   const requestedResolution = normalizeRequestedBinaryOptionsResolution(normalizedInterval);
+  const fallbackResolution = TERMINAL_INTERVAL_BINARY_OPTIONS_FALLBACK;
 
-  if (typeof requestedResolution !== "string" || requestedResolution.length === 0) {
-    throw new Error("Intervalo nao suportado para o modo operacional de binarias");
+  if (typeof fallbackResolution !== "string" || fallbackResolution.length === 0) {
+    throw new Error("Fallback de resolucao indisponivel para o modo operacional de binarias");
   }
 
-  const snapshot = await requestBinaryOptionsChartEndpoint(
-    assetId,
-    range,
-    mode,
-    exchange,
-    requestedResolution,
-  );
-  const fallbackReason = typeof snapshot?.fallbackReason === "string" ? snapshot.fallbackReason : "";
-  const resolvedBroker = typeof snapshot?.exchange?.resolved === "string"
-    ? snapshot.exchange.resolved
-    : "binance";
+  if (typeof requestedResolution !== "string" || requestedResolution.length === 0) {
+    const snapshot = await requestBinaryOptionsChartEndpoint(
+      assetId,
+      range,
+      mode,
+      exchange,
+      fallbackResolution,
+    );
+    const fallbackReason = [
+      buildResolutionFallbackMessage(normalizedInterval, TERMINAL_INTERVAL_BINARY_OPTIONS_FALLBACK),
+      typeof snapshot?.fallbackReason === "string" ? snapshot.fallbackReason : "",
+    ].filter((item) => item.length > 0).join(" • ");
+    const resolvedBroker = typeof snapshot?.exchange?.resolved === "string"
+      ? snapshot.exchange.resolved
+      : "binance";
 
-  return {
-    fallbackReason,
-    resolvedBroker,
-    resolvedResolution: requestedResolution,
-    snapshot,
-  };
+    return {
+      fallbackReason,
+      resolvedBroker,
+      resolvedResolution: fallbackResolution,
+      snapshot,
+    };
+  }
+
+  try {
+    const snapshot = await requestBinaryOptionsChartEndpoint(
+      assetId,
+      range,
+      mode,
+      exchange,
+      requestedResolution,
+    );
+    const fallbackReason = typeof snapshot?.fallbackReason === "string" ? snapshot.fallbackReason : "";
+    const resolvedBroker = typeof snapshot?.exchange?.resolved === "string"
+      ? snapshot.exchange.resolved
+      : "binance";
+
+    return {
+      fallbackReason,
+      resolvedBroker,
+      resolvedResolution: requestedResolution,
+      snapshot,
+    };
+  } catch (error) {
+    const canFallback =
+      normalizedInterval !== TERMINAL_INTERVAL_BINARY_OPTIONS_FALLBACK;
+
+    if (!canFallback) {
+      throw error;
+    }
+
+    const snapshot = await requestBinaryOptionsChartEndpoint(
+      assetId,
+      range,
+      mode,
+      exchange,
+      fallbackResolution,
+    );
+    const fallbackReason = [
+      buildResolutionFallbackMessage(normalizedInterval, TERMINAL_INTERVAL_BINARY_OPTIONS_FALLBACK),
+      typeof snapshot?.fallbackReason === "string" ? snapshot.fallbackReason : "",
+    ].filter((item) => item.length > 0).join(" • ");
+    const resolvedBroker = typeof snapshot?.exchange?.resolved === "string"
+      ? snapshot.exchange.resolved
+      : "binance";
+
+    return {
+      fallbackReason,
+      resolvedBroker,
+      resolvedResolution: fallbackResolution,
+      snapshot,
+    };
+  }
 }
 
 async function requestCryptoChart(assetId, range, mode, exchange, interval) {
@@ -12983,6 +13292,9 @@ function applyChartSnapshot(snapshot, options = {}) {
   const forcedModeReason = typeof options.forcedModeReason === "string" ? options.forcedModeReason : "";
   const fallbackReason = typeof options.fallbackReason === "string" ? options.fallbackReason : "";
   const combinedFallbackReason = [forcedModeReason, fallbackReason].filter((item) => item.length > 0).join(" | ");
+  const hasFallbackReason = combinedFallbackReason.length > 0;
+  const hasDelayedFallback = hasDelayedFallbackReason(combinedFallbackReason);
+  const hasIntervalFallback = hasIntervalFallbackReason(combinedFallbackReason);
   const selectedExchange = typeof options.selectedExchange === "string"
     ? options.selectedExchange
     : getSelectedTerminalExchange();
@@ -13011,10 +13323,28 @@ function applyChartSnapshot(snapshot, options = {}) {
     snapshot.mode === "live"
       ? ` • 24h ${formatPercent(snapshot.live?.changePercent24h)} • vol ${formatPrice(snapshot.live?.volume24h, "usd")}`
       : "";
-  const fallbackLabel = combinedFallbackReason.length > 0
-    ? " • live indisponivel, usando delayed"
+  const fallbackLabel = hasFallbackReason
+    ? hasDelayedFallback
+      ? " • fallback delayed ativo"
+      : hasIntervalFallback
+        ? " • fallback de intervalo ativo"
+        : " • fallback operacional ativo"
     : "";
-  const statusMode = combinedFallbackReason.length > 0 ? "warn" : "";
+  const fallbackBadgeMode = hasFallbackReason
+    ? hasIntervalFallback
+      ? "interval"
+      : hasDelayedFallback
+        ? "delayed"
+        : "operational"
+    : "";
+  const fallbackBadgeLabel = hasFallbackReason
+    ? hasIntervalFallback
+      ? "Fallback intervalo"
+      : hasDelayedFallback
+        ? "Fallback delayed"
+        : "Fallback operacional"
+    : "";
+  const statusMode = hasFallbackReason ? "warn" : "";
   const updatedAtLabel = new Date().toLocaleTimeString("pt-BR", {
     hour: "2-digit",
     minute: "2-digit",
@@ -13022,13 +13352,21 @@ function applyChartSnapshot(snapshot, options = {}) {
   });
   const transportLabel = transport === "stream" ? " • transporte stream" : "";
 
+  setChartFallbackBadge(fallbackBadgeLabel, fallbackBadgeMode);
+
   setChartStatus(
     `Grafico ${snapshot.assetId.toUpperCase()} (${modeLabel}, ${rangeLabel}, ${styleLabel}, ${intervalLabel}) • workspace ${operationalModeLabel} • estrategia ${strategyLabel} • exchange ${selectedExchange} • provider ${providerLabel} • ${cacheLabel}${refreshLabel}${liveLabel}${transportLabel}${fallbackLabel} • atualizado ${updatedAtLabel}`,
     statusMode,
   );
 
-  if (chartViewMode !== "tv" && combinedFallbackReason.length > 0) {
-    setChartLegend(`Fallback ativo: ${combinedFallbackReason}. Exibindo delayed temporariamente.`, "warn");
+  if (chartViewMode !== "tv" && hasFallbackReason) {
+    const fallbackLegendMessage = hasDelayedFallback
+      ? `Fallback ativo: ${combinedFallbackReason}. Exibindo delayed temporariamente.`
+      : hasIntervalFallback
+        ? `Fallback de intervalo ativo: ${combinedFallbackReason}. Ajustando a granularidade automaticamente.`
+        : `Fallback operacional ativo: ${combinedFallbackReason}.`;
+
+    setChartLegend(fallbackLegendMessage, "warn");
   }
 }
 
@@ -13682,18 +14020,24 @@ async function loadChart(options = {}) {
     const requestedResolution = binaryOperationalMode
       ? normalizeRequestedBinaryOptionsResolution(selectedInterval)
       : normalizeRequestedChartResolution(selectedInterval);
+    const fallbackInterval = binaryOperationalMode
+      ? TERMINAL_INTERVAL_BINARY_OPTIONS_FALLBACK
+      : TERMINAL_INTERVAL_BACKEND_FALLBACK;
+    const fallbackResolution = binaryOperationalMode
+      ? fallbackInterval
+      : normalizeRequestedChartResolution(fallbackInterval);
     const usedFallbackResolution =
-      !binaryOperationalMode
+      typeof fallbackResolution === "string"
       &&
       typeof resolvedResolution === "string"
-      && resolvedResolution === TERMINAL_INTERVAL_BACKEND_FALLBACK
+      && resolvedResolution === fallbackResolution
       && requestedResolution !== resolvedResolution;
 
     if (usedFallbackResolution) {
-      setActiveTerminalInterval(TERMINAL_INTERVAL_BACKEND_FALLBACK, {
+      setActiveTerminalInterval(fallbackInterval, {
         closeMenu: true,
       });
-      syncChartRangeWithTerminalInterval(TERMINAL_INTERVAL_BACKEND_FALLBACK);
+      syncChartRangeWithTerminalInterval(fallbackInterval);
       saveChartPreferences();
     }
 

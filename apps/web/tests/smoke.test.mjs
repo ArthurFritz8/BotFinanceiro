@@ -35,6 +35,7 @@ test("index.html move risk desk para painel de analise profunda", async () => {
   assert.match(html, /id="intelligence-sync-ops-updated"/);
   assert.match(html, /grid grid-cols-1 md:grid-cols-3 gap-6/);
   assert.match(html, /id="watchlist-risk-summary"/);
+  assert.match(html, /id="chart-fallback-badge"/);
   assert.match(html, /Alt\+G gestao de risco/);
   assert.doesNotMatch(watchlistMarkup, /id="prop-desk"/);
 });
@@ -63,6 +64,9 @@ test("main.js inicializa estado, aba e render da gestao de risco", async () => {
   assert.match(mainSource, /function buildBrokerFailoverChain\(primaryBroker, options = \{\}\)/);
   assert.match(mainSource, /function startWatchlistStreamFallbackPolling\(\)/);
   assert.match(mainSource, /function startChartLiveFallbackPolling\(\)/);
+  assert.match(mainSource, /const chartFallbackBadgeElement = document\.querySelector\("#chart-fallback-badge"\);/);
+  assert.match(mainSource, /function setChartFallbackBadge\(message = "", mode = ""\)/);
+  assert.match(mainSource, /setChartFallbackBadge\(fallbackBadgeLabel, fallbackBadgeMode\);/);
   assert.match(mainSource, /void loadChart\(\{[\s\S]*mode: "live",[\s\S]*silent: true,[\s\S]*\}\);/);
   assert.match(mainSource, /function runMarketRequestWithRetry\(requestFactory, options = \{\}\)/);
   assert.match(mainSource, /requestBrokerLiveQuoteBatchWithFailover\(/);
@@ -142,6 +146,8 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /const INTELLIGENCE_SYNC_HEALTH_STALE_AFTER_MS = 90000/);
   assert.match(mainSource, /const INTELLIGENCE_SYNC_INTERNAL_TOKEN = \(import\.meta\.env\.VITE_INTERNAL_API_TOKEN \?\? ""\)\.trim\(\);/);
   assert.match(mainSource, /const TERMINAL_INTERVAL_TO_CHART_RANGE = \{/);
+  assert.match(mainSource, /const TERMINAL_INTERVAL_BINARY_OPTIONS_FALLBACK = "1S";/);
+  assert.match(mainSource, /function buildResolutionFallbackMessage\(interval, fallbackInterval = TERMINAL_INTERVAL_BACKEND_FALLBACK\)/);
   assert.match(mainSource, /let chartAutoPreferredBroker = "binance";/);
   assert.match(mainSource, /let pendingChartLoadRequest = null;/);
   assert.match(mainSource, /let intelligenceSyncActiveCorrelationId = "";/);
@@ -201,6 +207,7 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /requestCryptoChartEndpoint\([\s\S]*targetMode,[\s\S]*preferredBroker,[\s\S]*resolution,[\s\S]*\)/);
   assert.match(mainSource, /requestCryptoChartEndpoint\([\s\S]*targetMode,[\s\S]*"auto",[\s\S]*resolution,[\s\S]*\)/);
   assert.match(mainSource, /AUTO inteligente: ajuste de provider/);
+  assert.match(mainSource, /buildResolutionFallbackMessage\(normalizedInterval, TERMINAL_INTERVAL_BINARY_OPTIONS_FALLBACK\)/);
   assert.match(mainSource, /displayProvider: statusBroker,/);
   assert.match(mainSource, /Ghost Tracker Spot\/Margem \(Sessao\)/);
   assert.match(mainSource, /Ghost Institucional Spot\/Margem/);
@@ -232,6 +239,10 @@ test("styles.css contem classes base do prop desk", async () => {
   assert.match(stylesSource, /\.watchlist-risk-collapse\s*\{/);
   assert.match(stylesSource, /\.watchlist-risk-open\s*\{/);
   assert.match(stylesSource, /\.watchlist-risk-grid\s*\{/);
+  assert.match(stylesSource, /\.chart-desk-tags\s*\{/);
+  assert.match(stylesSource, /\.chart-lab-fallback-badge\s*\{/);
+  assert.match(stylesSource, /\.chart-lab-fallback-badge\[data-mode="interval"\]/);
+  assert.match(stylesSource, /\.chart-lab-fallback-badge\[data-mode="delayed"\]/);
   assert.match(stylesSource, /\.analysis-sync-ops\s*\{/);
   assert.match(stylesSource, /\.analysis-sync-ops\[data-level="warning"\]/);
   assert.match(stylesSource, /\.analysis-sync-ops\[data-level="critical"\]/);

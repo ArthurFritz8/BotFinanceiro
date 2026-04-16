@@ -26,6 +26,11 @@ const basePriceByAsset = {
 let delayedStrategyChartRequests = 0;
 let strategyChartDelayMs = 0;
 let intelligenceSyncTelemetryPosts = 0;
+let cryptoStrategyChartRequests = 0;
+let binaryStrategyChartRequests = 0;
+let forceBinaryResolutionFallback = false;
+let binaryStrategyChartRequestedResolutions = [];
+let binaryStrategyChartForcedFallbackFailures = 0;
 
 function waitMs(durationMs) {
   return new Promise((resolve) => {
@@ -149,6 +154,28 @@ function buildStrategyChartResponse(input) {
   };
 }
 
+function buildBinaryOptionsStrategyChartResponse(input) {
+  const baseResponse = buildStrategyChartResponse(input);
+
+  return {
+    ...baseResponse,
+    insights: {
+      ...baseResponse.insights,
+      bollingerTouch: "inside",
+      candlePattern: "inside_bar",
+      candlePatternSignal: "neutral",
+      institutionalPoiHit: true,
+      institutionalPoiTag: "cluster",
+      kineticAccelerationPercentPerSecond2: 0.00015,
+      kineticDecelerationStrength: 58.4,
+      kineticExhaustionState: "cooling",
+      momentumVelocityPercentPerSecond: 0.0019,
+      rejectionSignal: "bullish",
+    },
+    strategy: "binary_options",
+  };
+}
+
 async function fulfillJson(route, body, status = 200) {
   await route.fulfill({
     body: JSON.stringify(body),
@@ -174,6 +201,8 @@ async function handleApiRoute(route) {
   }
 
   if (url.pathname === "/v1/crypto/strategy-chart") {
+    cryptoStrategyChartRequests += 1;
+
     if (delayedStrategyChartRequests > 0 && strategyChartDelayMs > 0) {
       delayedStrategyChartRequests -= 1;
       await waitMs(strategyChartDelayMs);
@@ -191,6 +220,51 @@ async function handleApiRoute(route) {
         mode,
         range,
       }),
+      status: "success",
+    });
+  }
+
+  if (url.pathname === "/v1/binary-options/strategy-chart") {
+    binaryStrategyChartRequests += 1;
+
+    const assetId = (url.searchParams.get("assetId") ?? "bitcoin").toLowerCase();
+    const range = url.searchParams.get("range") ?? "24h";
+    const exchange = (url.searchParams.get("exchange") ?? "auto").toLowerCase();
+    const mode = url.searchParams.get("mode") === "live" ? "live" : "delayed";
+    const resolution = (url.searchParams.get("resolution") ?? "").toUpperCase();
+
+    binaryStrategyChartRequestedResolutions.push(resolution);
+
+    if (forceBinaryResolutionFallback && resolution !== "1S") {
+      binaryStrategyChartForcedFallbackFailures += 1;
+
+      return fulfillJson(route, {
+        error: {
+          message: "Resolucao nao suportada para binarias nesta corretora",
+        },
+        status: "error",
+      }, 422);
+    }
+
+    return fulfillJson(route, {
+      data: buildBinaryOptionsStrategyChartResponse({
+        assetId,
+        exchange,
+        mode,
+        range,
+      }),
+      status: "success",
+    });
+  }
+
+  if (url.pathname === "/v1/binary-options/ghost-audit/history") {
+    return fulfillJson(route, {
+      data: {
+        records: [],
+        summary: {
+          total: 0,
+        },
+      },
       status: "success",
     });
   }
@@ -302,6 +376,11 @@ test.beforeEach(async ({ page }) => {
   delayedStrategyChartRequests = 0;
   strategyChartDelayMs = 0;
   intelligenceSyncTelemetryPosts = 0;
+  cryptoStrategyChartRequests = 0;
+  binaryStrategyChartRequests = 0;
+  forceBinaryResolutionFallback = false;
+  binaryStrategyChartRequestedResolutions = [];
+  binaryStrategyChartForcedFallbackFailures = 0;
 
   await page.addInitScript(() => {
     const forceHideAuthGate = () => {
@@ -375,6 +454,9 @@ test("intelligence desk acompanha moeda, janela e simbolo com telemetria", async
     timeout: 15000,
   });
 
+  await page.click('#chart-view-switch .view-chip[data-view="copilot"]');
+  await expect(page.locator("#chart-copilot-stage")).toBeVisible();
+
   await page.selectOption("#chart-asset", "ethereum");
   await expect(page.locator("#chart-status")).toContainText("ETHEREUM");
 
@@ -419,4 +501,127 @@ test("intelligence desk preserva ultimo contexto com trocas durante loading", as
   await expect(page.locator("#chart-status")).toContainText("SOLANA", {
     timeout: 15000,
   });
+});
+
+test("chart lab alterna Spot/Margem e Binarias com endpoint correto", async ({ page }) => {
+  await page.goto("/");
+
+  await page.evaluate(() => {
+    const authGate = document.querySelector("#auth-gate");
+
+    if (!(authGate instanceof HTMLElement)) {
+      return;
+    }
+
+    authGate.classList.add("is-hidden");
+    authGate.setAttribute("aria-hidden", "true");
+    authGate.style.display = "none";
+    authGate.style.pointerEvents = "none";
+  });
+
+  const chartLabRouteButton = page.locator('#app-route-nav button[data-route="chart-lab"]');
+
+  if (await chartLabRouteButton.count()) {
+    await chartLabRouteButton.first().click();
+  }
+
+  await expect(page.locator("#chart-controls")).toBeVisible();
+  await expect(page.locator("#chart-status")).toContainText("Grafico", {
+    timeout: 15000,
+  });
+
+  await page.click('#chart-view-switch .view-chip[data-view="copilot"]');
+  await expect(page.locator("#chart-copilot-stage")).toBeVisible();
+
+  await expect(page.locator("#chart-operational-mode")).toHaveValue("spot_margin");
+  await expect(page.locator("#chart-operational-mode-tag")).toContainText("Live Desk");
+  await expect(page.locator('#analysis-tabs button[data-tab="micro_timing"]')).toHaveCount(0);
+
+  expect(cryptoStrategyChartRequests).toBeGreaterThan(0);
+  expect(binaryStrategyChartRequests).toBe(0);
+
+  await page.selectOption("#chart-operational-mode", "binary_options");
+
+  await expect(page.locator("#chart-operational-mode-tag")).toContainText("Micro-Timing Desk");
+  await expect(page.locator("#analysis-status")).toContainText("Workspace Binario ativo");
+  await expect(page.locator('#analysis-tabs button[data-tab="micro_timing"]')).toHaveCount(1);
+  await expect.poll(() => binaryStrategyChartRequests).toBeGreaterThan(0);
+
+  await page.click('#analysis-tabs button[data-tab="micro_timing"]');
+  await expect(page.locator("#analysis-tab-content")).toContainText("Contexto institucional e cinetico");
+  await expect(page.locator("#analysis-tab-content")).toContainText("POI institucional: ativo (Cluster de liquidez).");
+  await expect(page.locator("#analysis-tab-content")).toContainText("Exaustao cinetica: Cooling");
+
+  const cryptoRequestsAfterBinary = cryptoStrategyChartRequests;
+
+  await page.selectOption("#chart-operational-mode", "spot_margin");
+
+  await expect(page.locator("#chart-operational-mode-tag")).toContainText("Live Desk");
+  await expect(page.locator("#analysis-status")).toContainText("Modelagem quantitativa desbloqueada");
+  await expect(page.locator('#analysis-tabs button[data-tab="micro_timing"]')).toHaveCount(0);
+  await expect.poll(() => cryptoStrategyChartRequests).toBeGreaterThan(cryptoRequestsAfterBinary);
+});
+
+test("chart lab aplica fallback 1S em binarias quando resolucao nao e suportada", async ({ page }) => {
+  forceBinaryResolutionFallback = true;
+
+  await page.goto("/");
+
+  await page.evaluate(() => {
+    const authGate = document.querySelector("#auth-gate");
+
+    if (!(authGate instanceof HTMLElement)) {
+      return;
+    }
+
+    authGate.classList.add("is-hidden");
+    authGate.setAttribute("aria-hidden", "true");
+    authGate.style.display = "none";
+    authGate.style.pointerEvents = "none";
+  });
+
+  const chartLabRouteButton = page.locator('#app-route-nav button[data-route="chart-lab"]');
+
+  if (await chartLabRouteButton.count()) {
+    await chartLabRouteButton.first().click();
+  }
+
+  await expect(page.locator("#chart-controls")).toBeVisible();
+  await expect(page.locator("#chart-status")).toContainText("Grafico", {
+    timeout: 15000,
+  });
+
+  const selectedNonFallbackInterval = await page.evaluate(() => {
+    const fallbackInterval = "1S";
+    const chips = Array.from(document.querySelectorAll("#chart-interval-switch .interval-chip[data-interval]"));
+    const candidate = chips.find((chip) => {
+      const value = chip.getAttribute("data-interval");
+      return typeof value === "string" && value.length > 0 && value !== fallbackInterval;
+    });
+
+    if (!(candidate instanceof HTMLButtonElement)) {
+      return "";
+    }
+
+    const value = candidate.getAttribute("data-interval") ?? "";
+    candidate.click();
+
+    return value;
+  });
+
+  expect(selectedNonFallbackInterval).not.toBe("");
+
+  await page.selectOption("#chart-operational-mode", "binary_options");
+
+  await expect.poll(() => binaryStrategyChartForcedFallbackFailures).toBeGreaterThan(0);
+  await expect.poll(() => binaryStrategyChartRequestedResolutions.includes("1S")).toBeTruthy();
+
+  const fallbackBadge = page.locator("#chart-fallback-badge");
+
+  await expect(fallbackBadge).toBeVisible();
+  await expect(fallbackBadge).toContainText("Fallback intervalo");
+
+  const intervalMenuCurrent = page.locator("#chart-interval-menu-current");
+
+  await expect(intervalMenuCurrent).toContainText("1 segundo");
 });
