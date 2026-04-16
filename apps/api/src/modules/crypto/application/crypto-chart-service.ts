@@ -21,6 +21,28 @@ import { memoryCache } from "../../../shared/cache/memory-cache.js";
 import { cryptoLiveChartMetricsStore } from "../../../shared/observability/crypto-live-chart-metrics-store.js";
 
 export type CryptoChartRange = "24h" | "7d" | "30d" | "90d" | "1y";
+export type CryptoChartResolution =
+  | "1"
+  | "2"
+  | "3"
+  | "5"
+  | "10"
+  | "15"
+  | "30"
+  | "45"
+  | "60"
+  | "120"
+  | "180"
+  | "240"
+  | "1S"
+  | "5S"
+  | "10S"
+  | "15S"
+  | "30S"
+  | "45S"
+  | "D"
+  | "W"
+  | "M";
 export type CryptoTrend = "bearish" | "bullish" | "sideways";
 export type TradeAction = "buy" | "sell" | "wait";
 export type LiveChartBroker = "binance" | ExchangeBroker;
@@ -163,6 +185,27 @@ const liveRangePointLimitMap: Record<CryptoChartRange, number> = {
   "30d": 180,
   "7d": 168,
   "90d": 180,
+};
+
+const oneMinuteMs = 60 * 1000;
+const oneDayMs = 24 * 60 * oneMinuteMs;
+
+const chartResolutionToMsMap: Record<Exclude<CryptoChartResolution, "1S" | "5S" | "10S" | "15S" | "30S" | "45S">, number> = {
+  "1": oneMinuteMs,
+  "10": 10 * oneMinuteMs,
+  "120": 120 * oneMinuteMs,
+  "15": 15 * oneMinuteMs,
+  "180": 180 * oneMinuteMs,
+  "2": 2 * oneMinuteMs,
+  "240": 240 * oneMinuteMs,
+  "3": 3 * oneMinuteMs,
+  "30": 30 * oneMinuteMs,
+  "45": 45 * oneMinuteMs,
+  "5": 5 * oneMinuteMs,
+  "60": 60 * oneMinuteMs,
+  D: oneDayMs,
+  M: 30 * oneDayMs,
+  W: 7 * oneDayMs,
 };
 
 interface BinanceLiveState {
@@ -477,6 +520,133 @@ function buildBinanceLiveStateKey(assetId: string, range: CryptoChartRange): str
   return `${assetId}:${range}`;
 }
 
+function normalizeRequestedChartResolution(
+  resolution?: CryptoChartResolution,
+): Exclude<CryptoChartResolution, "1S" | "5S" | "10S" | "15S" | "30S" | "45S"> | null {
+  if (typeof resolution !== "string" || resolution.length === 0) {
+    return null;
+  }
+
+  if (
+    resolution === "1S"
+    || resolution === "5S"
+    || resolution === "10S"
+    || resolution === "15S"
+    || resolution === "30S"
+    || resolution === "45S"
+  ) {
+    return "1";
+  }
+
+  return resolution;
+}
+
+function estimateMedianPointSpacingMs(points: CryptoChartPoint[]): number {
+  if (points.length < 2) {
+    return oneMinuteMs;
+  }
+
+  const diffs: number[] = [];
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previousTimestamp = Date.parse(points[index - 1]?.timestamp ?? "");
+    const currentTimestamp = Date.parse(points[index]?.timestamp ?? "");
+
+    if (!Number.isFinite(previousTimestamp) || !Number.isFinite(currentTimestamp)) {
+      continue;
+    }
+
+    const diff = Math.round(currentTimestamp - previousTimestamp);
+
+    if (diff > 0) {
+      diffs.push(diff);
+    }
+  }
+
+  if (diffs.length === 0) {
+    return oneMinuteMs;
+  }
+
+  const sortedDiffs = diffs.sort((left, right) => left - right);
+  return sortedDiffs[Math.floor(sortedDiffs.length / 2)] ?? oneMinuteMs;
+}
+
+function aggregatePointsByInterval(points: CryptoChartPoint[], targetIntervalMs: number): CryptoChartPoint[] {
+  if (points.length < 2 || targetIntervalMs <= 0) {
+    return points;
+  }
+
+  const sortedPoints = points
+    .slice()
+    .sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
+  const groupedPoints = new Map<number, CryptoChartPoint>();
+
+  for (const point of sortedPoints) {
+    const parsedTimestamp = Date.parse(point.timestamp);
+
+    if (!Number.isFinite(parsedTimestamp)) {
+      continue;
+    }
+
+    const bucketTimestampMs = Math.floor(parsedTimestamp / targetIntervalMs) * targetIntervalMs;
+    const currentBucket = groupedPoints.get(bucketTimestampMs);
+
+    if (!currentBucket) {
+      groupedPoints.set(bucketTimestampMs, {
+        close: point.close,
+        high: point.high,
+        low: point.low,
+        open: point.open,
+        timestamp: new Date(bucketTimestampMs).toISOString(),
+        volume: point.volume,
+      });
+      continue;
+    }
+
+    currentBucket.close = point.close;
+    currentBucket.high = Math.max(currentBucket.high, point.high);
+    currentBucket.low = Math.min(currentBucket.low, point.low);
+
+    if (typeof point.volume === "number") {
+      currentBucket.volume = (currentBucket.volume ?? 0) + point.volume;
+    }
+  }
+
+  return [...groupedPoints.entries()]
+    .sort((left, right) => left[0] - right[0])
+    .map(([, point]) => point);
+}
+
+function applyResolutionToChartPoints(
+  points: CryptoChartPoint[],
+  resolution?: CryptoChartResolution,
+): CryptoChartPoint[] {
+  const normalizedResolution = normalizeRequestedChartResolution(resolution);
+
+  if (!normalizedResolution) {
+    return points;
+  }
+
+  const targetIntervalMs = chartResolutionToMsMap[normalizedResolution];
+
+  if (!Number.isFinite(targetIntervalMs) || targetIntervalMs <= 0) {
+    return points;
+  }
+
+  const sourceSpacingMs = estimateMedianPointSpacingMs(points);
+
+  if (targetIntervalMs <= sourceSpacingMs) {
+    return points;
+  }
+
+  const resampledPoints = aggregatePointsByInterval(points, targetIntervalMs);
+  return resampledPoints.length > 0 ? resampledPoints : points;
+}
+
+function resolveResolutionCacheToken(resolution?: CryptoChartResolution): string {
+  return normalizeRequestedChartResolution(resolution) ?? "auto";
+}
+
 function upsertRingBufferPoint(
   points: CryptoChartPoint[],
   point: CryptoChartPoint,
@@ -505,28 +675,34 @@ function buildCacheKey(
   assetId: string,
   currency: string,
   range: CryptoChartRange,
+  resolution?: CryptoChartResolution,
   broker?: LiveChartRequestedBroker,
 ): string {
+  const resolutionToken = resolveResolutionCacheToken(resolution);
+
   if (mode === "live") {
-    return `crypto:chart:${mode}:${assetId}:${currency}:${range}:${broker ?? "binance"}`;
+    return `crypto:chart:${mode}:${assetId}:${currency}:${range}:${resolutionToken}:${broker ?? "binance"}`;
   }
 
-  return `crypto:chart:${mode}:${assetId}:${currency}:${range}`;
+  return `crypto:chart:${mode}:${assetId}:${currency}:${range}:${resolutionToken}`;
 }
 
 function normalizeInput(input: {
   assetId: string;
   currency: string;
   range: CryptoChartRange;
+  resolution?: CryptoChartResolution;
 }): {
   assetId: string;
   currency: string;
   range: CryptoChartRange;
+  resolution: CryptoChartResolution | undefined;
 } {
   return {
     assetId: input.assetId.toLowerCase(),
     currency: input.currency.toLowerCase(),
     range: input.range,
+    resolution: input.resolution,
   };
 }
 
@@ -1407,22 +1583,25 @@ export class CryptoChartService {
   private buildBinanceLivePayloadFromState(
     state: BinanceLiveState,
     currency: string,
+    resolution?: CryptoChartResolution,
   ): CachedChartPayload | null {
     if (state.points.length < 5) {
       return null;
     }
 
-    const normalizedPoints = state.points.slice();
-    const latestPoint = normalizedPoints[normalizedPoints.length - 1];
+    const sourcePoints = state.points.slice();
+    const latestPoint = sourcePoints[sourcePoints.length - 1];
 
     if (latestPoint && state.lastPrice !== null) {
-      normalizedPoints[normalizedPoints.length - 1] = {
+      sourcePoints[sourcePoints.length - 1] = {
         ...latestPoint,
         close: roundPrice(state.lastPrice),
         high: roundPrice(Math.max(latestPoint.high, state.lastPrice)),
         low: roundPrice(Math.min(latestPoint.low, state.lastPrice)),
       };
     }
+
+    const normalizedPoints = applyResolutionToChartPoints(sourcePoints, resolution);
 
     return {
       assetId: state.assetId,
@@ -1522,6 +1701,7 @@ export class CryptoChartService {
     assetId: string;
     currency: string;
     range: CryptoChartRange;
+    resolution?: CryptoChartResolution;
     subscribe?: boolean;
   }): Promise<CachedChartPayload | null> {
     const state = await this.ensureBinanceLiveState({
@@ -1534,12 +1714,13 @@ export class CryptoChartService {
       return null;
     }
 
-    return this.buildBinanceLivePayloadFromState(state, input.currency);
+    return this.buildBinanceLivePayloadFromState(state, input.currency, input.resolution);
   }
 
   public async getLiveStreamSnapshot(input: {
     assetId: string;
     range: CryptoChartRange;
+    resolution?: CryptoChartResolution;
     broker?: LiveChartRequestedBroker;
   }): Promise<CryptoChartResponse> {
     const requestedBroker = normalizeRequestedLiveBroker(input.broker ?? "binance");
@@ -1550,6 +1731,7 @@ export class CryptoChartService {
       currency: "usd",
       requestedBroker,
       range: input.range,
+      resolution: input.resolution,
     };
 
     if (normalizedInput.broker === "binance") {
@@ -1564,6 +1746,7 @@ export class CryptoChartService {
           livePayload.assetId,
           livePayload.currency,
           livePayload.range,
+          normalizedInput.resolution,
           normalizedInput.requestedBroker,
         );
 
@@ -1578,6 +1761,7 @@ export class CryptoChartService {
       assetId: normalizedInput.assetId,
       broker: normalizedInput.requestedBroker,
       range: normalizedInput.range,
+      resolution: normalizedInput.resolution,
     });
   }
 
@@ -1585,17 +1769,22 @@ export class CryptoChartService {
     assetId: string;
     currency: string;
     range: CryptoChartRange;
+    resolution?: CryptoChartResolution;
   }): Promise<CryptoChartResponse> {
     const normalizedInput = normalizeInput(input);
     const chartPayload = await this.fetchDelayedChartWithFallback(normalizedInput);
+    const normalizedPoints = applyResolutionToChartPoints(
+      chartPayload.points,
+      normalizedInput.resolution,
+    );
     const payload: CachedChartPayload = {
       assetId: chartPayload.assetId,
       currency: chartPayload.currency,
       fetchedAt: chartPayload.fetchedAt,
-      insights: computeInsights(chartPayload.points, chartPayload.range),
+      insights: computeInsights(normalizedPoints, chartPayload.range),
       live: null,
       mode: "delayed",
-      points: chartPayload.points,
+      points: normalizedPoints,
       provider: chartPayload.provider,
       range: chartPayload.range,
     };
@@ -1604,6 +1793,7 @@ export class CryptoChartService {
       payload.assetId,
       payload.currency,
       payload.range,
+      normalizedInput.resolution,
     );
 
     memoryCache.set(cacheKey, payload, env.CACHE_DEFAULT_TTL_SECONDS, env.CACHE_STALE_SECONDS);
@@ -1615,6 +1805,7 @@ export class CryptoChartService {
     assetId: string;
     currency: string;
     range: CryptoChartRange;
+    resolution?: CryptoChartResolution;
   }): Promise<CryptoChartResponse> {
     const normalizedInput = normalizeInput(input);
     const cacheKey = buildCacheKey(
@@ -1622,6 +1813,7 @@ export class CryptoChartService {
       normalizedInput.assetId,
       normalizedInput.currency,
       normalizedInput.range,
+      normalizedInput.resolution,
     );
     const cachedPayload = memoryCache.get<CachedChartPayload>(cacheKey);
 
@@ -1643,6 +1835,7 @@ export class CryptoChartService {
   public async getLiveChart(input: {
     assetId: string;
     range: CryptoChartRange;
+    resolution?: CryptoChartResolution;
     broker?: LiveChartRequestedBroker;
   }): Promise<CryptoChartResponse> {
     const requestedBroker = normalizeRequestedLiveBroker(input.broker ?? "binance");
@@ -1653,12 +1846,14 @@ export class CryptoChartService {
       currency: "usd",
       requestedBroker,
       range: input.range,
+      resolution: input.resolution,
     };
     const cacheKey = buildCacheKey(
       "live",
       normalizedInput.assetId,
       normalizedInput.currency,
       normalizedInput.range,
+      normalizedInput.resolution,
       normalizedInput.requestedBroker,
     );
     const cachedPayload = memoryCache.get<CachedChartPayload>(cacheKey);
@@ -1684,6 +1879,7 @@ export class CryptoChartService {
     currency: string;
     requestedBroker: LiveChartRequestedBroker;
     range: CryptoChartRange;
+    resolution?: CryptoChartResolution;
   }): Promise<CryptoChartResponse> {
     const brokerChain = buildLiveBrokerFailoverChain(input.broker);
     const failures: Array<{
@@ -1702,6 +1898,7 @@ export class CryptoChartService {
           payload.assetId,
           payload.currency,
           payload.range,
+          input.resolution,
           input.requestedBroker,
         );
 
@@ -1750,6 +1947,7 @@ export class CryptoChartService {
     broker: LiveChartBroker;
     currency: string;
     range: CryptoChartRange;
+    resolution?: CryptoChartResolution;
   }): Promise<CachedChartPayload> {
     const startedAtMs = Date.now();
 
@@ -1766,7 +1964,10 @@ export class CryptoChartService {
             assetId: input.assetId,
           }),
         ]);
-        const points = chartPayload.points.map((point) => normalizeBinancePoint(point));
+        const points = applyResolutionToChartPoints(
+          chartPayload.points.map((point) => normalizeBinancePoint(point)),
+          input.resolution,
+        );
 
         normalizedPayload = {
           assetId: chartPayload.assetId,
@@ -1796,7 +1997,10 @@ export class CryptoChartService {
             broker: input.broker,
           }),
         ]);
-        const points = chartPayload.points.map((point) => normalizeMultiExchangePoint(point));
+        const points = applyResolutionToChartPoints(
+          chartPayload.points.map((point) => normalizeMultiExchangePoint(point)),
+          input.resolution,
+        );
 
         normalizedPayload = {
           assetId: chartPayload.assetId,

@@ -171,8 +171,8 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /function updateAutoChartPreferredBroker\(nextBroker, options = \{\}\)/);
   assert.match(mainSource, /if \(requestedBroker === "auto"\) \{/);
   assert.match(mainSource, /const preferredBroker = resolveAutoChartPrimaryBroker\(\);/);
-  assert.match(mainSource, /requestCryptoChartEndpoint\(assetId, range, targetMode, preferredBroker\)/);
-  assert.match(mainSource, /requestCryptoChartEndpoint\(assetId, range, targetMode, "auto"\)/);
+  assert.match(mainSource, /requestCryptoChartEndpoint\([\s\S]*targetMode,[\s\S]*preferredBroker,[\s\S]*resolution,[\s\S]*\)/);
+  assert.match(mainSource, /requestCryptoChartEndpoint\([\s\S]*targetMode,[\s\S]*"auto",[\s\S]*resolution,[\s\S]*\)/);
   assert.match(mainSource, /AUTO inteligente: ajuste de provider/);
   assert.match(mainSource, /displayProvider: statusBroker,/);
   assert.match(
@@ -183,8 +183,8 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
     mainSource,
     /chartSymbolInput\.addEventListener\("keydown", \(event\) => \{[\s\S]*syncIntelligenceDeskForCurrentContext\(\{[\s\S]*silent: false,[\s\S]*\}\);/,
   );
-  assert.match(mainSource, /const didSyncRange = syncChartRangeWithTerminalInterval\(intervalShortcut\);/);
-  assert.match(mainSource, /const didSyncRange = syncChartRangeWithTerminalInterval\(interval\);/);
+  assert.match(mainSource, /const didSyncRange = syncChartRangeWithTerminalInterval\(normalizedInterval, \{/);
+  assert.match(mainSource, /applyTerminalIntervalSelection\(intervalShortcut, \{/);
 });
 
 test("styles.css contem classes base do prop desk", async () => {

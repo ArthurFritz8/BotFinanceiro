@@ -2,11 +2,35 @@ import { z } from "zod";
 
 const supportedRangeSchema = z.enum(["24h", "7d", "30d", "90d", "1y"]);
 const supportedModeSchema = z.enum(["delayed", "live"]);
+const supportedResolutionSchema = z.enum([
+  "1",
+  "2",
+  "3",
+  "5",
+  "10",
+  "15",
+  "30",
+  "45",
+  "60",
+  "120",
+  "180",
+  "240",
+  "1S",
+  "5S",
+  "10S",
+  "15S",
+  "30S",
+  "45S",
+  "D",
+  "W",
+  "M",
+]);
 
 const strategyInputSchema = z.object({
   mode: supportedModeSchema.default("delayed"),
   module: z.string().trim().min(1).max(32).default("forex"),
   range: supportedRangeSchema.default("7d"),
+  resolution: supportedResolutionSchema.optional(),
   symbol: z.string().trim().min(2).max(32)
     .transform((value) => value.toUpperCase().replace(/[^A-Z0-9]/g, ""))
     .refine((value) => value.length >= 2, {
@@ -17,6 +41,7 @@ const strategyInputSchema = z.object({
 
 export type InstitutionalMacroRange = z.infer<typeof supportedRangeSchema>;
 export type InstitutionalMacroMode = z.infer<typeof supportedModeSchema>;
+export type InstitutionalMacroResolution = z.infer<typeof supportedResolutionSchema>;
 
 type InstitutionalBias = "bullish" | "bearish" | "neutral";
 
@@ -149,6 +174,27 @@ const rangeToPointCount: Record<InstitutionalMacroRange, number> = {
   "90d": 180,
 };
 
+const oneMinuteMs = 60 * 1000;
+const oneDayMs = 24 * 60 * oneMinuteMs;
+
+const resolutionToMsMap: Record<Exclude<InstitutionalMacroResolution, "1S" | "5S" | "10S" | "15S" | "30S" | "45S">, number> = {
+  "1": oneMinuteMs,
+  "10": 10 * oneMinuteMs,
+  "120": 120 * oneMinuteMs,
+  "15": 15 * oneMinuteMs,
+  "180": 180 * oneMinuteMs,
+  "2": 2 * oneMinuteMs,
+  "240": 240 * oneMinuteMs,
+  "3": 3 * oneMinuteMs,
+  "30": 30 * oneMinuteMs,
+  "45": 45 * oneMinuteMs,
+  "5": 5 * oneMinuteMs,
+  "60": 60 * oneMinuteMs,
+  D: oneDayMs,
+  M: 30 * oneDayMs,
+  W: 7 * oneDayMs,
+};
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -272,6 +318,132 @@ function buildSyntheticSeries(symbol: string, range: InstitutionalMacroRange): I
   }
 
   return points;
+}
+
+function normalizeRequestedResolution(
+  resolution?: InstitutionalMacroResolution,
+): Exclude<InstitutionalMacroResolution, "1S" | "5S" | "10S" | "15S" | "30S" | "45S"> | null {
+  if (typeof resolution !== "string" || resolution.length === 0) {
+    return null;
+  }
+
+  if (
+    resolution === "1S"
+    || resolution === "5S"
+    || resolution === "10S"
+    || resolution === "15S"
+    || resolution === "30S"
+    || resolution === "45S"
+  ) {
+    return "1";
+  }
+
+  return resolution;
+}
+
+function estimateSeriesSpacingMs(points: InstitutionalMacroPoint[]): number {
+  if (points.length < 2) {
+    return oneMinuteMs;
+  }
+
+  const diffs: number[] = [];
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previousTimestamp = Date.parse(points[index - 1]?.timestamp ?? "");
+    const currentTimestamp = Date.parse(points[index]?.timestamp ?? "");
+
+    if (!Number.isFinite(previousTimestamp) || !Number.isFinite(currentTimestamp)) {
+      continue;
+    }
+
+    const diff = Math.round(currentTimestamp - previousTimestamp);
+
+    if (diff > 0) {
+      diffs.push(diff);
+    }
+  }
+
+  if (diffs.length === 0) {
+    return oneMinuteMs;
+  }
+
+  const sortedDiffs = diffs.sort((left, right) => left - right);
+  return sortedDiffs[Math.floor(sortedDiffs.length / 2)] ?? oneMinuteMs;
+}
+
+function aggregateSeriesByInterval(
+  points: InstitutionalMacroPoint[],
+  targetIntervalMs: number,
+): InstitutionalMacroPoint[] {
+  if (points.length < 2 || targetIntervalMs <= 0) {
+    return points;
+  }
+
+  const sortedPoints = points
+    .slice()
+    .sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
+  const groupedPoints = new Map<number, InstitutionalMacroPoint>();
+
+  for (const point of sortedPoints) {
+    const parsedTimestamp = Date.parse(point.timestamp);
+
+    if (!Number.isFinite(parsedTimestamp)) {
+      continue;
+    }
+
+    const bucketTimestampMs = Math.floor(parsedTimestamp / targetIntervalMs) * targetIntervalMs;
+    const currentBucket = groupedPoints.get(bucketTimestampMs);
+
+    if (!currentBucket) {
+      groupedPoints.set(bucketTimestampMs, {
+        close: point.close,
+        high: point.high,
+        low: point.low,
+        open: point.open,
+        timestamp: new Date(bucketTimestampMs).toISOString(),
+        volume: point.volume,
+      });
+      continue;
+    }
+
+    currentBucket.close = point.close;
+    currentBucket.high = Math.max(currentBucket.high, point.high);
+    currentBucket.low = Math.min(currentBucket.low, point.low);
+
+    if (typeof point.volume === "number") {
+      currentBucket.volume = (currentBucket.volume ?? 0) + point.volume;
+    }
+  }
+
+  return [...groupedPoints.entries()]
+    .sort((left, right) => left[0] - right[0])
+    .map(([, point]) => point);
+}
+
+function applyResolutionToSeries(
+  points: InstitutionalMacroPoint[],
+  resolution?: InstitutionalMacroResolution,
+): InstitutionalMacroPoint[] {
+  const normalizedResolution = normalizeRequestedResolution(resolution);
+
+  if (!normalizedResolution) {
+    return points;
+  }
+
+  const targetIntervalMs = resolutionToMsMap[normalizedResolution];
+
+  if (!Number.isFinite(targetIntervalMs) || targetIntervalMs <= 0) {
+    return points;
+  }
+
+  const sourceSpacingMs = estimateSeriesSpacingMs(points);
+
+  if (targetIntervalMs <= sourceSpacingMs) {
+    return points;
+  }
+
+  const resampledPoints = aggregateSeriesByInterval(points, targetIntervalMs);
+  return resampledPoints.length > 0 ? resampledPoints : points;
 }
 
 function computeInsights(points: InstitutionalMacroPoint[]): InstitutionalMacroInsights {
@@ -642,6 +814,7 @@ export class InstitutionalMacroService {
     mode?: InstitutionalMacroMode;
     module?: string;
     range?: InstitutionalMacroRange;
+    resolution?: InstitutionalMacroResolution;
     symbol: string;
     timezone?: string;
   }): Promise<InstitutionalMacroResponse> {
@@ -649,7 +822,10 @@ export class InstitutionalMacroService {
     const now = new Date();
     const utcHour = now.getUTCHours();
     const seed = hashCode(`${parsedInput.module}:${parsedInput.symbol}:${parsedInput.range}`);
-    const points = buildSyntheticSeries(parsedInput.symbol, parsedInput.range);
+    const points = applyResolutionToSeries(
+      buildSyntheticSeries(parsedInput.symbol, parsedInput.range),
+      parsedInput.resolution,
+    );
     const insights = computeInsights(points);
 
     const dailyBias = resolveBiasFromSeed(seed);

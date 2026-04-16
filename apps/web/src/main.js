@@ -55,6 +55,10 @@ const chartOverlayLevelsToggle = document.querySelector("#chart-overlay-levels")
 const chartFitButton = document.querySelector("#chart-fit-button");
 const chartViewSwitch = document.querySelector("#chart-view-switch");
 const chartIntervalSwitch = document.querySelector("#chart-interval-switch");
+const chartIntervalMenuButton = document.querySelector("#chart-interval-menu-button");
+const chartIntervalMenu = document.querySelector("#chart-interval-menu");
+const chartIntervalMenuList = document.querySelector("#chart-interval-menu-list");
+const chartIntervalMenuCurrent = document.querySelector("#chart-interval-menu-current");
 const chartStatusElement = document.querySelector("#chart-status");
 const chartLegendElement = document.querySelector("#chart-legend");
 const chartCopilotStage = document.querySelector("#chart-copilot-stage");
@@ -200,8 +204,8 @@ const AUTH_MODE_SIGN_UP = "signup";
 const SUPABASE_CONVERSATIONS_TABLE = "copilot_user_conversations";
 const SUPABASE_MESSAGES_TABLE = "copilot_user_messages";
 const WATCHLIST_REFRESH_MIN_INTERVAL_MS = 20000;
-const TERMINAL_INTERVALS = ["1", "5", "60", "240", "1D", "1W"];
-const TERMINAL_INTERVAL_SET = new Set(TERMINAL_INTERVALS);
+const TERMINAL_INTERVAL_DEFAULT = "60";
+const TERMINAL_INTERVAL_FAVORITE_DEFAULTS = ["1", "5", "60", "240", "1D", "1W"];
 const TERMINAL_INTERVAL_SHORTCUTS = {
   Digit1: "1",
   Digit2: "5",
@@ -210,14 +214,266 @@ const TERMINAL_INTERVAL_SHORTCUTS = {
   Digit5: "1D",
   Digit6: "1W",
 };
-const TERMINAL_INTERVAL_TO_CHART_RANGE = {
-  1: "24h",
-  5: "24h",
-  60: "7d",
-  240: "30d",
-  "1D": "90d",
-  "1W": "1y",
+const TERMINAL_INTERVAL_GROUP_ORDER = ["ticks", "seconds", "minutes", "hours", "days", "ranges"];
+const TERMINAL_INTERVAL_GROUP_LABELS = {
+  days: "Dias",
+  hours: "Horas",
+  minutes: "Minutos",
+  ranges: "Ranges",
+  seconds: "Segundos",
+  ticks: "Ticks",
 };
+const TERMINAL_INTERVAL_DEFINITIONS = [
+  {
+    backendResolution: null,
+    defaultRange: "24h",
+    group: "ticks",
+    label: "1 tick",
+    tvResolution: "1T",
+    value: "1T",
+  },
+  {
+    backendResolution: null,
+    defaultRange: "24h",
+    group: "ticks",
+    label: "10 ticks",
+    tvResolution: "10T",
+    value: "10T",
+  },
+  {
+    backendResolution: null,
+    defaultRange: "24h",
+    group: "ticks",
+    label: "100 ticks",
+    tvResolution: "100T",
+    value: "100T",
+  },
+  {
+    backendResolution: null,
+    defaultRange: "24h",
+    group: "ticks",
+    label: "1000 ticks",
+    tvResolution: "1000T",
+    value: "1000T",
+  },
+  {
+    backendResolution: "1S",
+    defaultRange: "24h",
+    group: "seconds",
+    label: "1 segundo",
+    tvResolution: "1S",
+    value: "1S",
+  },
+  {
+    backendResolution: "5S",
+    defaultRange: "24h",
+    group: "seconds",
+    label: "5 segundos",
+    tvResolution: "5S",
+    value: "5S",
+  },
+  {
+    backendResolution: "10S",
+    defaultRange: "24h",
+    group: "seconds",
+    label: "10 segundos",
+    tvResolution: "10S",
+    value: "10S",
+  },
+  {
+    backendResolution: "15S",
+    defaultRange: "24h",
+    group: "seconds",
+    label: "15 segundos",
+    tvResolution: "15S",
+    value: "15S",
+  },
+  {
+    backendResolution: "30S",
+    defaultRange: "24h",
+    group: "seconds",
+    label: "30 segundos",
+    tvResolution: "30S",
+    value: "30S",
+  },
+  {
+    backendResolution: "45S",
+    defaultRange: "24h",
+    group: "seconds",
+    label: "45 segundos",
+    tvResolution: "45S",
+    value: "45S",
+  },
+  {
+    backendResolution: "1",
+    defaultRange: "24h",
+    group: "minutes",
+    label: "1 minuto",
+    tvResolution: "1",
+    value: "1",
+  },
+  {
+    backendResolution: "2",
+    defaultRange: "24h",
+    group: "minutes",
+    label: "2 minutos",
+    tvResolution: "2",
+    value: "2",
+  },
+  {
+    backendResolution: "3",
+    defaultRange: "24h",
+    group: "minutes",
+    label: "3 minutos",
+    tvResolution: "3",
+    value: "3",
+  },
+  {
+    backendResolution: "5",
+    defaultRange: "24h",
+    group: "minutes",
+    label: "5 minutos",
+    tvResolution: "5",
+    value: "5",
+  },
+  {
+    backendResolution: "10",
+    defaultRange: "24h",
+    group: "minutes",
+    label: "10 minutos",
+    tvResolution: "10",
+    value: "10",
+  },
+  {
+    backendResolution: "15",
+    defaultRange: "24h",
+    group: "minutes",
+    label: "15 minutos",
+    tvResolution: "15",
+    value: "15",
+  },
+  {
+    backendResolution: "30",
+    defaultRange: "7d",
+    group: "minutes",
+    label: "30 minutos",
+    tvResolution: "30",
+    value: "30",
+  },
+  {
+    backendResolution: "45",
+    defaultRange: "7d",
+    group: "minutes",
+    label: "45 minutos",
+    tvResolution: "45",
+    value: "45",
+  },
+  {
+    backendResolution: "60",
+    defaultRange: "7d",
+    group: "hours",
+    label: "1 hora",
+    tvResolution: "60",
+    value: "60",
+  },
+  {
+    backendResolution: "120",
+    defaultRange: "7d",
+    group: "hours",
+    label: "2 horas",
+    tvResolution: "120",
+    value: "120",
+  },
+  {
+    backendResolution: "180",
+    defaultRange: "30d",
+    group: "hours",
+    label: "3 horas",
+    tvResolution: "180",
+    value: "180",
+  },
+  {
+    backendResolution: "240",
+    defaultRange: "30d",
+    group: "hours",
+    label: "4 horas",
+    tvResolution: "240",
+    value: "240",
+  },
+  {
+    backendResolution: "D",
+    defaultRange: "90d",
+    group: "days",
+    label: "1 dia",
+    tvResolution: "D",
+    value: "1D",
+  },
+  {
+    backendResolution: "W",
+    defaultRange: "1y",
+    group: "days",
+    label: "1 semana",
+    tvResolution: "W",
+    value: "1W",
+  },
+  {
+    backendResolution: "M",
+    defaultRange: "1y",
+    group: "days",
+    label: "1 mes",
+    tvResolution: "M",
+    value: "1M",
+  },
+  {
+    backendResolution: null,
+    defaultRange: "24h",
+    group: "ranges",
+    label: "1 range",
+    tvResolution: "1R",
+    value: "1R",
+  },
+  {
+    backendResolution: null,
+    defaultRange: "24h",
+    group: "ranges",
+    label: "10 ranges",
+    tvResolution: "10R",
+    value: "10R",
+  },
+  {
+    backendResolution: null,
+    defaultRange: "24h",
+    group: "ranges",
+    label: "100 ranges",
+    tvResolution: "100R",
+    value: "100R",
+  },
+  {
+    backendResolution: null,
+    defaultRange: "24h",
+    group: "ranges",
+    label: "1000 ranges",
+    tvResolution: "1000R",
+    value: "1000R",
+  },
+];
+const TERMINAL_INTERVAL_DEFINITION_MAP = new Map(
+  TERMINAL_INTERVAL_DEFINITIONS.map((definition) => [definition.value, definition]),
+);
+const TERMINAL_INTERVAL_SET = new Set(TERMINAL_INTERVAL_DEFINITION_MAP.keys());
+const TERMINAL_INTERVAL_TO_CHART_RANGE = {
+  ...Object.fromEntries(
+    TERMINAL_INTERVAL_DEFINITIONS.map((definition) => [definition.value, definition.defaultRange]),
+  ),
+};
+const TERMINAL_INTERVAL_BACKEND_FALLBACK = "1";
+const TERMINAL_INTERVAL_MENU_MAX_FAVORITES = 8;
+const TERMINAL_INTERVAL_MENU_MIN_FAVORITES = 1;
+const TERMINAL_INTERVAL_MENU_TV_ONLY_META = "Somente Terminal PRO";
+const TERMINAL_INTERVAL_MENU_INSTITUTIONAL_META = "Recalcula IA nesta granularidade";
+const TERMINAL_INTERVAL_MENU_SHORTCUT_META = "Atalho Alt+1..6";
+const TERMINAL_INTERVAL_MENU_FALLBACK_MESSAGE =
+  "A corretora atual nao fornece dados de [%INTERVAL%] para este ativo. Fallback automatico para 1m.";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").trim().replace(/\/$/, "");
 const CHART_RANGE_LABELS = {
   "1y": "1 ano",
@@ -1520,6 +1776,9 @@ let chartLatestCandles = [];
 let chartCandleByTime = new Map();
 let chartHasInitialFit = false;
 let chartViewMode = "tv";
+let activeTerminalInterval = TERMINAL_INTERVAL_DEFAULT;
+let favoriteTerminalIntervals = new Set(TERMINAL_INTERVAL_FAVORITE_DEFAULTS);
+let isChartIntervalMenuOpen = false;
 let chartSymbolSourceModule = "crypto";
 let currentChartStrategy = "crypto";
 let tvMountIdCounter = 0;
@@ -6946,6 +7205,7 @@ function saveChartPreferences() {
     autoRefresh:
       chartAutoRefreshSelect instanceof HTMLSelectElement ? chartAutoRefreshSelect.value : "5000",
     exchange: chartExchangeSelect instanceof HTMLSelectElement ? chartExchangeSelect.value : "BINANCE",
+    favoriteIntervals: getOrderedFavoriteTerminalIntervals(),
     interval: getSelectedTerminalInterval(),
     mode: chartModeSelect instanceof HTMLSelectElement ? chartModeSelect.value : "delayed",
     overlayEma:
@@ -7042,9 +7302,22 @@ function hydrateChartPreferences() {
     }
   }
 
-  if (typeof preferences.interval === "string" && TERMINAL_INTERVAL_SET.has(preferences.interval)) {
-    setActiveTerminalInterval(preferences.interval);
+  if (Array.isArray(preferences.favoriteIntervals)) {
+    const sanitizedFavorites = preferences.favoriteIntervals
+      .map((value) => normalizeTerminalInterval(value))
+      .filter((value, index, collection) => TERMINAL_INTERVAL_SET.has(value) && collection.indexOf(value) === index)
+      .slice(0, TERMINAL_INTERVAL_MENU_MAX_FAVORITES);
+
+    if (sanitizedFavorites.length >= TERMINAL_INTERVAL_MENU_MIN_FAVORITES) {
+      favoriteTerminalIntervals = new Set(sanitizedFavorites);
+    }
   }
+
+  ensureFavoriteTerminalIntervalsSanity();
+
+  setActiveTerminalInterval(preferences.interval, {
+    closeMenu: true,
+  });
 
   if (preferences.viewMode === "copilot" || preferences.viewMode === "tv") {
     chartViewMode = preferences.viewMode;
@@ -7778,40 +8051,244 @@ function getTradingViewTerminalExchange() {
   return exchange === "AUTO" ? "BINANCE" : exchange;
 }
 
-function getSelectedTerminalInterval() {
-  if (!(chartIntervalSwitch instanceof HTMLElement)) {
-    return "60";
-  }
-
-  const activeButton = chartIntervalSwitch.querySelector(".interval-chip.is-active");
-
-  if (activeButton instanceof HTMLButtonElement && activeButton.dataset.interval) {
-    return activeButton.dataset.interval;
-  }
-
-  return "60";
+function getTerminalIntervalDefinition(interval) {
+  return TERMINAL_INTERVAL_DEFINITION_MAP.get(String(interval ?? ""))
+    ?? TERMINAL_INTERVAL_DEFINITION_MAP.get(TERMINAL_INTERVAL_DEFAULT)
+    ?? null;
 }
 
-function setActiveTerminalInterval(interval) {
+function normalizeTerminalInterval(interval) {
+  const rawInterval = String(interval ?? "").trim().toUpperCase();
+
+  if (rawInterval === "D") {
+    return "1D";
+  }
+
+  if (rawInterval === "W") {
+    return "1W";
+  }
+
+  if (rawInterval === "M") {
+    return "1M";
+  }
+
+  if (TERMINAL_INTERVAL_SET.has(rawInterval)) {
+    return rawInterval;
+  }
+
+  return TERMINAL_INTERVAL_DEFAULT;
+}
+
+function getTerminalIntervalDisplayLabel(interval) {
+  const definition = getTerminalIntervalDefinition(interval);
+  return definition?.label ?? "1 hora";
+}
+
+function getTradingViewResolutionForTerminalInterval(interval) {
+  const definition = getTerminalIntervalDefinition(interval);
+  return definition?.tvResolution ?? TERMINAL_INTERVAL_DEFAULT;
+}
+
+function getBackendResolutionForTerminalInterval(interval) {
+  const definition = getTerminalIntervalDefinition(interval);
+  return typeof definition?.backendResolution === "string" ? definition.backendResolution : null;
+}
+
+function isNonTimeBasedTerminalInterval(interval) {
+  const definition = getTerminalIntervalDefinition(interval);
+  return definition?.group === "ticks" || definition?.group === "ranges";
+}
+
+function isSubMinuteTerminalInterval(interval) {
+  const backendResolution = getBackendResolutionForTerminalInterval(interval);
+  return typeof backendResolution === "string" && backendResolution.endsWith("S");
+}
+
+function getOrderedFavoriteTerminalIntervals() {
+  const intervalOrderMap = new Map(
+    TERMINAL_INTERVAL_DEFINITIONS.map((definition, index) => [definition.value, index]),
+  );
+
+  return [...favoriteTerminalIntervals]
+    .map((value) => normalizeTerminalInterval(value))
+    .filter((value, index, collection) => TERMINAL_INTERVAL_SET.has(value) && collection.indexOf(value) === index)
+    .sort((left, right) => {
+      const leftOrder = intervalOrderMap.get(left) ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = intervalOrderMap.get(right) ?? Number.MAX_SAFE_INTEGER;
+      return leftOrder - rightOrder;
+    });
+}
+
+function ensureFavoriteTerminalIntervalsSanity() {
+  const orderedFavorites = getOrderedFavoriteTerminalIntervals();
+
+  if (orderedFavorites.length >= TERMINAL_INTERVAL_MENU_MIN_FAVORITES) {
+    favoriteTerminalIntervals = new Set(orderedFavorites.slice(0, TERMINAL_INTERVAL_MENU_MAX_FAVORITES));
+    return;
+  }
+
+  favoriteTerminalIntervals = new Set(TERMINAL_INTERVAL_FAVORITE_DEFAULTS);
+}
+
+function getTerminalIntervalMenuMeta(definition) {
+  if (!definition || definition.backendResolution === null) {
+    return TERMINAL_INTERVAL_MENU_TV_ONLY_META;
+  }
+
+  if (Object.values(TERMINAL_INTERVAL_SHORTCUTS).includes(definition.value)) {
+    return TERMINAL_INTERVAL_MENU_SHORTCUT_META;
+  }
+
+  return TERMINAL_INTERVAL_MENU_INSTITUTIONAL_META;
+}
+
+function renderTerminalIntervalFavorites() {
   if (!(chartIntervalSwitch instanceof HTMLElement)) {
     return;
   }
 
-  const normalizedInterval = TERMINAL_INTERVAL_SET.has(interval) ? interval : "60";
+  ensureFavoriteTerminalIntervalsSanity();
+  const orderedFavorites = getOrderedFavoriteTerminalIntervals();
+  chartIntervalSwitch.innerHTML = "";
 
-  const buttons = chartIntervalSwitch.querySelectorAll(".interval-chip");
+  for (const interval of orderedFavorites) {
+    const definition = getTerminalIntervalDefinition(interval);
 
-  buttons.forEach((button) => {
-    if (!(button instanceof HTMLButtonElement)) {
+    if (!definition) {
+      continue;
+    }
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `interval-chip${activeTerminalInterval === definition.value ? " is-active" : ""}`;
+    button.dataset.interval = definition.value;
+    button.textContent = definition.label;
+    chartIntervalSwitch.append(button);
+  }
+}
+
+function renderTerminalIntervalMenu() {
+  if (!(chartIntervalMenuList instanceof HTMLElement)) {
+    return;
+  }
+
+  const rows = [];
+
+  for (const groupId of TERMINAL_INTERVAL_GROUP_ORDER) {
+    const groupItems = TERMINAL_INTERVAL_DEFINITIONS.filter((definition) => definition.group === groupId);
+
+    if (groupItems.length === 0) {
+      continue;
+    }
+
+    const optionsHtml = groupItems.map((definition) => {
+      const isActive = activeTerminalInterval === definition.value;
+      const isFavorite = favoriteTerminalIntervals.has(definition.value);
+      const activeClass = isActive ? " is-active" : "";
+      const favoriteClass = isFavorite ? " is-favorite" : "";
+      const starLabel = isFavorite ? "Remover favorito" : "Favoritar";
+
+      return `
+        <div class="chart-interval-option">
+          <button
+            type="button"
+            class="chart-interval-option-select${activeClass}"
+            data-interval="${definition.value}"
+            role="menuitemradio"
+            aria-checked="${isActive ? "true" : "false"}"
+          >
+            <span>${definition.label}</span>
+            <span class="chart-interval-option-meta">${getTerminalIntervalMenuMeta(definition)}</span>
+          </button>
+          <button
+            type="button"
+            class="chart-interval-option-star${favoriteClass}"
+            data-interval-star="${definition.value}"
+            aria-label="${starLabel}: ${definition.label}"
+            title="${starLabel}"
+          >★</button>
+        </div>
+      `;
+    }).join("");
+
+    rows.push(`
+      <section class="chart-interval-group" aria-label="${TERMINAL_INTERVAL_GROUP_LABELS[groupId] ?? groupId}">
+        <div class="chart-interval-group-title">${TERMINAL_INTERVAL_GROUP_LABELS[groupId] ?? groupId}</div>
+        ${optionsHtml}
+      </section>
+    `);
+  }
+
+  chartIntervalMenuList.innerHTML = rows.join("");
+}
+
+function setChartIntervalMenuOpen(nextState) {
+  const shouldOpen = nextState === true;
+  isChartIntervalMenuOpen = shouldOpen;
+
+  if (chartIntervalMenuButton instanceof HTMLButtonElement) {
+    chartIntervalMenuButton.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+  }
+
+  if (chartIntervalMenu instanceof HTMLElement) {
+    chartIntervalMenu.classList.toggle("is-hidden", !shouldOpen);
+  }
+
+  if (shouldOpen) {
+    renderTerminalIntervalMenu();
+  }
+}
+
+function getSelectedTerminalInterval() {
+  return activeTerminalInterval;
+}
+
+function setActiveTerminalInterval(interval, options = {}) {
+  const normalizedInterval = normalizeTerminalInterval(interval);
+  activeTerminalInterval = normalizedInterval;
+
+  if (chartIntervalMenuCurrent instanceof HTMLElement) {
+    chartIntervalMenuCurrent.textContent = getTerminalIntervalDisplayLabel(normalizedInterval);
+  }
+
+  if (options.skipRender !== true) {
+    renderTerminalIntervalFavorites();
+    renderTerminalIntervalMenu();
+  }
+
+  if (options.closeMenu !== false) {
+    setChartIntervalMenuOpen(false);
+  }
+}
+
+function toggleFavoriteTerminalInterval(interval) {
+  const normalizedInterval = normalizeTerminalInterval(interval);
+
+  if (favoriteTerminalIntervals.has(normalizedInterval)) {
+    if (favoriteTerminalIntervals.size <= TERMINAL_INTERVAL_MENU_MIN_FAVORITES) {
       return;
     }
 
-    button.classList.toggle("is-active", button.dataset.interval === normalizedInterval);
-  });
+    favoriteTerminalIntervals.delete(normalizedInterval);
+  } else {
+    if (favoriteTerminalIntervals.size >= TERMINAL_INTERVAL_MENU_MAX_FAVORITES) {
+      const firstFavorite = getOrderedFavoriteTerminalIntervals()[0];
+
+      if (typeof firstFavorite === "string") {
+        favoriteTerminalIntervals.delete(firstFavorite);
+      }
+    }
+
+    favoriteTerminalIntervals.add(normalizedInterval);
+  }
+
+  ensureFavoriteTerminalIntervalsSanity();
+  renderTerminalIntervalFavorites();
+  renderTerminalIntervalMenu();
 }
 
 function resolveChartRangeForTerminalInterval(interval) {
-  const normalizedInterval = TERMINAL_INTERVAL_SET.has(interval) ? interval : "60";
+  const normalizedInterval = normalizeTerminalInterval(interval);
   return TERMINAL_INTERVAL_TO_CHART_RANGE[normalizedInterval] ?? "7d";
 }
 
@@ -8379,6 +8856,47 @@ function syncChartRangeWithTerminalInterval(interval, options = {}) {
   return true;
 }
 
+function applyTerminalIntervalSelection(interval, options = {}) {
+  const normalizedInterval = normalizeTerminalInterval(interval);
+  setActiveTerminalInterval(normalizedInterval, {
+    closeMenu: options.closeMenu !== false,
+  });
+
+  const didSyncRange = syncChartRangeWithTerminalInterval(normalizedInterval, {
+    announce: options.announce === true,
+  });
+
+  if (didSyncRange) {
+    configureChartAutoRefresh();
+    void syncIntelligenceDeskForCurrentContext({
+      reason: typeof options.reason === "string" ? options.reason : "interval-change",
+      silent: options.silentSync !== false,
+    });
+  }
+
+  if (options.refreshTerminal !== false) {
+    scheduleTradingViewRefresh();
+  }
+
+  if (options.persist !== false) {
+    saveChartPreferences();
+  }
+
+  if (options.showLegend !== false) {
+    const linkedRange = CHART_RANGE_LABELS[resolveChartRangeForTerminalInterval(normalizedInterval)]
+      ?? resolveChartRangeForTerminalInterval(normalizedInterval);
+
+    setChartLegend(
+      `Intervalo ${getTerminalIntervalDisplayLabel(normalizedInterval)} ativo • janela ${linkedRange}`,
+    );
+  }
+
+  return {
+    didSyncRange,
+    interval: normalizedInterval,
+  };
+}
+
 function queuePendingChartLoadRequest(options = {}) {
   const nextRequest = {};
 
@@ -8525,7 +9043,7 @@ function buildTradingViewSymbol() {
 
 function buildTerminalReadyStatus() {
   const styleLabel = CHART_STYLE_LABELS[getSelectedTerminalStyle()] ?? getSelectedTerminalStyle();
-  return `Terminal ${buildTradingViewSymbol()} ativo • intervalo ${getSelectedTerminalInterval()} • estilo ${styleLabel}`;
+  return `Terminal ${buildTradingViewSymbol()} ativo • intervalo ${getTerminalIntervalDisplayLabel(getSelectedTerminalInterval())} • estilo ${styleLabel}`;
 }
 
 function syncTerminalSymbolWithAsset() {
@@ -9282,7 +9800,7 @@ async function mountTradingViewWidget() {
     tvWidgetContainer.innerHTML = "";
 
     const symbol = buildTradingViewSymbol();
-    const interval = getSelectedTerminalInterval();
+    const interval = getTradingViewResolutionForTerminalInterval(getSelectedTerminalInterval());
     const selectedStyle = getSelectedTerminalStyle();
     const style = TERMINAL_STYLE_TO_TV[selectedStyle] ?? "1";
     const iframe = document.createElement("iframe");
@@ -10274,7 +10792,42 @@ function buildIntelligenceSyncCorrelationHeaders() {
   };
 }
 
-async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "binance") {
+function normalizeRequestedChartResolution(interval) {
+  const normalizedInterval = normalizeTerminalInterval(interval);
+  return getBackendResolutionForTerminalInterval(normalizedInterval);
+}
+
+function shouldUseResolutionFallback(interval, message) {
+  const normalizedInterval = normalizeTerminalInterval(interval);
+
+  if (normalizedInterval === TERMINAL_INTERVAL_BACKEND_FALLBACK) {
+    return false;
+  }
+
+  const normalizedMessage = String(message ?? "").toLowerCase();
+  const hasUnsupportedHint =
+    normalizedMessage.includes("resolu")
+    || normalizedMessage.includes("unsupported")
+    || normalizedMessage.includes("granularity")
+    || normalizedMessage.includes("interval");
+
+  if (isNonTimeBasedTerminalInterval(normalizedInterval)) {
+    return true;
+  }
+
+  if (isSubMinuteTerminalInterval(normalizedInterval)) {
+    return hasUnsupportedHint || isRetryableMarketApiErrorMessage(normalizedMessage);
+  }
+
+  return hasUnsupportedHint;
+}
+
+function buildResolutionFallbackMessage(interval) {
+  const label = getTerminalIntervalDisplayLabel(interval);
+  return TERMINAL_INTERVAL_MENU_FALLBACK_MESSAGE.replace("%INTERVAL%", label);
+}
+
+async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "binance", resolution = null) {
   return runMarketRequestWithRetry(async () => {
     const normalizedExchange = normalizeRequestedBroker(exchange);
     const normalizedMode = mode === "live" ? "live" : "delayed";
@@ -10284,6 +10837,11 @@ async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "bina
       mode: normalizedMode,
       range,
     });
+
+    if (typeof resolution === "string" && resolution.length > 0) {
+      params.set("resolution", resolution);
+    }
+
     const response = await fetch(buildApiUrl(`/v1/crypto/strategy-chart?${params.toString()}`), {
       headers: buildIntelligenceSyncCorrelationHeaders(),
       method: "GET",
@@ -10306,7 +10864,65 @@ async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "bina
   });
 }
 
-async function requestCryptoChart(assetId, range, mode, exchange) {
+async function requestCryptoChart(assetId, range, mode, exchange, interval) {
+  const normalizedInterval = normalizeTerminalInterval(interval);
+  const requestedResolution = normalizeRequestedChartResolution(normalizedInterval);
+
+  if (requestedResolution === null) {
+    const fallbackResolution = normalizeRequestedChartResolution(TERMINAL_INTERVAL_BACKEND_FALLBACK);
+    const fallbackResult = await requestCryptoChartCore(
+      assetId,
+      range,
+      mode,
+      exchange,
+      fallbackResolution,
+    );
+
+    return {
+      ...fallbackResult,
+      fallbackReason: [
+        buildResolutionFallbackMessage(normalizedInterval),
+        fallbackResult.fallbackReason,
+      ].filter((item) => typeof item === "string" && item.length > 0).join(" • "),
+      resolvedResolution: fallbackResolution,
+    };
+  }
+
+  try {
+    const result = await requestCryptoChartCore(assetId, range, mode, exchange, requestedResolution);
+
+    return {
+      ...result,
+      resolvedResolution: requestedResolution,
+    };
+  } catch (error) {
+    const message = getErrorMessage(error, "Falha ao consultar grafico");
+
+    if (!shouldUseResolutionFallback(normalizedInterval, message)) {
+      throw error;
+    }
+
+    const fallbackResolution = normalizeRequestedChartResolution(TERMINAL_INTERVAL_BACKEND_FALLBACK);
+    const fallbackResult = await requestCryptoChartCore(
+      assetId,
+      range,
+      mode,
+      exchange,
+      fallbackResolution,
+    );
+
+    return {
+      ...fallbackResult,
+      fallbackReason: [
+        buildResolutionFallbackMessage(normalizedInterval),
+        fallbackResult.fallbackReason,
+      ].filter((item) => typeof item === "string" && item.length > 0).join(" • "),
+      resolvedResolution: fallbackResolution,
+    };
+  }
+}
+
+async function requestCryptoChartCore(assetId, range, mode, exchange, resolution) {
   const requestedBroker = normalizeRequestedBroker(exchange);
 
   if (requestedBroker === "auto") {
@@ -10314,7 +10930,13 @@ async function requestCryptoChart(assetId, range, mode, exchange) {
       const preferredBroker = resolveAutoChartPrimaryBroker();
 
       try {
-        const snapshot = await requestCryptoChartEndpoint(assetId, range, targetMode, preferredBroker);
+        const snapshot = await requestCryptoChartEndpoint(
+          assetId,
+          range,
+          targetMode,
+          preferredBroker,
+          resolution,
+        );
         markBrokerSuccess(preferredBroker);
         updateAutoChartPreferredBroker(preferredBroker);
 
@@ -10333,7 +10955,13 @@ async function requestCryptoChart(assetId, range, mode, exchange) {
           throw new Error(normalizedPreferredMessage);
         }
 
-        const snapshot = await requestCryptoChartEndpoint(assetId, range, targetMode, "auto");
+        const snapshot = await requestCryptoChartEndpoint(
+          assetId,
+          range,
+          targetMode,
+          "auto",
+          resolution,
+        );
         const resolvedBroker = normalizeBrokerName(snapshot?.provider ?? preferredBroker);
         const switchedBroker = resolvedBroker !== preferredBroker;
 
@@ -10390,7 +11018,7 @@ async function requestCryptoChart(assetId, range, mode, exchange) {
   const tryResolveSnapshot = async (targetMode, brokerChain) => {
     for (const broker of brokerChain) {
       try {
-        const snapshot = await requestCryptoChartEndpoint(assetId, range, targetMode, broker);
+        const snapshot = await requestCryptoChartEndpoint(assetId, range, targetMode, broker, resolution);
         markBrokerSuccess(broker);
         return {
           broker,
@@ -10470,7 +11098,66 @@ async function requestCryptoChart(assetId, range, mode, exchange) {
   throw new Error(normalizeChartApiErrorMessage(lastFailure?.message, "Nao foi possivel carregar o grafico"));
 }
 
-async function requestInstitutionalMacroSnapshot(symbol, range, mode, moduleName = "forex") {
+async function requestInstitutionalMacroSnapshot(symbol, range, mode, moduleName = "forex", interval) {
+  const normalizedInterval = normalizeTerminalInterval(interval);
+  const requestedResolution = normalizeRequestedChartResolution(normalizedInterval);
+
+  if (requestedResolution === null) {
+    const fallbackResolution = normalizeRequestedChartResolution(TERMINAL_INTERVAL_BACKEND_FALLBACK);
+    const snapshot = await requestInstitutionalMacroSnapshotCore(
+      symbol,
+      range,
+      mode,
+      moduleName,
+      fallbackResolution,
+    );
+
+    return {
+      fallbackReason: buildResolutionFallbackMessage(normalizedInterval),
+      resolvedResolution: fallbackResolution,
+      snapshot,
+    };
+  }
+
+  try {
+    const snapshot = await requestInstitutionalMacroSnapshotCore(
+      symbol,
+      range,
+      mode,
+      moduleName,
+      requestedResolution,
+    );
+
+    return {
+      fallbackReason: "",
+      resolvedResolution: requestedResolution,
+      snapshot,
+    };
+  } catch (error) {
+    const message = getErrorMessage(error, "Falha ao carregar o motor institucional");
+
+    if (!shouldUseResolutionFallback(normalizedInterval, message)) {
+      throw error;
+    }
+
+    const fallbackResolution = normalizeRequestedChartResolution(TERMINAL_INTERVAL_BACKEND_FALLBACK);
+    const snapshot = await requestInstitutionalMacroSnapshotCore(
+      symbol,
+      range,
+      mode,
+      moduleName,
+      fallbackResolution,
+    );
+
+    return {
+      fallbackReason: buildResolutionFallbackMessage(normalizedInterval),
+      resolvedResolution: fallbackResolution,
+      snapshot,
+    };
+  }
+}
+
+async function requestInstitutionalMacroSnapshotCore(symbol, range, mode, moduleName, resolution) {
   const sanitizedSymbol = sanitizeTerminalSymbol(symbol);
 
   if (sanitizedSymbol.length < 2) {
@@ -10486,6 +11173,7 @@ async function requestInstitutionalMacroSnapshot(symbol, range, mode, moduleName
     mode: safeMode,
     module: normalizedModule,
     range,
+    resolution,
     symbol: sanitizedSymbol,
     timezone,
   });
@@ -10515,13 +11203,17 @@ async function requestInstitutionalMacroSnapshot(symbol, range, mode, moduleName
   return payload?.data ?? null;
 }
 
-function buildCryptoLiveStreamUrl(assetId, exchange, range, intervalMs) {
+function buildCryptoLiveStreamUrl(assetId, exchange, range, intervalMs, resolution = null) {
   const params = new URLSearchParams({
     assetId,
     exchange,
     intervalMs: String(intervalMs),
     range,
   });
+
+  if (typeof resolution === "string" && resolution.length > 0) {
+    params.set("resolution", resolution);
+  }
 
   return buildApiUrl(`/v1/crypto/live-stream?${params.toString()}`);
 }
@@ -10558,6 +11250,7 @@ function applyChartSnapshot(snapshot, options = {}) {
   const cacheLabel = snapshot.cache?.state ? `cache ${snapshot.cache.state}` : "cache n/d";
   const rangeLabel = CHART_RANGE_LABELS[snapshot.range] ?? snapshot.range;
   const modeLabel = CHART_MODE_LABELS[snapshot.mode] ?? snapshot.mode;
+  const intervalLabel = getTerminalIntervalDisplayLabel(getSelectedTerminalInterval());
   const styleLabel = chartViewMode === "tv"
     ? CHART_STYLE_LABELS[getSelectedTerminalStyle()] ?? getSelectedTerminalStyle()
     : CHART_STYLE_LABELS[resolveChartStyle()] ?? resolveChartStyle();
@@ -10589,7 +11282,7 @@ function applyChartSnapshot(snapshot, options = {}) {
   const transportLabel = transport === "stream" ? " • transporte stream" : "";
 
   setChartStatus(
-    `Grafico ${snapshot.assetId.toUpperCase()} (${modeLabel}, ${rangeLabel}, ${styleLabel}) • estrategia ${strategyLabel} • exchange ${selectedExchange} • provider ${providerLabel} • ${cacheLabel}${refreshLabel}${liveLabel}${transportLabel}${fallbackLabel} • atualizado ${updatedAtLabel}`,
+    `Grafico ${snapshot.assetId.toUpperCase()} (${modeLabel}, ${rangeLabel}, ${styleLabel}, ${intervalLabel}) • estrategia ${strategyLabel} • exchange ${selectedExchange} • provider ${providerLabel} • ${cacheLabel}${refreshLabel}${liveLabel}${transportLabel}${fallbackLabel} • atualizado ${updatedAtLabel}`,
     statusMode,
   );
 
@@ -10664,13 +11357,17 @@ function connectChartLiveStream(intervalMs) {
 
   const assetId = chartAssetSelect.value;
   const range = chartRangeSelect.value;
+  const selectedInterval = getSelectedTerminalInterval();
+  const requestedResolution = normalizeRequestedChartResolution(selectedInterval);
+  const streamResolution = requestedResolution
+    ?? normalizeRequestedChartResolution(TERMINAL_INTERVAL_BACKEND_FALLBACK);
   const selectedRequestedBroker = normalizeRequestedBroker(getSelectedBroker());
   const selectedBroker = selectedRequestedBroker === "auto"
     ? resolveAutoChartPrimaryBroker()
     : normalizeBrokerName(selectedRequestedBroker);
   const streamFailoverChain = buildBrokerFailoverChain(selectedBroker);
   const exchange = streamFailoverChain[0] ?? selectedBroker;
-  const streamKey = `${assetId}:${selectedRequestedBroker}:${exchange}:${range}:${intervalMs}`;
+  const streamKey = `${assetId}:${selectedRequestedBroker}:${exchange}:${range}:${streamResolution ?? "1"}:${intervalMs}`;
 
   if (chartLiveStream && chartLiveStreamKey === streamKey) {
     return true;
@@ -10679,7 +11376,7 @@ function connectChartLiveStream(intervalMs) {
   stopChartLiveStream();
   chartLiveStreamKey = streamKey;
 
-  const streamUrl = buildCryptoLiveStreamUrl(assetId, exchange, range, intervalMs);
+  const streamUrl = buildCryptoLiveStreamUrl(assetId, exchange, range, intervalMs, streamResolution);
   const eventSource = new EventSource(streamUrl);
   chartLiveStream = eventSource;
 
@@ -10986,6 +11683,7 @@ async function loadChart(options = {}) {
   const assetId = options.assetId ?? chartAssetSelect.value;
   const requestedMode = options.mode ?? chartModeSelect?.value ?? "delayed";
   const selectedTerminalSymbol = getSelectedTerminalSymbol();
+  const selectedInterval = getSelectedTerminalInterval();
   const pipelineStrategy = resolveChartPipelineStrategy(selectedTerminalSymbol);
   const selectedExchange = getSelectedTerminalExchange();
   const selectedBroker = getSelectedBroker();
@@ -11035,27 +11733,72 @@ async function loadChart(options = {}) {
     currentChartStrategy = pipelineStrategy;
 
     if (pipelineStrategy === "institutional_macro") {
-      const snapshot = await requestInstitutionalMacroSnapshot(
+      const {
+        fallbackReason,
+        resolvedResolution,
+        snapshot,
+      } = await requestInstitutionalMacroSnapshot(
         selectedTerminalSymbol,
         range,
         mode,
         chartSymbolSourceModule,
+        selectedInterval,
       );
 
+      const requestedResolution = normalizeRequestedChartResolution(selectedInterval);
+      const usedFallbackResolution =
+        typeof resolvedResolution === "string"
+        && resolvedResolution === TERMINAL_INTERVAL_BACKEND_FALLBACK
+        && requestedResolution !== resolvedResolution;
+
+      if (usedFallbackResolution) {
+        setActiveTerminalInterval(TERMINAL_INTERVAL_BACKEND_FALLBACK, {
+          closeMenu: true,
+        });
+        syncChartRangeWithTerminalInterval(TERMINAL_INTERVAL_BACKEND_FALLBACK);
+      }
+
       applyChartSnapshot(snapshot, {
+        fallbackReason,
         forcedModeReason,
         selectedExchange,
         transport: "polling",
       });
+
+      if (usedFallbackResolution) {
+        saveChartPreferences();
+      }
+
       return;
     }
 
-    const { fallbackReason, resolvedBroker, snapshot } = await requestCryptoChart(
+    const {
+      fallbackReason,
+      resolvedBroker,
+      resolvedResolution,
+      snapshot,
+    } = await requestCryptoChart(
       assetId,
       range,
       mode,
       selectedBroker,
+      selectedInterval,
     );
+
+    const requestedResolution = normalizeRequestedChartResolution(selectedInterval);
+    const usedFallbackResolution =
+      typeof resolvedResolution === "string"
+      && resolvedResolution === TERMINAL_INTERVAL_BACKEND_FALLBACK
+      && requestedResolution !== resolvedResolution;
+
+    if (usedFallbackResolution) {
+      setActiveTerminalInterval(TERMINAL_INTERVAL_BACKEND_FALLBACK, {
+        closeMenu: true,
+      });
+      syncChartRangeWithTerminalInterval(TERMINAL_INTERVAL_BACKEND_FALLBACK);
+      saveChartPreferences();
+    }
+
     const requestedBroker = normalizeRequestedBroker(selectedBroker);
     const statusBroker = requestedBroker === "auto"
       ? resolveAutoChartPrimaryBroker()
@@ -11884,22 +12627,18 @@ function setupChartKeyboardShortcuts() {
 
     if (event.altKey && !event.metaKey && !event.ctrlKey && intervalShortcut) {
       event.preventDefault();
-      setActiveTerminalInterval(intervalShortcut);
-      const didSyncRange = syncChartRangeWithTerminalInterval(intervalShortcut);
-
-      if (didSyncRange) {
-        configureChartAutoRefresh();
-        void syncIntelligenceDeskForCurrentContext({
-          reason: "interval-shortcut",
-          silent: true,
-        });
-      }
-
-      scheduleTradingViewRefresh();
-      saveChartPreferences();
+      applyTerminalIntervalSelection(intervalShortcut, {
+        reason: "interval-shortcut",
+        showLegend: false,
+      });
       const linkedRange = CHART_RANGE_LABELS[resolveChartRangeForTerminalInterval(intervalShortcut)]
         ?? resolveChartRangeForTerminalInterval(intervalShortcut);
-      setChartLegend(`Atalho ativo: intervalo ${intervalShortcut} • janela ${linkedRange}`);
+      setChartLegend(`Atalho ativo: intervalo ${getTerminalIntervalDisplayLabel(intervalShortcut)} • janela ${linkedRange}`);
+      return;
+    }
+
+    if (event.key === "Escape" && isChartIntervalMenuOpen) {
+      setChartIntervalMenuOpen(false);
       return;
     }
 
@@ -12001,7 +12740,9 @@ function setupChartLab() {
     chartSymbolInput.value = mapSymbolToExchange(chartSymbolInput.value, getSelectedTerminalExchange());
   }
 
-  setActiveTerminalInterval(getSelectedTerminalInterval());
+  setActiveTerminalInterval(getSelectedTerminalInterval(), {
+    closeMenu: true,
+  });
   renderWatchlist();
   watchlistDiagnostics = {
     ...watchlistDiagnostics,
@@ -12252,21 +12993,66 @@ function setupChartLab() {
         return;
       }
 
-      setActiveTerminalInterval(interval);
-      const didSyncRange = syncChartRangeWithTerminalInterval(interval);
-
-      if (didSyncRange) {
-        configureChartAutoRefresh();
-        void syncIntelligenceDeskForCurrentContext({
-          reason: "interval-chip",
-          silent: true,
-        });
-      }
-
-      scheduleTradingViewRefresh();
-      saveChartPreferences();
+      applyTerminalIntervalSelection(interval, {
+        reason: "interval-chip",
+      });
     });
   }
+
+  if (chartIntervalMenuButton instanceof HTMLButtonElement) {
+    chartIntervalMenuButton.addEventListener("click", () => {
+      setChartIntervalMenuOpen(!isChartIntervalMenuOpen);
+    });
+  }
+
+  if (chartIntervalMenuList instanceof HTMLElement) {
+    chartIntervalMenuList.addEventListener("click", (event) => {
+      const target = event.target;
+
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+
+      const starButton = target.closest("button.chart-interval-option-star");
+
+      if (starButton instanceof HTMLButtonElement && typeof starButton.dataset.intervalStar === "string") {
+        toggleFavoriteTerminalInterval(starButton.dataset.intervalStar);
+        saveChartPreferences();
+        return;
+      }
+
+      const selectButton = target.closest("button.chart-interval-option-select");
+
+      if (!(selectButton instanceof HTMLButtonElement) || typeof selectButton.dataset.interval !== "string") {
+        return;
+      }
+
+      applyTerminalIntervalSelection(selectButton.dataset.interval, {
+        reason: "interval-menu",
+      });
+    });
+  }
+
+  window.addEventListener("click", (event) => {
+    if (!isChartIntervalMenuOpen) {
+      return;
+    }
+
+    const target = event.target;
+
+    if (!(target instanceof Node)) {
+      return;
+    }
+
+    const clickedInsideMenu = chartIntervalMenu instanceof HTMLElement && chartIntervalMenu.contains(target);
+    const clickedMenuButton = chartIntervalMenuButton instanceof HTMLButtonElement && chartIntervalMenuButton.contains(target);
+
+    if (clickedInsideMenu || clickedMenuButton) {
+      return;
+    }
+
+    setChartIntervalMenuOpen(false);
+  });
 
   if (watchlistGrid instanceof HTMLElement) {
     if (watchlistRiskSummaryElement instanceof HTMLElement) {

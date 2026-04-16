@@ -42,10 +42,35 @@ const marketOverviewQuerySchema = z.object({
   preset: z.enum(["majors", "latam", "europe", "asia", "global"]).default("majors"),
 });
 
+const chartResolutionSchema = z.enum([
+  "1",
+  "2",
+  "3",
+  "5",
+  "10",
+  "15",
+  "30",
+  "45",
+  "60",
+  "120",
+  "180",
+  "240",
+  "1S",
+  "5S",
+  "10S",
+  "15S",
+  "30S",
+  "45S",
+  "D",
+  "W",
+  "M",
+]);
+
 const institutionalMacroQuerySchema = z.object({
   mode: z.enum(["delayed", "live"]).default("delayed"),
   module: z.string().trim().min(1).max(32).optional(),
   range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("7d"),
+  resolution: chartResolutionSchema.optional(),
   symbol: z.string().trim().min(2).max(32)
     .transform((value) => value.toUpperCase().replace(/[^A-Z0-9]/g, ""))
     .refine((value) => value.length >= 2, {
@@ -95,6 +120,7 @@ export async function getInstitutionalMacroSnapshot(
     mode: parsedQuery.mode,
     module: parsedQuery.module,
     range: parsedQuery.range,
+    resolution: parsedQuery.resolution,
     symbol: parsedQuery.symbol,
     timezone: parsedQuery.timezone,
   });

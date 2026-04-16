@@ -22,7 +22,7 @@ void after(() => {
 });
 
 void it("getLiveStreamSnapshot usa stale cache para broker nao-binance quando refresh falha", async () => {
-  const staleCacheKey = "crypto:chart:live:bitcoin:usd:24h:okx";
+  const staleCacheKey = "crypto:chart:live:bitcoin:usd:24h:auto:okx";
 
   memoryCache.set(
     staleCacheKey,

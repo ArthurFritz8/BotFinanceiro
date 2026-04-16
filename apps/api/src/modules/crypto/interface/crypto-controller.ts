@@ -48,18 +48,43 @@ const spotPriceBatchQuerySchema = z.object({
   currency: z.string().trim().min(2).max(10).default("usd"),
 });
 
+const liveChartExchangeSchema = z.enum(["auto", "binance", "bybit", "coinbase", "kraken", "okx"]);
+const chartResolutionSchema = z.enum([
+  "1",
+  "2",
+  "3",
+  "5",
+  "10",
+  "15",
+  "30",
+  "45",
+  "60",
+  "120",
+  "180",
+  "240",
+  "1S",
+  "5S",
+  "10S",
+  "15S",
+  "30S",
+  "45S",
+  "D",
+  "W",
+  "M",
+]);
+
 const chartQuerySchema = z.object({
   assetId: z.string().trim().min(1).default("bitcoin"),
   currency: z.string().trim().min(2).max(10).default("usd"),
   range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("7d"),
+  resolution: chartResolutionSchema.optional(),
 });
-
-const liveChartExchangeSchema = z.enum(["auto", "binance", "bybit", "coinbase", "kraken", "okx"]);
 
 const liveChartQuerySchema = z.object({
   assetId: z.string().trim().min(1).default("bitcoin"),
   exchange: liveChartExchangeSchema.default("binance"),
   range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("24h"),
+  resolution: chartResolutionSchema.optional(),
 });
 
 const strategyChartQuerySchema = z.object({
@@ -67,6 +92,7 @@ const strategyChartQuerySchema = z.object({
   exchange: liveChartExchangeSchema.default("binance"),
   mode: z.enum(["delayed", "live"]).default("delayed"),
   range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("7d"),
+  resolution: chartResolutionSchema.optional(),
 });
 
 const liveStreamQuerySchema = z.object({
@@ -74,6 +100,7 @@ const liveStreamQuerySchema = z.object({
   exchange: liveChartExchangeSchema.default("binance"),
   intervalMs: z.coerce.number().int().min(500).max(15000).default(1000),
   range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("24h"),
+  resolution: chartResolutionSchema.optional(),
 });
 
 const marketOverviewQuerySchema = z.object({
@@ -156,7 +183,12 @@ export async function getSpotPriceBatch(request: FastifyRequest, reply: FastifyR
 
 export async function getChart(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const parsedQuery = chartQuerySchema.parse(request.query);
-  const chart = await cryptoChartService.getChart(parsedQuery);
+  const chart = await cryptoChartService.getChart({
+    assetId: parsedQuery.assetId,
+    currency: parsedQuery.currency,
+    range: parsedQuery.range,
+    resolution: parsedQuery.resolution,
+  });
 
   void reply.send(buildSuccessResponse(request.id, chart));
 }
@@ -167,6 +199,7 @@ export async function getLiveChart(request: FastifyRequest, reply: FastifyReply)
     assetId: parsedQuery.assetId,
     broker: parsedQuery.exchange,
     range: parsedQuery.range,
+    resolution: parsedQuery.resolution,
   });
 
   void reply.send(buildSuccessResponse(request.id, chart));
@@ -180,6 +213,7 @@ export async function getCryptoStrategyChart(request: FastifyRequest, reply: Fas
       assetId: parsedQuery.assetId,
       broker: parsedQuery.exchange,
       range: parsedQuery.range,
+      resolution: parsedQuery.resolution,
     });
 
     void reply.send(buildSuccessResponse(request.id, chart));
@@ -190,6 +224,7 @@ export async function getCryptoStrategyChart(request: FastifyRequest, reply: Fas
     assetId: parsedQuery.assetId,
     currency: "usd",
     range: parsedQuery.range,
+    resolution: parsedQuery.resolution,
   });
 
   void reply.send(buildSuccessResponse(request.id, chart));
@@ -282,6 +317,7 @@ export function streamLiveChart(request: FastifyRequest, reply: FastifyReply): v
         assetId: parsedQuery.assetId,
         broker: parsedQuery.exchange,
         range: parsedQuery.range,
+        resolution: parsedQuery.resolution,
       });
 
       if (isClosed) {

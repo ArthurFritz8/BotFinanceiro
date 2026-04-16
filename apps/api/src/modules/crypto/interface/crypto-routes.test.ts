@@ -1371,7 +1371,7 @@ void it("GET /v1/crypto/live-chart valida exchange invalida", async () => {
 });
 
 void it("GET /v1/crypto/live-chart usa cache stale quando refresh live falha", async () => {
-  const staleCacheKey = "crypto:chart:live:bitcoin:usd:24h:binance";
+  const staleCacheKey = "crypto:chart:live:bitcoin:usd:24h:auto:binance";
 
   memoryCache.set(
     staleCacheKey,

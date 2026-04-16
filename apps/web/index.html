@@ -353,13 +353,30 @@
             </button>
           </div>
 
-          <div id="chart-interval-switch" class="chart-interval-switch" aria-label="Intervalos rapidos">
-            <button type="button" class="interval-chip" data-interval="1">1m</button>
-            <button type="button" class="interval-chip" data-interval="5">5m</button>
-            <button type="button" class="interval-chip is-active" data-interval="60">1h</button>
-            <button type="button" class="interval-chip" data-interval="240">4h</button>
-            <button type="button" class="interval-chip" data-interval="1D">1D</button>
-            <button type="button" class="interval-chip" data-interval="1W">1W</button>
+          <div class="chart-timeframe-shell">
+            <div id="chart-interval-switch" class="chart-interval-switch" aria-label="Intervalos favoritos"></div>
+
+            <button
+              type="button"
+              id="chart-interval-menu-button"
+              class="chart-interval-menu-button"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              aria-controls="chart-interval-menu"
+            >
+              <span id="chart-interval-menu-current">1 hora</span>
+              <span class="chart-interval-menu-caret" aria-hidden="true">▾</span>
+            </button>
+
+            <div
+              id="chart-interval-menu"
+              class="chart-interval-menu is-hidden"
+              role="menu"
+              aria-label="Selecionar intervalo"
+            >
+              <p class="chart-interval-menu-hint">+ Adicionar intervalo personalizado...</p>
+              <div id="chart-interval-menu-list" class="chart-interval-menu-list"></div>
+            </div>
           </div>
         </div>
 

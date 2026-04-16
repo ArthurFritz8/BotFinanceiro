@@ -1275,6 +1275,15 @@ body.sidebar-collapsed .app-shell {
   margin-top: 0.72rem;
 }
 
+.chart-timeframe-shell {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: flex-end;
+  position: relative;
+}
+
 .chart-view-switch {
   background: rgba(7, 18, 33, 0.7);
   border: 1px solid rgba(120, 164, 220, 0.34);
@@ -1306,7 +1315,7 @@ body.sidebar-collapsed .app-shell {
   display: flex;
   flex-wrap: wrap;
   gap: 0.34rem;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .interval-chip {
@@ -1325,6 +1334,167 @@ body.sidebar-collapsed .app-shell {
   background: rgba(44, 196, 255, 0.23);
   border-color: rgba(118, 226, 255, 0.78);
   color: #f5fdff;
+}
+
+.chart-interval-menu-button {
+  align-items: center;
+  background: rgba(8, 22, 38, 0.82);
+  border: 1px solid rgba(117, 166, 224, 0.5);
+  border-radius: 8px;
+  color: #d7ebff;
+  cursor: pointer;
+  display: inline-flex;
+  font-family: inherit;
+  font-size: 0.73rem;
+  font-weight: 700;
+  gap: 0.4rem;
+  justify-content: space-between;
+  min-width: 140px;
+  padding: 0.34rem 0.52rem;
+  text-align: left;
+}
+
+.chart-interval-menu-button[aria-expanded="true"] {
+  border-color: rgba(126, 234, 255, 0.82);
+  box-shadow: 0 0 0 2px rgba(44, 196, 255, 0.18);
+}
+
+.chart-interval-menu-caret {
+  color: #96b7de;
+  font-size: 0.7rem;
+}
+
+.chart-interval-menu {
+  background: rgba(5, 18, 34, 0.97);
+  border: 1px solid rgba(120, 164, 220, 0.42);
+  border-radius: 12px;
+  box-shadow: 0 16px 30px rgba(5, 12, 24, 0.48);
+  max-height: 420px;
+  min-width: 300px;
+  overflow: hidden;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.34rem);
+  z-index: 30;
+}
+
+.chart-interval-menu.is-hidden {
+  display: none;
+}
+
+.chart-interval-menu-hint {
+  border-bottom: 1px solid rgba(116, 164, 222, 0.24);
+  color: #89b0dc;
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  margin: 0;
+  padding: 0.5rem 0.62rem;
+}
+
+.chart-interval-menu-list {
+  display: grid;
+  gap: 0.1rem;
+  max-height: 360px;
+  overflow: auto;
+  padding: 0.28rem;
+}
+
+.chart-interval-menu-list::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+.chart-interval-menu-list::-webkit-scrollbar-track {
+  background: rgba(16, 31, 50, 0.7);
+  border-radius: 999px;
+}
+
+.chart-interval-menu-list::-webkit-scrollbar-thumb {
+  background: rgba(128, 170, 225, 0.5);
+  border-radius: 999px;
+}
+
+.chart-interval-group {
+  border-top: 1px solid rgba(114, 157, 215, 0.2);
+  display: grid;
+  gap: 0.16rem;
+  padding: 0.38rem 0.18rem 0.16rem;
+}
+
+.chart-interval-group:first-child {
+  border-top: none;
+}
+
+.chart-interval-group-title {
+  color: #7da3ce;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 0 0.26rem;
+  text-transform: uppercase;
+}
+
+.chart-interval-option {
+  align-items: center;
+  display: grid;
+  gap: 0.26rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.chart-interval-option-select {
+  align-items: center;
+  background: rgba(8, 22, 38, 0.72);
+  border: 1px solid rgba(117, 166, 224, 0.3);
+  border-radius: 8px;
+  color: #d9ebff;
+  cursor: pointer;
+  display: flex;
+  font-family: inherit;
+  font-size: 0.7rem;
+  justify-content: space-between;
+  padding: 0.36rem 0.46rem;
+  text-align: left;
+}
+
+.chart-interval-option-select:hover {
+  background: rgba(17, 36, 60, 0.78);
+}
+
+.chart-interval-option-select.is-active {
+  background: rgba(44, 196, 255, 0.2);
+  border-color: rgba(126, 234, 255, 0.8);
+  color: #f4fcff;
+}
+
+.chart-interval-option-meta {
+  color: #9cb9dd;
+  font-size: 0.6rem;
+  letter-spacing: 0.03em;
+  margin-left: 0.42rem;
+}
+
+.chart-interval-option-star {
+  align-items: center;
+  background: rgba(8, 22, 38, 0.78);
+  border: 1px solid rgba(117, 166, 224, 0.32);
+  border-radius: 8px;
+  color: #89acd4;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 0.78rem;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
+.chart-interval-option-star:hover {
+  background: rgba(17, 36, 60, 0.84);
+  color: #d4e8ff;
+}
+
+.chart-interval-option-star.is-favorite {
+  border-color: rgba(255, 213, 122, 0.76);
+  color: #ffd57a;
 }
 
 .terminal-helper {
@@ -3637,8 +3807,17 @@ body.sidebar-collapsed .app-shell {
     flex-direction: column;
   }
 
+  .chart-timeframe-shell {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
   .chart-interval-switch {
     justify-content: flex-start;
+  }
+
+  .chart-interval-menu-button {
+    min-width: 190px;
   }
 
   .chart-toolbar {
@@ -3792,6 +3971,23 @@ body.sidebar-collapsed .app-shell {
 
   .chart-interval-switch {
     justify-content: flex-start;
+  }
+
+  .chart-timeframe-shell {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .chart-interval-menu-button {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .chart-interval-menu {
+    left: 0;
+    min-width: 0;
+    right: 0;
+    width: 100%;
   }
 
   .chart-buttons {
