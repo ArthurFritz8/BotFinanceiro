@@ -129,6 +129,12 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /const INTELLIGENCE_SYNC_ALERT_WARNING_P95_MS = 1200/);
   assert.match(mainSource, /const INTELLIGENCE_SYNC_ALERT_CRITICAL_P95_MS = 2000/);
   assert.match(mainSource, /const INTELLIGENCE_SYNC_TELEMETRY_ENDPOINT = "\/v1\/crypto\/intelligence-sync\/telemetry"/);
+  assert.match(mainSource, /const BINARY_OPTIONS_GHOST_AUDIT_SETTLEMENT_ENDPOINT = "\/v1\/binary-options\/ghost-audit\/settlements"/);
+  assert.match(mainSource, /const BINARY_OPTIONS_GHOST_AUDIT_HISTORY_ENDPOINT = "\/v1\/binary-options\/ghost-audit\/history"/);
+  assert.match(mainSource, /const BINARY_OPTIONS_GHOST_AUDIT_HISTORY_REFRESH_MS = 20000/);
+  assert.match(mainSource, /const BINARY_OPTIONS_GHOST_AUDIT_HISTORY_LIMIT = 300/);
+  assert.match(mainSource, /const BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION = "session"/);
+  assert.match(mainSource, /const BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_INSTITUTIONAL = "institutional"/);
   assert.match(mainSource, /const INTELLIGENCE_SYNC_HEALTH_ENDPOINT = "\/internal\/health\/intelligence-sync"/);
   assert.match(mainSource, /const INTELLIGENCE_SYNC_HEALTH_REFRESH_MS = 20000/);
   assert.match(mainSource, /const INTELLIGENCE_SYNC_HEALTH_STALE_AFTER_MS = 90000/);
@@ -141,6 +147,8 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /let intelligenceSyncHealthInFlight = false;/);
   assert.match(mainSource, /let intelligenceSyncBackendHealthSnapshot = null;/);
   assert.match(mainSource, /let intelligenceSyncBackendHealthError = "";/);
+  assert.match(mainSource, /let binaryOptionsGhostAuditBackendState = createBinaryOptionsGhostAuditBackendState\(\);/);
+  assert.match(mainSource, /let binaryOptionsGhostAuditViewMode = BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION;/);
   assert.match(mainSource, /function resolveAutoChartPrimaryBroker\(\)/);
   assert.match(mainSource, /function resolveChartRangeForTerminalInterval\(interval\)/);
   assert.match(mainSource, /function syncChartRangeWithTerminalInterval\(interval, options = \{\}\)/);
@@ -148,6 +156,15 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /function canRunInstitutionalMacroForSymbol\(symbol\)/);
   assert.match(mainSource, /function createIntelligenceSyncCorrelationId\(\)/);
   assert.match(mainSource, /function publishIntelligenceSyncTelemetryToBackend\(input = \{\}\)/);
+  assert.match(mainSource, /function createBinaryOptionsGhostAuditBackendState\(\)/);
+  assert.match(mainSource, /function normalizeBinaryOptionsGhostAuditViewMode\(value\)/);
+  assert.match(mainSource, /function getBinaryOptionsGhostAuditSessionId\(\)/);
+  assert.match(mainSource, /function resetBinaryOptionsGhostAuditBackendState\(\)/);
+  assert.match(mainSource, /function setBinaryOptionsGhostAuditViewMode\(nextMode, options = \{\}\)/);
+  assert.match(mainSource, /function buildBinaryOptionsGhostAuditHistoryRequestKey\(snapshot\)/);
+  assert.match(mainSource, /function refreshBinaryOptionsGhostAuditHistory\(snapshot, options = \{\}\)/);
+  assert.match(mainSource, /function getBinaryOptionsGhostBackendStats\(state = binaryOptionsGhostAuditBackendState\)/);
+  assert.match(mainSource, /function buildBinaryOptionsGhostBackendStatusMessage\(ghostBackendStats\)/);
   assert.match(mainSource, /function syncIntelligenceDeskForCurrentContext\(options = \{\}\)/);
   assert.match(mainSource, /function scheduleChartContextSync\(options = \{\}\)/);
   assert.match(mainSource, /function publishIntelligenceSyncTelemetry\(\)/);
@@ -162,6 +179,7 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /analysisPanel\.dataset\.syncAlertLevel = safeSummary\.alertLevel/);
   assert.match(mainSource, /handleIntelligenceSyncOpsRouteChange\(safeRoute\);/);
   assert.match(mainSource, /buildApiUrl\(INTELLIGENCE_SYNC_HEALTH_ENDPOINT\)/);
+  assert.match(mainSource, /buildApiUrl\(requestPath\)/);
   assert.match(mainSource, /"x-internal-token": INTELLIGENCE_SYNC_INTERNAL_TOKEN/);
   assert.match(mainSource, /"x-intelligence-correlation-id": correlationId/);
   assert.match(mainSource, /buildApiUrl\(INTELLIGENCE_SYNC_TELEMETRY_ENDPOINT\)/);
@@ -175,6 +193,9 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /requestCryptoChartEndpoint\([\s\S]*targetMode,[\s\S]*"auto",[\s\S]*resolution,[\s\S]*\)/);
   assert.match(mainSource, /AUTO inteligente: ajuste de provider/);
   assert.match(mainSource, /displayProvider: statusBroker,/);
+  assert.match(mainSource, /Ghost Tracker Persistido \(Sessao Atual\)/);
+  assert.match(mainSource, /Ghost Tracker Institucional \(Backend\)/);
+  assert.match(mainSource, /data-ghost-audit-view-mode=/);
   assert.match(
     mainSource,
     /chartSymbolInput\.addEventListener\("input", \(\) => \{[\s\S]*scheduleChartContextSync\(\{[\s\S]*silent: true,[\s\S]*\}\);/,
@@ -208,6 +229,9 @@ test("styles.css contem classes base do prop desk", async () => {
   assert.match(stylesSource, /\.analysis-sync-ops-badge\[data-level="critical"\]/);
   assert.match(stylesSource, /\.analysis-sync-ops-grid\s*\{/);
   assert.match(stylesSource, /\.analysis-sync-ops-updated\s*\{/);
+  assert.match(stylesSource, /\.analysis-binary-ghost-view-toggle\s*\{/);
+  assert.match(stylesSource, /\.analysis-binary-ghost-view-button\s*\{/);
+  assert.match(stylesSource, /\.analysis-binary-ghost-view-button\.is-active\s*\{/);
   assert.match(stylesSource, /\.prop-tracker-status\[data-state="good"\]/);
   assert.match(stylesSource, /\.prop-tracker-status\[data-state="alert"\]/);
   assert.match(stylesSource, /\.chart-status\[data-mode="warn"\]/);

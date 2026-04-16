@@ -148,6 +148,14 @@ const environmentSchema = z
       .trim()
       .min(1)
       .default(".runtime/copilot-chat-audit.json"),
+    BINARY_OPTIONS_GHOST_AUDIT_ENABLED: booleanFromString.default("true"),
+    BINARY_OPTIONS_GHOST_AUDIT_MAX_ITEMS: z.coerce.number().int().min(50).max(200000).default(20000),
+    BINARY_OPTIONS_GHOST_AUDIT_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(120),
+    BINARY_OPTIONS_GHOST_AUDIT_FILE_PATH: z
+      .string()
+      .trim()
+      .min(1)
+      .default(".runtime/binary-options-ghost-audit.json"),
     YAHOO_FINANCE_API_BASE_URL: z.string().url(),
     YAHOO_FINANCE_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
     BINANCE_API_BASE_URL: z.string().url().default("https://api.binance.com"),

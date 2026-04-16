@@ -152,6 +152,15 @@ type BinaryMarketStructureBias = "bearish" | "bullish" | "neutral";
 type BinaryMarketSessionLabel = "asia" | "london" | "new_york" | "off_session" | "overlap";
 type BinaryMarketLiquidityHeat = "high" | "low" | "medium";
 type BinarySmcConfluenceTier = "high" | "low" | "medium";
+type BinaryCandlePatternSignal = "bearish" | "bullish" | "neutral";
+type BinaryCandlePattern =
+  | "bearish_engulfing"
+  | "bearish_pinbar"
+  | "bullish_engulfing"
+  | "bullish_pinbar"
+  | "none";
+type BinaryRejectionSignal = "bearish" | "bullish" | "none";
+type BinaryBollingerTouch = "inside" | "lower" | "upper";
 
 interface RetryableErrorDetails {
   retryable?: boolean;
@@ -184,6 +193,19 @@ interface TimeResolutionPlan {
 }
 
 type ResolutionPlan = TickResolutionPlan | TimeResolutionPlan;
+
+interface BollingerBandsSnapshot {
+  bandwidthPercent: number;
+  lower: number;
+  middle: number;
+  upper: number;
+}
+
+interface CandlePatternSnapshot {
+  pattern: BinaryCandlePattern;
+  signal: BinaryCandlePatternSignal;
+  strength: number;
+}
 
 export interface BinaryOptionsChartPoint {
   close: number;
@@ -232,6 +254,14 @@ export interface BinaryOptionsSmcConfluence {
 
 export interface BinaryOptionsChartInsights {
   atrPercent: number;
+  bollingerBandwidthPercent: number;
+  bollingerLower: number;
+  bollingerMiddle: number;
+  bollingerTouch: BinaryBollingerTouch;
+  bollingerUpper: number;
+  candlePattern: BinaryCandlePattern;
+  candlePatternSignal: BinaryCandlePatternSignal;
+  candlePatternStrength: number;
   changePercent: number;
   confidenceScore: number;
   currentPrice: number;
@@ -244,6 +274,8 @@ export interface BinaryOptionsChartInsights {
   marketSession: BinaryOptionsMarketSession;
   marketStructure: BinaryOptionsMarketStructure;
   momentumPercent: number;
+  momentumVelocityPercentPerSecond: number;
+  rejectionSignal: BinaryRejectionSignal;
   resistanceLevel: number;
   rsi14: number | null;
   shortMovingAverage: number;
@@ -339,6 +371,10 @@ function roundPrice(value: number): number {
 
 function roundPercent(value: number): number {
   return Number(value.toFixed(2));
+}
+
+function roundMicroPercent(value: number): number {
+  return Number(value.toFixed(5));
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -485,6 +521,177 @@ function computeAtrPercent(points: BinaryOptionsChartPoint[], period = 14): numb
   }
 
   return roundPercent((atr / lastPoint.close) * 100);
+}
+
+function computeMomentumVelocityPercentPerSecond(
+  points: BinaryOptionsChartPoint[],
+  sampleSize = 14,
+): number {
+  if (points.length < 2) {
+    return 0;
+  }
+
+  const boundedSize = Math.max(2, sampleSize);
+  const recentPoints = points.slice(-boundedSize);
+  const firstPoint = recentPoints[0];
+  const lastPoint = recentPoints[recentPoints.length - 1];
+
+  if (!firstPoint || !lastPoint || firstPoint.close <= 0) {
+    return 0;
+  }
+
+  const firstTimestampMs = Date.parse(firstPoint.timestamp);
+  const lastTimestampMs = Date.parse(lastPoint.timestamp);
+  const elapsedSeconds =
+    Number.isFinite(firstTimestampMs)
+    && Number.isFinite(lastTimestampMs)
+    && lastTimestampMs > firstTimestampMs
+      ? (lastTimestampMs - firstTimestampMs) / 1000
+      : Math.max(1, recentPoints.length - 1);
+
+  if (elapsedSeconds <= 0) {
+    return 0;
+  }
+
+  const variationPercent = ((lastPoint.close - firstPoint.close) / firstPoint.close) * 100;
+  return roundMicroPercent(variationPercent / elapsedSeconds);
+}
+
+function computeBollingerBands(
+  values: number[],
+  period = 20,
+  deviationMultiplier = 2,
+): BollingerBandsSnapshot {
+  if (values.length === 0) {
+    return {
+      bandwidthPercent: 0,
+      lower: 0,
+      middle: 0,
+      upper: 0,
+    };
+  }
+
+  const boundedPeriod = Math.max(2, period);
+  const windowValues = values.slice(-boundedPeriod);
+  const middle = computeAverage(windowValues);
+  const deviation = computeStandardDeviation(windowValues);
+  const upper = middle + deviation * deviationMultiplier;
+  const lower = middle - deviation * deviationMultiplier;
+  const bandwidthPercent = middle <= 0 ? 0 : ((upper - lower) / middle) * 100;
+
+  return {
+    bandwidthPercent,
+    lower,
+    middle,
+    upper,
+  };
+}
+
+function resolveBollingerTouch(
+  currentPrice: number,
+  bands: BollingerBandsSnapshot,
+): BinaryBollingerTouch {
+  if (bands.lower > 0 && currentPrice <= bands.lower * 1.0008) {
+    return "lower";
+  }
+
+  if (bands.upper > 0 && currentPrice >= bands.upper * 0.9992) {
+    return "upper";
+  }
+
+  return "inside";
+}
+
+function detectCandlePattern(points: BinaryOptionsChartPoint[]): CandlePatternSnapshot {
+  if (points.length < 2) {
+    return {
+      pattern: "none",
+      signal: "neutral",
+      strength: 0,
+    };
+  }
+
+  const previousPoint = points[points.length - 2];
+  const currentPoint = points[points.length - 1];
+
+  if (!previousPoint || !currentPoint) {
+    return {
+      pattern: "none",
+      signal: "neutral",
+      strength: 0,
+    };
+  }
+
+  const previousBody = Math.abs(previousPoint.close - previousPoint.open);
+  const currentBody = Math.abs(currentPoint.close - currentPoint.open);
+  const currentRange = Math.max(1e-8, currentPoint.high - currentPoint.low);
+  const upperWick = Math.max(0, currentPoint.high - Math.max(currentPoint.open, currentPoint.close));
+  const lowerWick = Math.max(0, Math.min(currentPoint.open, currentPoint.close) - currentPoint.low);
+  const bodyRatio = currentBody / currentRange;
+
+  const bullishEngulfing =
+    previousPoint.close < previousPoint.open
+    && currentPoint.close > currentPoint.open
+    && currentPoint.open <= previousPoint.close
+    && currentPoint.close >= previousPoint.open
+    && currentBody >= previousBody * 0.9;
+
+  if (bullishEngulfing) {
+    return {
+      pattern: "bullish_engulfing",
+      signal: "bullish",
+      strength: 1,
+    };
+  }
+
+  const bearishEngulfing =
+    previousPoint.close > previousPoint.open
+    && currentPoint.close < currentPoint.open
+    && currentPoint.open >= previousPoint.close
+    && currentPoint.close <= previousPoint.open
+    && currentBody >= previousBody * 0.9;
+
+  if (bearishEngulfing) {
+    return {
+      pattern: "bearish_engulfing",
+      signal: "bearish",
+      strength: 1,
+    };
+  }
+
+  const bullishPinbar =
+    bodyRatio <= 0.42
+    && lowerWick >= currentBody * 2.4
+    && upperWick <= currentBody * 1.1
+    && currentPoint.close >= currentPoint.open;
+
+  if (bullishPinbar) {
+    return {
+      pattern: "bullish_pinbar",
+      signal: "bullish",
+      strength: 0.78,
+    };
+  }
+
+  const bearishPinbar =
+    bodyRatio <= 0.42
+    && upperWick >= currentBody * 2.4
+    && lowerWick <= currentBody * 1.1
+    && currentPoint.close <= currentPoint.open;
+
+  if (bearishPinbar) {
+    return {
+      pattern: "bearish_pinbar",
+      signal: "bearish",
+      strength: 0.78,
+    };
+  }
+
+  return {
+    pattern: "none",
+    signal: "neutral",
+    strength: 0,
+  };
 }
 
 function percentile(sortedValues: number[], ratio: number): number {
@@ -1127,6 +1334,10 @@ function buildInsights(points: BinaryOptionsChartPoint[]): BinaryOptionsChartIns
   const macd = macdSeries[macdSeries.length - 1] ?? 0;
   const macdSignal = macdSignalSeries[macdSignalSeries.length - 1] ?? 0;
   const macdHistogram = macd - macdSignal;
+  const momentumVelocityPercentPerSecond = computeMomentumVelocityPercentPerSecond(points);
+  const bollingerBands = computeBollingerBands(prices, 20, 2);
+  const bollingerTouch = resolveBollingerTouch(currentPrice, bollingerBands);
+  const candlePattern = detectCandlePattern(points);
 
   const trend = emaFast > emaSlow * 1.0002
     ? "bullish"
@@ -1134,29 +1345,57 @@ function buildInsights(points: BinaryOptionsChartPoint[]): BinaryOptionsChartIns
       ? "bearish"
       : "sideways";
 
+  const bullishRejectionSignal =
+    rsi14 !== null
+    && rsi14 <= 37
+    && bollingerTouch === "lower"
+    && (candlePattern.signal === "bullish" || momentumVelocityPercentPerSecond >= 0.0015);
+  const bearishRejectionSignal =
+    rsi14 !== null
+    && rsi14 >= 63
+    && bollingerTouch === "upper"
+    && (candlePattern.signal === "bearish" || momentumVelocityPercentPerSecond <= -0.0015);
+  const rejectionSignal: BinaryRejectionSignal = bullishRejectionSignal
+    ? "bullish"
+    : bearishRejectionSignal
+      ? "bearish"
+      : "none";
+
   const tradeAction: BinaryTradeAction = (() => {
-    if (trend === "bullish" && momentumPercent > -0.05 && (rsi14 === null || rsi14 < 72)) {
+    if (rejectionSignal === "bullish") {
       return "buy";
     }
 
-    if (trend === "bearish" && momentumPercent < 0.05 && (rsi14 === null || rsi14 > 28)) {
+    if (rejectionSignal === "bearish") {
+      return "sell";
+    }
+
+    if (
+      candlePattern.signal === "bullish"
+      && momentumVelocityPercentPerSecond > 0.0008
+      && (rsi14 === null || rsi14 < 60)
+    ) {
+      return "buy";
+    }
+
+    if (
+      candlePattern.signal === "bearish"
+      && momentumVelocityPercentPerSecond < -0.0008
+      && (rsi14 === null || rsi14 > 40)
+    ) {
+      return "sell";
+    }
+
+    if (trend === "bullish" && momentumPercent > -0.08 && (rsi14 === null || rsi14 < 70)) {
+      return "buy";
+    }
+
+    if (trend === "bearish" && momentumPercent < 0.08 && (rsi14 === null || rsi14 > 30)) {
       return "sell";
     }
 
     return "wait";
   })();
-
-  const confidenceScore = clamp(
-    Math.round(
-      48
-      + Math.abs(momentumPercent) * 5.5
-      + (trend === "sideways" ? -8 : 8)
-      + Math.abs(macdHistogram) * 35
-      - Math.max(0, volatilityPercent - 4.2) * 2.2,
-    ),
-    5,
-    95,
-  );
 
   const tradeLevels = computeTradeLevels({
     atrPercent,
@@ -1180,8 +1419,48 @@ function buildInsights(points: BinaryOptionsChartPoint[]): BinaryOptionsChartIns
     volatilityPercent,
   });
 
+  const velocityComponent = clamp(Math.abs(momentumVelocityPercentPerSecond) * 9000, 0, 22);
+  const rejectionComponent = rejectionSignal === "none" ? 0 : 16;
+  const candleComponent = candlePattern.signal === "neutral" ? 0 : 10 * candlePattern.strength;
+  const rsiExtremaComponent = rsi14 !== null && (rsi14 <= 35 || rsi14 >= 65) ? 6 : 0;
+  const trendComponent = trend === "sideways" ? -2 : 3;
+  const bollingerCompressionComponent = bollingerBands.bandwidthPercent <= 1.4
+    ? 5
+    : bollingerBands.bandwidthPercent >= 4.8
+      ? -4
+      : 1;
+  const smcComponent = (smcConfluence.score - 50) * 0.12;
+  const macdComponent = clamp(Math.abs(macdHistogram) * 24, 0, 14);
+  const volatilityPenalty = Math.max(0, volatilityPercent - 5) * 2.6;
+
+  const confidenceScore = clamp(
+    Math.round(
+      42
+      + Math.abs(momentumPercent) * 3.2
+      + velocityComponent
+      + macdComponent
+      + rejectionComponent
+      + candleComponent
+      + rsiExtremaComponent
+      + trendComponent
+      + bollingerCompressionComponent
+      + smcComponent
+      - volatilityPenalty,
+    ),
+    5,
+    95,
+  );
+
   return {
     atrPercent: roundPercent(atrPercent),
+    bollingerBandwidthPercent: roundPercent(bollingerBands.bandwidthPercent),
+    bollingerLower: roundPrice(bollingerBands.lower),
+    bollingerMiddle: roundPrice(bollingerBands.middle),
+    bollingerTouch,
+    bollingerUpper: roundPrice(bollingerBands.upper),
+    candlePattern: candlePattern.pattern,
+    candlePatternSignal: candlePattern.signal,
+    candlePatternStrength: roundPercent(candlePattern.strength),
     changePercent: roundPercent(changePercent),
     confidenceScore,
     currentPrice: roundPrice(currentPrice),
@@ -1194,6 +1473,8 @@ function buildInsights(points: BinaryOptionsChartPoint[]): BinaryOptionsChartIns
     marketSession,
     marketStructure,
     momentumPercent: roundPercent(momentumPercent),
+    momentumVelocityPercentPerSecond,
+    rejectionSignal,
     resistanceLevel: roundPrice(resistanceLevel),
     rsi14,
     shortMovingAverage: roundPrice(shortMovingAverage),

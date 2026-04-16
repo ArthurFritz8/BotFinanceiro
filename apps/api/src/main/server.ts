@@ -3,6 +3,7 @@ import { memeRadarSyncJobRunner } from "../jobs/meme-radar-sync-job-runner.js";
 import { operationalHealthSnapshotJobRunner } from "../jobs/operational-health-snapshot-job-runner.js";
 import { env } from "../shared/config/env.js";
 import { logger } from "../shared/logger/logger.js";
+import { binaryOptionsGhostAuditStore } from "../shared/observability/binary-options-ghost-audit-store.js";
 import { copilotChatAuditStore } from "../shared/observability/copilot-chat-audit-store.js";
 import { closePostgresPool } from "../shared/persistence/postgres-pool.js";
 import { runPostgresMigrations } from "../shared/persistence/postgres-migrator.js";
@@ -19,6 +20,7 @@ async function startServer(): Promise<void> {
       await runPostgresMigrations();
     }
 
+    await binaryOptionsGhostAuditStore.initialize();
     await copilotChatAuditStore.initialize();
 
     await app.listen({

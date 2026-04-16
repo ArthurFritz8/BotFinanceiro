@@ -2528,6 +2528,161 @@ body.sidebar-collapsed .app-shell {
   font-size: 0.8rem;
 }
 
+.analysis-binary-ghost {
+  gap: 0.34rem;
+}
+
+.analysis-binary-ghost[data-state="cold"] {
+  border-color: rgba(118, 166, 224, 0.34);
+}
+
+.analysis-binary-ghost[data-state="warm"] {
+  border-color: rgba(255, 197, 118, 0.54);
+}
+
+.analysis-binary-ghost[data-state="hot"] {
+  border-color: rgba(67, 221, 159, 0.56);
+}
+
+.analysis-binary-ghost-head {
+  align-items: center;
+  display: flex;
+  gap: 0.4rem;
+  justify-content: space-between;
+}
+
+.analysis-binary-ghost-badge {
+  background: rgba(44, 196, 255, 0.2);
+  border: 1px solid rgba(112, 221, 255, 0.54);
+  border-radius: 999px;
+  color: #def4ff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.14rem 0.42rem;
+  text-transform: uppercase;
+}
+
+.analysis-binary-ghost-view-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.28rem;
+}
+
+.analysis-binary-ghost-view-button {
+  align-items: center;
+  background: rgba(14, 34, 55, 0.86);
+  border: 1px solid rgba(118, 166, 224, 0.35);
+  border-radius: 999px;
+  color: #b8d7f5;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.16rem 0.44rem;
+  text-transform: uppercase;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.analysis-binary-ghost-view-button:hover {
+  border-color: rgba(140, 196, 255, 0.6);
+  color: #e6f3ff;
+}
+
+.analysis-binary-ghost-view-button.is-active {
+  background: rgba(44, 196, 255, 0.2);
+  border-color: rgba(112, 221, 255, 0.62);
+  color: #e7f7ff;
+}
+
+.analysis-binary-ghost-view-button:focus-visible {
+  outline: 2px solid rgba(112, 221, 255, 0.8);
+  outline-offset: 1px;
+}
+
+.analysis-binary-ghost-metrics {
+  display: grid;
+  gap: 0.34rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.analysis-binary-ghost-metrics article {
+  background: rgba(7, 20, 36, 0.76);
+  border: 1px solid rgba(118, 166, 224, 0.32);
+  border-radius: 9px;
+  display: grid;
+  gap: 0.12rem;
+  padding: 0.34rem 0.4rem;
+}
+
+.analysis-binary-ghost-metrics span {
+  color: #95b2d6;
+  font-size: 0.56rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.analysis-binary-ghost-metrics strong {
+  color: #ebf6ff;
+  font-size: 0.78rem;
+}
+
+.analysis-trigger-heat {
+  background: rgba(9, 24, 41, 0.75);
+  border: 1px solid rgba(118, 166, 224, 0.34);
+  border-radius: 10px;
+  display: grid;
+  gap: 0.24rem;
+  margin-top: 0.26rem;
+  padding: 0.42rem;
+}
+
+.analysis-trigger-heat[data-state="warm"] {
+  border-color: rgba(255, 197, 118, 0.52);
+}
+
+.analysis-trigger-heat[data-state="hot"] {
+  border-color: rgba(67, 221, 159, 0.56);
+}
+
+.analysis-trigger-heat-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.analysis-trigger-heat-head strong,
+.analysis-trigger-heat-head span {
+  color: #d8edff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.analysis-trigger-heat-track {
+  background: rgba(17, 36, 58, 0.85);
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.analysis-trigger-heat-fill {
+  background: linear-gradient(90deg, rgba(117, 167, 226, 0.95), rgba(178, 208, 255, 0.95));
+  border-radius: 999px;
+  height: 100%;
+}
+
+.analysis-trigger-heat[data-state="warm"] .analysis-trigger-heat-fill {
+  background: linear-gradient(90deg, rgba(255, 179, 82, 0.92), rgba(255, 223, 150, 0.96));
+}
+
+.analysis-trigger-heat[data-state="hot"] .analysis-trigger-heat-fill {
+  background: linear-gradient(90deg, rgba(38, 213, 149, 0.9), rgba(101, 236, 188, 0.95));
+}
+
 .analysis-block {
   background: rgba(8, 22, 38, 0.72);
   border: 1px solid rgba(118, 166, 224, 0.34);
@@ -4136,6 +4291,19 @@ body.sidebar-collapsed .app-shell {
 
   .analysis-binary-kpi-grid {
     grid-template-columns: 1fr;
+  }
+
+  .analysis-binary-ghost-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .analysis-binary-ghost-view-toggle {
+    width: 100%;
+  }
+
+  .analysis-binary-ghost-view-button {
+    flex: 1;
+    justify-content: center;
   }
 
   .analysis-tab-button {

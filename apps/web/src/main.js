@@ -171,6 +171,12 @@ const INTELLIGENCE_SYNC_ALERT_WARNING_SUCCESS_RATE_PERCENT = 95;
 const INTELLIGENCE_SYNC_ALERT_CRITICAL_SUCCESS_RATE_PERCENT = 90;
 const INTELLIGENCE_SYNC_ALERT_MIN_INTERVAL_MS = 45000;
 const INTELLIGENCE_SYNC_TELEMETRY_ENDPOINT = "/v1/crypto/intelligence-sync/telemetry";
+const BINARY_OPTIONS_GHOST_AUDIT_SETTLEMENT_ENDPOINT = "/v1/binary-options/ghost-audit/settlements";
+const BINARY_OPTIONS_GHOST_AUDIT_HISTORY_ENDPOINT = "/v1/binary-options/ghost-audit/history";
+const BINARY_OPTIONS_GHOST_AUDIT_HISTORY_REFRESH_MS = 20000;
+const BINARY_OPTIONS_GHOST_AUDIT_HISTORY_LIMIT = 300;
+const BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION = "session";
+const BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_INSTITUTIONAL = "institutional";
 const INTELLIGENCE_SYNC_HEALTH_ENDPOINT = "/internal/health/intelligence-sync";
 const INTELLIGENCE_SYNC_HEALTH_REFRESH_MS = 20000;
 const INTELLIGENCE_SYNC_HEALTH_STALE_AFTER_MS = 90000;
@@ -1742,6 +1748,16 @@ const BINARY_OPTIONS_RISK_DEFAULT_STATE = Object.freeze({
   payoutPercent: 82,
   stake: 20,
 });
+const BINARY_OPTIONS_GHOST_TRACKER_DEFAULTS = Object.freeze({
+  cooldownSeconds: 20,
+  fallbackExpirySeconds: 60,
+  maxConcurrentSignals: 4,
+  maxNeutralProbability: 24,
+  minDirectionalProbability: 75,
+  minMomentumStrength: 34,
+  minProbabilityEdge: 6,
+  resultHistoryLimit: 30,
+});
 
 const messages = [];
 let isSending = false;
@@ -1866,6 +1882,9 @@ let propDeskState = {
 let binaryOptionsRiskState = {
   ...BINARY_OPTIONS_RISK_DEFAULT_STATE,
 };
+let binaryOptionsGhostTrackerState = createBinaryOptionsGhostTrackerState();
+let binaryOptionsGhostAuditBackendState = createBinaryOptionsGhostAuditBackendState();
+let binaryOptionsGhostAuditViewMode = BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION;
 let isPropDeskInitialized = false;
 let isWatchlistRiskSummaryCollapsed = false;
 
@@ -2038,6 +2057,11 @@ function setChartOperationalMode(nextMode, options = {}) {
   const normalizedMode = normalizeChartOperationalMode(nextMode);
   const hasChanged = normalizedMode !== chartOperationalMode;
   chartOperationalMode = normalizedMode;
+
+  if (hasChanged) {
+    resetBinaryOptionsGhostTrackerSession();
+    resetBinaryOptionsGhostAuditBackendState();
+  }
 
   if (chartOperationalModeSelect instanceof HTMLSelectElement) {
     chartOperationalModeSelect.value = normalizedMode;
@@ -6841,6 +6865,49 @@ function estimateMomentumPerSecondPercent(points) {
   return variationPercent / Math.max(elapsedSeconds, 1e-6);
 }
 
+function resolveBinaryOptionsTriggerHeat(input) {
+  const directionalProbability = Math.max(input.callProbability, input.putProbability);
+  const score = clampNumber(
+    roundNumber(
+      directionalProbability * 0.62
+      + input.momentumStrength * 0.48
+      - input.neutralProbability * 0.35,
+      1,
+    ),
+    0,
+    100,
+  );
+  const dominantSide = input.callProbability >= input.putProbability ? "CALL" : "PUT";
+
+  if (directionalProbability >= 79 && input.momentumStrength >= 68 && input.neutralProbability <= 18) {
+    return {
+      dominantSide,
+      guidance: `Fluxo quente para ${dominantSide}. Janela curta valida, sem perseguir esticada.`,
+      score,
+      state: "hot",
+      title: "Gatilho quente",
+    };
+  }
+
+  if (directionalProbability >= 69 && input.momentumStrength >= 44 && input.neutralProbability <= 30) {
+    return {
+      dominantSide,
+      guidance: `Fluxo aquecendo para ${dominantSide}. Aguardar micro-confirmacao no proximo candle melhora qualidade.`,
+      score,
+      state: "warm",
+      title: "Gatilho em aquecimento",
+    };
+  }
+
+  return {
+    dominantSide,
+    guidance: "Fluxo frio ou conflitado. Melhor aguardar novo ciclo para evitar clique de baixa assimetria.",
+    score,
+    state: "cold",
+    title: "Gatilho frio",
+  };
+}
+
 function buildMicroTimingAnalysis(analysis, snapshot) {
   const points = Array.isArray(snapshot?.points) ? snapshot.points : [];
   const momentumPerSecondPercent = estimateMomentumPerSecondPercent(points);
@@ -6875,6 +6942,12 @@ function buildMicroTimingAnalysis(analysis, snapshot) {
       : momentumStrength >= 45
         ? "Aceleracao moderada"
         : "Fluxo comprimido";
+  const triggerHeat = resolveBinaryOptionsTriggerHeat({
+    callProbability,
+    momentumStrength,
+    neutralProbability,
+    putProbability,
+  });
 
   return {
     barSpacingSeconds,
@@ -6886,7 +6959,547 @@ function buildMicroTimingAnalysis(analysis, snapshot) {
     neutralProbability,
     putProbability,
     suggestedExpirySeconds,
+    triggerHeat,
   };
+}
+
+function createBinaryOptionsGhostTrackerState() {
+  return {
+    lastSignalAtMs: 0,
+    lastSettledAtMs: 0,
+    losses: 0,
+    openSignals: [],
+    pushes: 0,
+    recentResults: [],
+    sessionKey: "",
+    startedAtMs: Date.now(),
+    wins: 0,
+  };
+}
+
+function createBinaryOptionsGhostAuditBackendState() {
+  return {
+    error: "",
+    fetchedAtMs: 0,
+    history: null,
+    inFlight: false,
+    requestKey: "",
+  };
+}
+
+function normalizeBinaryOptionsGhostAuditViewMode(value) {
+  return value === BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_INSTITUTIONAL
+    ? BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_INSTITUTIONAL
+    : BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION;
+}
+
+function getBinaryOptionsGhostAuditSessionId() {
+  const sessionId = typeof chatSessionId === "string" ? chatSessionId.trim() : "";
+  return SESSION_ID_PATTERN.test(sessionId) ? sessionId : "";
+}
+
+function resetBinaryOptionsGhostTrackerSession() {
+  binaryOptionsGhostTrackerState = createBinaryOptionsGhostTrackerState();
+}
+
+function resetBinaryOptionsGhostAuditBackendState() {
+  binaryOptionsGhostAuditBackendState = createBinaryOptionsGhostAuditBackendState();
+  binaryOptionsGhostAuditViewMode = BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION;
+}
+
+function setBinaryOptionsGhostAuditViewMode(nextMode, options = {}) {
+  const normalizedMode = normalizeBinaryOptionsGhostAuditViewMode(nextMode);
+
+  if (normalizedMode === binaryOptionsGhostAuditViewMode && options.force !== true) {
+    return;
+  }
+
+  binaryOptionsGhostAuditViewMode = normalizedMode;
+  binaryOptionsGhostAuditBackendState.error = "";
+  binaryOptionsGhostAuditBackendState.fetchedAtMs = 0;
+  binaryOptionsGhostAuditBackendState.history = null;
+  binaryOptionsGhostAuditBackendState.requestKey = "";
+
+  renderDeepAnalysisPanel(currentChartSnapshot);
+
+  if (options.refresh !== false && currentChartSnapshot) {
+    void refreshBinaryOptionsGhostAuditHistory(currentChartSnapshot, {
+      force: true,
+    });
+  }
+}
+
+function buildBinaryOptionsGhostSessionKey(snapshot) {
+  const assetId = typeof snapshot?.assetId === "string" ? snapshot.assetId : "unknown";
+  const range = typeof snapshot?.range === "string" ? snapshot.range : "na";
+  const resolution = typeof snapshot?.resolution === "string" ? snapshot.resolution : "na";
+  const exchange = typeof snapshot?.exchange?.resolved === "string"
+    ? snapshot.exchange.resolved
+    : typeof snapshot?.provider === "string"
+      ? snapshot.provider
+      : "provider";
+
+  return `${assetId}:${range}:${resolution}:${exchange}`;
+}
+
+function getBinaryOptionsGhostTrackerStats(state = binaryOptionsGhostTrackerState) {
+  const resolvedTrades = state.wins + state.losses;
+  const winRate = resolvedTrades > 0 ? roundNumber((state.wins / resolvedTrades) * 100, 1) : 0;
+
+  return {
+    losses: state.losses,
+    openSignals: state.openSignals.length,
+    pushes: state.pushes,
+    resolvedTrades,
+    sampleState:
+      resolvedTrades >= 20 ? "amostra robusta" : resolvedTrades >= 8 ? "amostra moderada" : "amostra inicial",
+    wins: state.wins,
+    winRate,
+  };
+}
+
+function canFetchBinaryOptionsGhostAuditHistory() {
+  return typeof fetch === "function" && INTELLIGENCE_SYNC_INTERNAL_TOKEN.length >= 16;
+}
+
+function getBinaryOptionsGhostBackendStats(state = binaryOptionsGhostAuditBackendState) {
+  const summary = state.history && typeof state.history.summary === "object" ? state.history.summary : null;
+  const wins = Math.max(0, Math.round(toFiniteNumber(summary?.wins, 0)));
+  const losses = Math.max(0, Math.round(toFiniteNumber(summary?.losses, 0)));
+  const pushes = Math.max(0, Math.round(toFiniteNumber(summary?.pushes, 0)));
+  const resolvedTrades = Math.max(
+    0,
+    Math.round(toFiniteNumber(summary?.resolvedTrades, wins + losses)),
+  );
+  const winRate = clampNumber(
+    toFiniteNumber(summary?.winRatePercent, resolvedTrades > 0 ? (wins / resolvedTrades) * 100 : 0),
+    0,
+    100,
+  );
+  const totalMatched = Math.max(
+    0,
+    Math.round(toFiniteNumber(state.history?.totalMatched, resolvedTrades + pushes)),
+  );
+  const totalStored = Math.max(0, Math.round(toFiniteNumber(state.history?.totalStored, totalMatched)));
+
+  return {
+    enabled: canFetchBinaryOptionsGhostAuditHistory(),
+    error: state.error,
+    fetchedAtMs: state.fetchedAtMs,
+    hasSnapshot: summary !== null,
+    inFlight: state.inFlight,
+    losses,
+    pushes,
+    resolvedTrades,
+    sampleState:
+      resolvedTrades >= 40 ? "amostra institucional" : resolvedTrades >= 12 ? "amostra em crescimento" : "amostra inicial",
+    totalMatched,
+    totalStored,
+    winRate,
+    wins,
+  };
+}
+
+function buildBinaryOptionsGhostBackendStatusMessage(ghostBackendStats) {
+  const isSessionView =
+    normalizeBinaryOptionsGhostAuditViewMode(binaryOptionsGhostAuditViewMode)
+    === BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION;
+
+  if (!ghostBackendStats.enabled) {
+    return "Backend audit indisponivel: defina VITE_INTERNAL_API_TOKEN para consultar historico interno.";
+  }
+
+  if (isSessionView && ghostBackendStats.error === "ghost-audit-session-id-invalid") {
+    return "Sessao atual sem sessionId valido para consultar o historico persistido.";
+  }
+
+  if (ghostBackendStats.inFlight && !ghostBackendStats.hasSnapshot) {
+    return isSessionView
+      ? "Sincronizando historico persistido da sessao atual..."
+      : "Sincronizando historico institucional...";
+  }
+
+  if (ghostBackendStats.error.length > 0 && !ghostBackendStats.hasSnapshot) {
+    return isSessionView
+      ? "Historico persistido da sessao indisponivel; mantendo auditoria local da sessao."
+      : "Historico institucional indisponivel; mantendo apenas auditoria local da sessao.";
+  }
+
+  if (ghostBackendStats.resolvedTrades <= 0) {
+    return isSessionView
+      ? "Sem base persistida para a sessao atual neste ativo."
+      : "Sem base persistida para este ativo ate o momento.";
+  }
+
+  if (ghostBackendStats.error.length > 0) {
+    return isSessionView
+      ? "Exibindo ultimo snapshot valido da sessao; houve falha na atualizacao mais recente."
+      : "Exibindo ultimo snapshot valido do backend; houve falha na atualizacao mais recente.";
+  }
+
+  if (isSessionView) {
+    return `Sessao atual: ${ghostBackendStats.totalMatched} registros filtrados por sessionId.`;
+  }
+
+  return `Base institucional: ${ghostBackendStats.totalMatched} registros filtrados (${ghostBackendStats.totalStored} no storage).`;
+}
+
+function buildBinaryOptionsGhostAuditHistoryQuery(snapshot) {
+  const params = new URLSearchParams();
+  const assetId = typeof snapshot?.assetId === "string" ? snapshot.assetId.trim() : "";
+  const ghostAuditViewMode = normalizeBinaryOptionsGhostAuditViewMode(binaryOptionsGhostAuditViewMode);
+
+  if (ghostAuditViewMode === BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION) {
+    const sessionId = getBinaryOptionsGhostAuditSessionId();
+
+    if (sessionId.length > 0) {
+      params.set("sessionId", sessionId);
+    }
+  }
+
+  if (assetId.length > 0) {
+    params.set("assetId", assetId);
+  }
+
+  params.set("limit", String(BINARY_OPTIONS_GHOST_AUDIT_HISTORY_LIMIT));
+  params.set("offset", "0");
+  return params.toString();
+}
+
+function buildBinaryOptionsGhostAuditHistoryRequestKey(snapshot) {
+  const baseSessionKey = buildBinaryOptionsGhostSessionKey(snapshot);
+  const ghostAuditViewMode = normalizeBinaryOptionsGhostAuditViewMode(binaryOptionsGhostAuditViewMode);
+
+  if (ghostAuditViewMode === BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION) {
+    const sessionId = getBinaryOptionsGhostAuditSessionId();
+    return sessionId.length > 0
+      ? `${baseSessionKey}:${BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION}:${sessionId}`
+      : `${baseSessionKey}:${BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION}:invalid`;
+  }
+
+  return `${baseSessionKey}:${BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_INSTITUTIONAL}`;
+}
+
+async function refreshBinaryOptionsGhostAuditHistory(snapshot, options = {}) {
+  if (!isBinaryOptionsOperationalMode() || snapshot?.mode !== "live") {
+    return;
+  }
+
+  if (activeAppRoute !== APP_ROUTE_CHART_LAB) {
+    return;
+  }
+
+  if (!canFetchBinaryOptionsGhostAuditHistory()) {
+    return;
+  }
+
+  const ghostAuditViewMode = normalizeBinaryOptionsGhostAuditViewMode(binaryOptionsGhostAuditViewMode);
+  const sessionId = getBinaryOptionsGhostAuditSessionId();
+
+  if (ghostAuditViewMode === BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION && sessionId.length < 8) {
+    binaryOptionsGhostAuditBackendState.error = "ghost-audit-session-id-invalid";
+    binaryOptionsGhostAuditBackendState.history = null;
+    binaryOptionsGhostAuditBackendState.requestKey = "";
+    binaryOptionsGhostAuditBackendState.fetchedAtMs = 0;
+    return;
+  }
+
+  if (binaryOptionsGhostAuditBackendState.inFlight) {
+    return;
+  }
+
+  const requestKey = buildBinaryOptionsGhostAuditHistoryRequestKey(snapshot);
+  const nowMs = Date.now();
+  const hasFreshSnapshot =
+    binaryOptionsGhostAuditBackendState.fetchedAtMs > 0
+    && nowMs - binaryOptionsGhostAuditBackendState.fetchedAtMs < BINARY_OPTIONS_GHOST_AUDIT_HISTORY_REFRESH_MS
+    && binaryOptionsGhostAuditBackendState.requestKey === requestKey;
+
+  if (options.force !== true && hasFreshSnapshot) {
+    return;
+  }
+
+  const query = buildBinaryOptionsGhostAuditHistoryQuery(snapshot);
+  const requestPath = query.length > 0
+    ? `${BINARY_OPTIONS_GHOST_AUDIT_HISTORY_ENDPOINT}?${query}`
+    : BINARY_OPTIONS_GHOST_AUDIT_HISTORY_ENDPOINT;
+
+  binaryOptionsGhostAuditBackendState.inFlight = true;
+
+  try {
+    const response = await fetch(buildApiUrl(requestPath), {
+      headers: {
+        "x-internal-token": INTELLIGENCE_SYNC_INTERNAL_TOKEN,
+      },
+      method: "GET",
+    });
+
+    if (!response.ok) {
+      throw new Error(`ghost-audit-history-${response.status}`);
+    }
+
+    const payload = await response.json();
+    const payloadData = payload && typeof payload === "object" && payload.data && typeof payload.data === "object"
+      ? payload.data
+      : null;
+
+    if (!payloadData || !payloadData.summary || typeof payloadData.summary !== "object") {
+      throw new Error("ghost-audit-history-invalid");
+    }
+
+    binaryOptionsGhostAuditBackendState.error = "";
+    binaryOptionsGhostAuditBackendState.fetchedAtMs = Date.now();
+    binaryOptionsGhostAuditBackendState.history = payloadData;
+    binaryOptionsGhostAuditBackendState.requestKey = requestKey;
+    renderDeepAnalysisPanel(currentChartSnapshot);
+  } catch (error) {
+    binaryOptionsGhostAuditBackendState.error = error instanceof Error ? error.message : "ghost-audit-history-failed";
+    binaryOptionsGhostAuditBackendState.fetchedAtMs = Date.now();
+    renderDeepAnalysisPanel(currentChartSnapshot);
+  } finally {
+    binaryOptionsGhostAuditBackendState.inFlight = false;
+  }
+}
+
+function buildBinaryOptionsGhostSignalId(nowMs = Date.now()) {
+  const randomSuffix = Math.random().toString(36).slice(2, 10);
+  return `ghost_${nowMs}_${randomSuffix}`;
+}
+
+function buildBinaryOptionsGhostAuditSettlementPayload(input) {
+  const sessionId = typeof chatSessionId === "string" ? chatSessionId.trim() : "";
+
+  if (!SESSION_ID_PATTERN.test(sessionId)) {
+    return null;
+  }
+
+  const signal = input?.signal;
+  const snapshot = input?.snapshot;
+  const settledAtMs = toFiniteNumber(input?.nowMs, Date.now());
+  const expiryPrice = toFiniteNumber(input?.currentPrice, Number.NaN);
+
+  if (!signal || !Number.isFinite(expiryPrice)) {
+    return null;
+  }
+
+  const openedAt = Number.isFinite(signal.openedAtMs)
+    ? new Date(signal.openedAtMs).toISOString()
+    : undefined;
+  const settledAt = Number.isFinite(settledAtMs)
+    ? new Date(settledAtMs).toISOString()
+    : undefined;
+
+  return {
+    assetId: typeof snapshot?.assetId === "string" ? snapshot.assetId : "bitcoin",
+    callProbability: Number.isFinite(signal.callProbability) ? signal.callProbability : undefined,
+    direction: signal.direction,
+    entryPrice: signal.entryPrice,
+    exchangeRequested:
+      typeof snapshot?.exchange?.requested === "string" ? snapshot.exchange.requested : undefined,
+    exchangeResolved:
+      typeof snapshot?.exchange?.resolved === "string" ? snapshot.exchange.resolved : undefined,
+    expiryPrice,
+    expirySeconds: signal.expirySeconds,
+    momentumStrength: Number.isFinite(signal.momentumStrength) ? signal.momentumStrength : undefined,
+    neutralProbability: Number.isFinite(signal.neutralProbability) ? signal.neutralProbability : undefined,
+    openedAt,
+    outcome: input?.outcome,
+    probability: signal.probability,
+    provider: typeof snapshot?.provider === "string" ? snapshot.provider : undefined,
+    putProbability: Number.isFinite(signal.putProbability) ? signal.putProbability : undefined,
+    range: typeof snapshot?.range === "string" ? snapshot.range : undefined,
+    resolution: typeof signal.resolution === "string" ? signal.resolution : undefined,
+    sessionId,
+    settledAt,
+    signalId: signal.signalId,
+    symbol: typeof snapshot?.symbol === "string" ? snapshot.symbol : undefined,
+    triggerHeat:
+      signal.triggerHeat === "cold" || signal.triggerHeat === "warm" || signal.triggerHeat === "hot"
+        ? signal.triggerHeat
+        : undefined,
+  };
+}
+
+async function publishBinaryOptionsGhostSettlementToBackend(input) {
+  if (typeof fetch !== "function") {
+    return;
+  }
+
+  const payload = buildBinaryOptionsGhostAuditSettlementPayload(input);
+
+  if (!payload) {
+    return;
+  }
+
+  try {
+    const response = await fetch(buildApiUrl(BINARY_OPTIONS_GHOST_AUDIT_SETTLEMENT_ENDPOINT), {
+      body: JSON.stringify(payload),
+      headers: {
+        "Content-Type": "application/json",
+      },
+      keepalive: true,
+      method: "POST",
+    });
+
+    if (response.ok) {
+      binaryOptionsGhostAuditBackendState.fetchedAtMs = 0;
+    }
+  } catch {
+    // Ghost audit nao deve bloquear a experiencia do operador.
+  }
+}
+
+function settleBinaryOptionsGhostSignals(currentPrice, snapshot, nowMs = Date.now()) {
+  if (!Number.isFinite(currentPrice) || binaryOptionsGhostTrackerState.openSignals.length === 0) {
+    return;
+  }
+
+  const epsilon = Math.max(1e-8, Math.abs(currentPrice) * 0.00001);
+  const pendingSignals = [];
+  let hasSettlement = false;
+
+  for (const signal of binaryOptionsGhostTrackerState.openSignals) {
+    if (nowMs < signal.expiresAtMs) {
+      pendingSignals.push(signal);
+      continue;
+    }
+
+    const priceDelta = currentPrice - signal.entryPrice;
+    let outcome = "push";
+
+    if (signal.direction === "call") {
+      outcome = priceDelta > epsilon ? "win" : priceDelta < -epsilon ? "loss" : "push";
+    } else {
+      outcome = priceDelta < -epsilon ? "win" : priceDelta > epsilon ? "loss" : "push";
+    }
+
+    if (outcome === "win") {
+      binaryOptionsGhostTrackerState.wins += 1;
+    } else if (outcome === "loss") {
+      binaryOptionsGhostTrackerState.losses += 1;
+    } else {
+      binaryOptionsGhostTrackerState.pushes += 1;
+    }
+
+    binaryOptionsGhostTrackerState.recentResults.unshift({
+      direction: signal.direction,
+      entryPrice: signal.entryPrice,
+      expiryPrice: currentPrice,
+      expirySeconds: signal.expirySeconds,
+      outcome,
+      probability: signal.probability,
+      signalId: signal.signalId,
+      settledAtMs: nowMs,
+      triggerHeat: signal.triggerHeat ?? "unknown",
+    });
+
+    void publishBinaryOptionsGhostSettlementToBackend({
+      currentPrice,
+      nowMs,
+      outcome,
+      signal,
+      snapshot,
+    });
+
+    hasSettlement = true;
+  }
+
+  if (!hasSettlement) {
+    return;
+  }
+
+  binaryOptionsGhostTrackerState.lastSettledAtMs = nowMs;
+  binaryOptionsGhostTrackerState.openSignals = pendingSignals;
+  binaryOptionsGhostTrackerState.recentResults = binaryOptionsGhostTrackerState.recentResults.slice(
+    0,
+    BINARY_OPTIONS_GHOST_TRACKER_DEFAULTS.resultHistoryLimit,
+  );
+}
+
+function registerBinaryOptionsGhostSignal(snapshot, microTiming, currentPrice, nowMs = Date.now()) {
+  const directionalProbability = Math.max(microTiming.callProbability, microTiming.putProbability);
+  const probabilityEdge = Math.abs(microTiming.callProbability - microTiming.putProbability);
+
+  if (directionalProbability < BINARY_OPTIONS_GHOST_TRACKER_DEFAULTS.minDirectionalProbability) {
+    return false;
+  }
+
+  if (probabilityEdge < BINARY_OPTIONS_GHOST_TRACKER_DEFAULTS.minProbabilityEdge) {
+    return false;
+  }
+
+  if (microTiming.neutralProbability > BINARY_OPTIONS_GHOST_TRACKER_DEFAULTS.maxNeutralProbability) {
+    return false;
+  }
+
+  if (microTiming.momentumStrength < BINARY_OPTIONS_GHOST_TRACKER_DEFAULTS.minMomentumStrength) {
+    return false;
+  }
+
+  if (microTiming.triggerHeat?.state === "cold") {
+    return false;
+  }
+
+  if (binaryOptionsGhostTrackerState.openSignals.length >= BINARY_OPTIONS_GHOST_TRACKER_DEFAULTS.maxConcurrentSignals) {
+    return false;
+  }
+
+  const cooldownMs = BINARY_OPTIONS_GHOST_TRACKER_DEFAULTS.cooldownSeconds * 1000;
+
+  if (nowMs - binaryOptionsGhostTrackerState.lastSignalAtMs < cooldownMs) {
+    return false;
+  }
+
+  const direction = microTiming.callProbability >= microTiming.putProbability ? "call" : "put";
+  const suggestedExpirySeconds = toFiniteNumber(
+    microTiming.suggestedExpirySeconds,
+    BINARY_OPTIONS_GHOST_TRACKER_DEFAULTS.fallbackExpirySeconds,
+  );
+  const expirySeconds = Math.round(clampNumber(suggestedExpirySeconds, 30, 180));
+  const signalId = buildBinaryOptionsGhostSignalId(nowMs);
+
+  binaryOptionsGhostTrackerState.openSignals.push({
+    callProbability: microTiming.callProbability,
+    direction,
+    entryPrice: currentPrice,
+    expiresAtMs: nowMs + expirySeconds * 1000,
+    expirySeconds,
+    momentumStrength: microTiming.momentumStrength,
+    neutralProbability: microTiming.neutralProbability,
+    openedAtMs: nowMs,
+    probability: directionalProbability,
+    putProbability: microTiming.putProbability,
+    resolution: typeof snapshot?.resolution === "string" ? snapshot.resolution : "1S",
+    signalId,
+    triggerHeat: microTiming.triggerHeat?.state,
+  });
+  binaryOptionsGhostTrackerState.lastSignalAtMs = nowMs;
+  return true;
+}
+
+function updateBinaryOptionsGhostTracker(snapshot, microTiming) {
+  if (!isBinaryOptionsOperationalMode() || snapshot?.mode !== "live") {
+    return;
+  }
+
+  const points = Array.isArray(snapshot?.points) ? snapshot.points : [];
+  const lastPoint = points[points.length - 1];
+  const currentPrice = toFiniteNumber(lastPoint?.close, Number.NaN);
+
+  if (!Number.isFinite(currentPrice)) {
+    return;
+  }
+
+  const sessionKey = buildBinaryOptionsGhostSessionKey(snapshot);
+
+  if (binaryOptionsGhostTrackerState.sessionKey !== sessionKey) {
+    binaryOptionsGhostTrackerState = createBinaryOptionsGhostTrackerState();
+    binaryOptionsGhostTrackerState.sessionKey = sessionKey;
+  }
+
+  const nowMs = Date.now();
+  settleBinaryOptionsGhostSignals(currentPrice, snapshot, nowMs);
+  registerBinaryOptionsGhostSignal(snapshot, microTiming, currentPrice, nowMs);
 }
 
 function sanitizeBinaryOptionsRiskState(candidate) {
@@ -7057,7 +7670,7 @@ function buildScenarioHtml(label, scenario, currency) {
   `;
 }
 
-function renderAnalysisTabContent(analysis, snapshot) {
+function renderAnalysisTabContent(analysis, snapshot, options = {}) {
   if (!(analysisTabContentElement instanceof HTMLElement)) {
     return;
   }
@@ -7319,10 +7932,86 @@ function renderAnalysisTabContent(analysis, snapshot) {
   }
 
   if (activeAnalysisTabId === "micro_timing") {
-    const microTiming = buildMicroTimingAnalysis(analysis, snapshot);
+    const microTiming = options.microTiming ?? buildMicroTimingAnalysis(analysis, snapshot);
+    const ghostStats = getBinaryOptionsGhostTrackerStats();
+    const ghostBackendStats = getBinaryOptionsGhostBackendStats();
+    const ghostBackendViewMode = normalizeBinaryOptionsGhostAuditViewMode(binaryOptionsGhostAuditViewMode);
+    const isSessionBackendView = ghostBackendViewMode === BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION;
+    const triggerHeat = microTiming.triggerHeat;
     const momentumPerSecondLabel = `${microTiming.momentumPerSecondPercent >= 0 ? "+" : ""}${microTiming.momentumPerSecondPercent.toFixed(4)}%/s`;
+    const ghostSummaryLabel = ghostStats.pushes > 0
+      ? `${ghostStats.wins}W - ${ghostStats.losses}L - ${ghostStats.pushes}D`
+      : `${ghostStats.wins}W - ${ghostStats.losses}L`;
+    const ghostBackendSummaryLabel = ghostBackendStats.hasSnapshot
+      ? ghostBackendStats.pushes > 0
+        ? `${ghostBackendStats.wins}W - ${ghostBackendStats.losses}L - ${ghostBackendStats.pushes}D`
+        : `${ghostBackendStats.wins}W - ${ghostBackendStats.losses}L`
+      : ghostBackendStats.inFlight
+        ? "SYNC"
+        : "SEM DADOS";
+    const ghostBackendTitle = isSessionBackendView
+      ? "Ghost Tracker Persistido (Sessao Atual)"
+      : "Ghost Tracker Institucional (Backend)";
+    const ghostBackendScopeMessage = isSessionBackendView
+      ? "Escopo: filtros por sessionId ativo + assetId atual."
+      : "Escopo: agregacao por assetId em toda a base persistida.";
+    const ghostBackendState = !ghostBackendStats.enabled
+      ? "cold"
+      : ghostBackendStats.winRate >= 58
+        ? "hot"
+        : ghostBackendStats.winRate >= 48
+          ? "warm"
+          : "cold";
+    const ghostBackendStatusMessage = buildBinaryOptionsGhostBackendStatusMessage(ghostBackendStats);
+    const ghostBackendUpdatedLabel = ghostBackendStats.fetchedAtMs > 0
+      ? `Atualizado ${formatShortTime(new Date(ghostBackendStats.fetchedAtMs).toISOString())}`
+      : "Sem snapshot backend ainda";
 
     analysisTabContentElement.innerHTML = `
+      <article class="analysis-block analysis-binary-ghost" data-state="${escapeHtml(triggerHeat.state)}">
+        <div class="analysis-binary-ghost-head">
+          <h4>Ghost Tracker de Sessao</h4>
+          <span class="analysis-binary-ghost-badge">${escapeHtml(ghostSummaryLabel)}</span>
+        </div>
+        <div class="analysis-binary-ghost-metrics">
+          <article><span>Win rate auditada</span><strong>${ghostStats.winRate.toFixed(1)}%</strong></article>
+          <article><span>Sinais encerrados</span><strong>${ghostStats.resolvedTrades}</strong></article>
+          <article><span>Sinais em aberto</span><strong>${ghostStats.openSignals}</strong></article>
+          <article><span>Qualidade amostral</span><strong>${escapeHtml(ghostStats.sampleState)}</strong></article>
+        </div>
+        <p>
+          Regras ativas: probabilidade direcional >= ${BINARY_OPTIONS_GHOST_TRACKER_DEFAULTS.minDirectionalProbability}%,
+          edge minimo ${BINARY_OPTIONS_GHOST_TRACKER_DEFAULTS.minProbabilityEdge} p.p.,
+          cooldown ${BINARY_OPTIONS_GHOST_TRACKER_DEFAULTS.cooldownSeconds}s.
+        </p>
+      </article>
+      <article class="analysis-block analysis-binary-ghost" data-state="${escapeHtml(ghostBackendState)}">
+        <div class="analysis-binary-ghost-head">
+          <h4>${escapeHtml(ghostBackendTitle)}</h4>
+          <span class="analysis-binary-ghost-badge">${escapeHtml(ghostBackendSummaryLabel)}</span>
+        </div>
+        <div class="analysis-binary-ghost-view-toggle" role="tablist" aria-label="Escopo da auditoria ghost persistida">
+          <button
+            type="button"
+            class="analysis-binary-ghost-view-button ${isSessionBackendView ? "is-active" : ""}"
+            data-ghost-audit-view-mode="${BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION}"
+          >Sessao atual</button>
+          <button
+            type="button"
+            class="analysis-binary-ghost-view-button ${isSessionBackendView ? "" : "is-active"}"
+            data-ghost-audit-view-mode="${BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_INSTITUTIONAL}"
+          >Institucional</button>
+        </div>
+        <div class="analysis-binary-ghost-metrics">
+          <article><span>Win rate backend</span><strong>${ghostBackendStats.winRate.toFixed(1)}%</strong></article>
+          <article><span>Sinais encerrados</span><strong>${ghostBackendStats.resolvedTrades}</strong></article>
+          <article><span>Registros filtrados</span><strong>${ghostBackendStats.totalMatched}</strong></article>
+          <article><span>Qualidade amostral</span><strong>${escapeHtml(ghostBackendStats.sampleState)}</strong></article>
+        </div>
+        <p>${escapeHtml(ghostBackendScopeMessage)}</p>
+        <p>${escapeHtml(ghostBackendStatusMessage)}</p>
+        <p>${escapeHtml(ghostBackendUpdatedLabel)}</p>
+      </article>
       <div class="analysis-grid">
         <article class="analysis-block">
           <h4>Probabilidade CALL/PUT</h4>
@@ -7350,6 +8039,16 @@ function renderAnalysisTabContent(analysis, snapshot) {
           <p>Intensidade: ${microTiming.momentumStrength.toFixed(1)} / 100 (${escapeHtml(microTiming.momentumLabel)})</p>
           <p>Velocidade instantanea: ${escapeHtml(momentumPerSecondLabel)}</p>
           <p>Amostra media: ${Math.round(microTiming.barSpacingSeconds)}s por barra • expiracao sugerida ${microTiming.suggestedExpirySeconds}s.</p>
+          <div class="analysis-trigger-heat" data-state="${escapeHtml(triggerHeat.state)}">
+            <div class="analysis-trigger-heat-head">
+              <strong>${escapeHtml(triggerHeat.title)}</strong>
+              <span>${escapeHtml(triggerHeat.state.toUpperCase())}</span>
+            </div>
+            <div class="analysis-trigger-heat-track">
+              <div class="analysis-trigger-heat-fill" style="width: ${triggerHeat.score.toFixed(1)}%"></div>
+            </div>
+            <p>${escapeHtml(triggerHeat.guidance)}</p>
+          </div>
         </article>
       </div>
       <article class="analysis-block">
@@ -7361,6 +8060,21 @@ function renderAnalysisTabContent(analysis, snapshot) {
         </ul>
       </article>
     `;
+
+    const ghostViewModeButtons = analysisTabContentElement.querySelectorAll("[data-ghost-audit-view-mode]");
+
+    for (const ghostViewModeButton of ghostViewModeButtons) {
+      if (!(ghostViewModeButton instanceof HTMLButtonElement)) {
+        continue;
+      }
+
+      ghostViewModeButton.addEventListener("click", () => {
+        setBinaryOptionsGhostAuditViewMode(ghostViewModeButton.dataset.ghostAuditViewMode, {
+          refresh: true,
+        });
+      });
+    }
+
     return;
   }
 
@@ -7592,8 +8306,17 @@ function renderDeepAnalysisPanel(snapshot) {
 
   if (analysisStatusElement instanceof HTMLElement) {
     analysisStatusElement.textContent = isBinaryOptionsOperationalMode()
-      ? "Workspace Binario ativo: foco em micro-timing, CALL/PUT e controle de stake por expiracao."
+      ? "Workspace Binario ativo: foco em micro-timing, CALL/PUT, gatilho frio/quente e ghost tracker de assertividade da sessao."
       : "Modelagem quantitativa desbloqueada: tecnica + SMC + harmonicos + WEGD + probabilidades + timing, sem bloqueio de plano.";
+  }
+
+  const precomputedMicroTiming = isBinaryOptionsOperationalMode()
+    ? buildMicroTimingAnalysis(analysis, snapshot)
+    : null;
+
+  if (precomputedMicroTiming) {
+    updateBinaryOptionsGhostTracker(snapshot, precomputedMicroTiming);
+    void refreshBinaryOptionsGhostAuditHistory(snapshot);
   }
 
   if (analysisSignalCardElement instanceof HTMLElement) {
@@ -7638,7 +8361,9 @@ function renderDeepAnalysisPanel(snapshot) {
   }
 
   renderAnalysisTabs();
-  renderAnalysisTabContent(analysis, snapshot);
+  renderAnalysisTabContent(analysis, snapshot, {
+    microTiming: precomputedMicroTiming,
+  });
 }
 
 function setChartStatus(message, mode = "") {
