@@ -220,7 +220,7 @@
               real.
             </p>
           </div>
-          <span class="chart-lab-tag">Live Desk</span>
+          <span id="chart-operational-mode-tag" class="chart-lab-tag">Live Desk</span>
         </div>
 
         <form id="chart-controls" class="chart-controls">
@@ -246,6 +246,14 @@
             <select id="chart-mode" name="mode">
               <option value="delayed" selected>Delay (mais estavel)</option>
               <option value="live">Ao vivo (por corretora)</option>
+            </select>
+          </div>
+
+          <div class="chart-control-field">
+            <label for="chart-operational-mode">Modo operacional</label>
+            <select id="chart-operational-mode" name="operationalMode">
+              <option value="spot_margin" selected>Spot/Margem</option>
+              <option value="binary_options">Opcoes Binarias (Micro-Timing)</option>
             </select>
           </div>
 

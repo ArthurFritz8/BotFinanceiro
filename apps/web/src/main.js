@@ -44,6 +44,7 @@ const airdropsStageSection = document.querySelector(".airdrops-stage");
 const chartControlsForm = document.querySelector("#chart-controls");
 const chartAssetSelect = document.querySelector("#chart-asset");
 const chartModeSelect = document.querySelector("#chart-mode");
+const chartOperationalModeSelect = document.querySelector("#chart-operational-mode");
 const chartRangeSelect = document.querySelector("#chart-range");
 const chartRefreshButton = document.querySelector("#chart-refresh-button");
 const chartStyleSelect = document.querySelector("#chart-style");
@@ -59,6 +60,7 @@ const chartIntervalMenuButton = document.querySelector("#chart-interval-menu-but
 const chartIntervalMenu = document.querySelector("#chart-interval-menu");
 const chartIntervalMenuList = document.querySelector("#chart-interval-menu-list");
 const chartIntervalMenuCurrent = document.querySelector("#chart-interval-menu-current");
+const chartOperationalModeTagElement = document.querySelector("#chart-operational-mode-tag");
 const chartStatusElement = document.querySelector("#chart-status");
 const chartLegendElement = document.querySelector("#chart-legend");
 const chartCopilotStage = document.querySelector("#chart-copilot-stage");
@@ -148,6 +150,7 @@ const AIRDROP_PREFERENCES_STORAGE_KEY = "botfinanceiro.airdrop.preferences.v1";
 const MEMECOIN_PREFERENCES_STORAGE_KEY = "botfinanceiro.memecoin.preferences.v1";
 const MARKET_NAVIGATOR_FAVORITES_STORAGE_KEY = "botfinanceiro.marketNavigator.favorites.v1";
 const PROP_DESK_STORAGE_KEY = "botfinanceiro.chart.propDesk.v1";
+const BINARY_OPTIONS_RISK_STORAGE_KEY = "botfinanceiro.chart.binaryOptionsRisk.v1";
 const WATCHLIST_RISK_SUMMARY_COLLAPSED_STORAGE_KEY = "botfinanceiro.chart.watchlistRiskSummaryCollapsed.v1";
 const MAX_STORED_MESSAGES = 60;
 const MAX_RECENT_HISTORY_ITEMS = 8;
@@ -485,6 +488,16 @@ const CHART_RANGE_LABELS = {
 const CHART_MODE_LABELS = {
   delayed: "delay",
   live: "ao vivo",
+};
+const CHART_OPERATIONAL_MODE_SPOT_MARGIN = "spot_margin";
+const CHART_OPERATIONAL_MODE_BINARY_OPTIONS = "binary_options";
+const CHART_OPERATIONAL_MODES = new Set([
+  CHART_OPERATIONAL_MODE_SPOT_MARGIN,
+  CHART_OPERATIONAL_MODE_BINARY_OPTIONS,
+]);
+const CHART_OPERATIONAL_MODE_LABELS = {
+  [CHART_OPERATIONAL_MODE_BINARY_OPTIONS]: "Opcoes Binarias (Micro-Timing)",
+  [CHART_OPERATIONAL_MODE_SPOT_MARGIN]: "Spot/Margem",
 };
 const CHART_STYLE_LABELS = {
   area: "area",
@@ -1518,6 +1531,10 @@ const ANALYSIS_TAB_DEFINITIONS = [
     label: "Probabilistica",
   },
   {
+    id: "micro_timing",
+    label: "Micro-Timing",
+  },
+  {
     id: "calculadora",
     label: "Calculadora",
   },
@@ -1538,6 +1555,10 @@ const ANALYSIS_TAB_DEFINITIONS = [
     label: "Noticias",
   },
 ];
+const BINARY_OPTIONS_HIDDEN_ANALYSIS_TABS = new Set([
+  "smc",
+  "wegd",
+]);
 const TERMINAL_STYLE_TO_TV = {
   area: "3",
   bars: "0",
@@ -1716,6 +1737,11 @@ const PROP_DESK_DEFAULT_STATE = Object.freeze({
   trackerLosses: 0,
   trackerWins: 0,
 });
+const BINARY_OPTIONS_RISK_DEFAULT_STATE = Object.freeze({
+  bankroll: 1000,
+  payoutPercent: 82,
+  stake: 20,
+});
 
 const messages = [];
 let isSending = false;
@@ -1776,6 +1802,7 @@ let chartLatestCandles = [];
 let chartCandleByTime = new Map();
 let chartHasInitialFit = false;
 let chartViewMode = "tv";
+let chartOperationalMode = CHART_OPERATIONAL_MODE_SPOT_MARGIN;
 let activeTerminalInterval = TERMINAL_INTERVAL_DEFAULT;
 let favoriteTerminalIntervals = new Set(TERMINAL_INTERVAL_FAVORITE_DEFAULTS);
 let isChartIntervalMenuOpen = false;
@@ -1835,6 +1862,9 @@ let brokerFailureStreakByName = new Map();
 let brokerCircuitOpenUntilByName = new Map();
 let propDeskState = {
   ...PROP_DESK_DEFAULT_STATE,
+};
+let binaryOptionsRiskState = {
+  ...BINARY_OPTIONS_RISK_DEFAULT_STATE,
 };
 let isPropDeskInitialized = false;
 let isWatchlistRiskSummaryCollapsed = false;
@@ -1915,6 +1945,10 @@ function shouldUseCryptoChartPipeline(symbol) {
 }
 
 function resolveChartPipelineStrategy(symbol) {
+  if (isBinaryOptionsOperationalMode()) {
+    return "crypto";
+  }
+
   if (shouldUseCryptoChartPipeline(symbol)) {
     return "crypto";
   }
@@ -1940,6 +1974,97 @@ function canRunInstitutionalMacroForSymbol(symbol) {
   }
 
   return INSTITUTIONAL_MACRO_MODULES.has(chartSymbolSourceModule);
+}
+
+function normalizeChartOperationalMode(value) {
+  if (typeof value !== "string") {
+    return CHART_OPERATIONAL_MODE_SPOT_MARGIN;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return CHART_OPERATIONAL_MODES.has(normalized)
+    ? normalized
+    : CHART_OPERATIONAL_MODE_SPOT_MARGIN;
+}
+
+function getChartOperationalModeLabel(mode) {
+  return CHART_OPERATIONAL_MODE_LABELS[mode] ?? CHART_OPERATIONAL_MODE_LABELS[CHART_OPERATIONAL_MODE_SPOT_MARGIN];
+}
+
+function isBinaryOptionsOperationalMode(mode = chartOperationalMode) {
+  return normalizeChartOperationalMode(mode) === CHART_OPERATIONAL_MODE_BINARY_OPTIONS;
+}
+
+function isAnalysisTabVisible(tabId, mode = chartOperationalMode) {
+  const normalizedMode = normalizeChartOperationalMode(mode);
+
+  if (tabId === "micro_timing") {
+    return normalizedMode === CHART_OPERATIONAL_MODE_BINARY_OPTIONS;
+  }
+
+  if (normalizedMode === CHART_OPERATIONAL_MODE_BINARY_OPTIONS && BINARY_OPTIONS_HIDDEN_ANALYSIS_TABS.has(tabId)) {
+    return false;
+  }
+
+  return true;
+}
+
+function resolveVisibleAnalysisTabs(mode = chartOperationalMode) {
+  const normalizedMode = normalizeChartOperationalMode(mode);
+  return ANALYSIS_TAB_DEFINITIONS.filter((tab) => isAnalysisTabVisible(tab.id, normalizedMode));
+}
+
+function ensureActiveAnalysisTabForOperationalMode(mode = chartOperationalMode) {
+  if (isAnalysisTabVisible(activeAnalysisTabId, mode)) {
+    return;
+  }
+
+  const nextTab = resolveVisibleAnalysisTabs(mode)[0];
+  activeAnalysisTabId = nextTab?.id ?? "resumo";
+}
+
+function updateOperationalModeTag() {
+  if (!(chartOperationalModeTagElement instanceof HTMLElement)) {
+    return;
+  }
+
+  chartOperationalModeTagElement.dataset.operationalMode = chartOperationalMode;
+  chartOperationalModeTagElement.textContent = isBinaryOptionsOperationalMode()
+    ? "Micro-Timing Desk"
+    : "Live Desk";
+}
+
+function setChartOperationalMode(nextMode, options = {}) {
+  const normalizedMode = normalizeChartOperationalMode(nextMode);
+  const hasChanged = normalizedMode !== chartOperationalMode;
+  chartOperationalMode = normalizedMode;
+
+  if (chartOperationalModeSelect instanceof HTMLSelectElement) {
+    chartOperationalModeSelect.value = normalizedMode;
+  }
+
+  updateOperationalModeTag();
+
+  ensureActiveAnalysisTabForOperationalMode(normalizedMode);
+  renderDeepAnalysisPanel(currentChartSnapshot);
+
+  if (hasChanged && options.refreshChart === true) {
+    void loadChart({
+      silent: true,
+    });
+
+    if (chartViewMode === "tv") {
+      scheduleTradingViewRefresh();
+    }
+  }
+
+  if (hasChanged && options.announce === true) {
+    setChartLegend(`Modo operacional ativo: ${getChartOperationalModeLabel(normalizedMode)}.`);
+  }
+
+  if (options.persist !== false) {
+    saveChartPreferences();
+  }
 }
 
 function applyExternalSymbolChartState(symbol, options = {}) {
@@ -6648,6 +6773,253 @@ function buildQuantitativeAnalysis(snapshot) {
   };
 }
 
+function estimateMedianPointSpacingSeconds(points) {
+  if (!Array.isArray(points) || points.length < 2) {
+    return 60;
+  }
+
+  const intervalsSeconds = [];
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const previousTimeMs = typeof previous?.timestamp === "string" ? Date.parse(previous.timestamp) : Number.NaN;
+    const currentTimeMs = typeof current?.timestamp === "string" ? Date.parse(current.timestamp) : Number.NaN;
+
+    if (!Number.isFinite(previousTimeMs) || !Number.isFinite(currentTimeMs)) {
+      continue;
+    }
+
+    const diffSeconds = (currentTimeMs - previousTimeMs) / 1000;
+
+    if (Number.isFinite(diffSeconds) && diffSeconds > 0) {
+      intervalsSeconds.push(diffSeconds);
+    }
+  }
+
+  if (intervalsSeconds.length === 0) {
+    return 60;
+  }
+
+  intervalsSeconds.sort((left, right) => left - right);
+  const middleIndex = Math.floor(intervalsSeconds.length / 2);
+
+  if (intervalsSeconds.length % 2 === 0) {
+    return (intervalsSeconds[middleIndex - 1] + intervalsSeconds[middleIndex]) / 2;
+  }
+
+  return intervalsSeconds[middleIndex];
+}
+
+function estimateMomentumPerSecondPercent(points) {
+  if (!Array.isArray(points) || points.length < 2) {
+    return 0;
+  }
+
+  const recentPoints = points.slice(-Math.min(points.length, 12));
+  const firstPoint = recentPoints[0];
+  const lastPoint = recentPoints[recentPoints.length - 1];
+  const firstClose = toFiniteNumber(firstPoint?.close, Number.NaN);
+  const lastClose = toFiniteNumber(lastPoint?.close, Number.NaN);
+
+  if (!Number.isFinite(firstClose) || !Number.isFinite(lastClose)) {
+    return 0;
+  }
+
+  const firstTimeMs = typeof firstPoint?.timestamp === "string" ? Date.parse(firstPoint.timestamp) : Number.NaN;
+  const lastTimeMs = typeof lastPoint?.timestamp === "string" ? Date.parse(lastPoint.timestamp) : Number.NaN;
+  const elapsedSecondsFromClock =
+    Number.isFinite(firstTimeMs)
+    && Number.isFinite(lastTimeMs)
+    && lastTimeMs > firstTimeMs
+      ? (lastTimeMs - firstTimeMs) / 1000
+      : 0;
+  const elapsedSecondsFallback = Math.max(1, recentPoints.length - 1) * estimateMedianPointSpacingSeconds(recentPoints);
+  const elapsedSeconds = elapsedSecondsFromClock > 0 ? elapsedSecondsFromClock : elapsedSecondsFallback;
+  const variationPercent = ((lastClose - firstClose) / Math.max(Math.abs(firstClose), 1e-6)) * 100;
+
+  return variationPercent / Math.max(elapsedSeconds, 1e-6);
+}
+
+function buildMicroTimingAnalysis(analysis, snapshot) {
+  const points = Array.isArray(snapshot?.points) ? snapshot.points : [];
+  const momentumPerSecondPercent = estimateMomentumPerSecondPercent(points);
+  const momentumStrength = clampNumber(roundNumber(Math.abs(momentumPerSecondPercent) * 1400, 1), 0, 100);
+  const momentumDirection =
+    momentumPerSecondPercent >= 0.004
+      ? "comprador"
+      : momentumPerSecondPercent <= -0.004
+        ? "vendedor"
+        : "neutro";
+  const momentumBias = clampNumber(momentumPerSecondPercent * 1200, -14, 14);
+  const rawCall = clampNumber(
+    analysis.buyProbability + momentumBias + (analysis.signal.tone === "buy" ? 4 : 0),
+    1,
+    98,
+  );
+  const rawPut = clampNumber(
+    analysis.sellProbability - momentumBias + (analysis.signal.tone === "sell" ? 4 : 0),
+    1,
+    98,
+  );
+  const rawNeutral = clampNumber(analysis.neutralProbability + (momentumStrength < 28 ? 6 : 2), 1, 40);
+  const total = rawCall + rawPut + rawNeutral;
+  const callProbability = roundNumber((rawCall / total) * 100, 1);
+  const putProbability = roundNumber((rawPut / total) * 100, 1);
+  const neutralProbability = roundNumber(Math.max(0, 100 - callProbability - putProbability), 1);
+  const barSpacingSeconds = estimateMedianPointSpacingSeconds(points);
+  const suggestedExpirySeconds = Math.round(clampNumber(barSpacingSeconds * 3, 15, 300));
+  const momentumLabel =
+    momentumStrength >= 72
+      ? "Aceleracao forte"
+      : momentumStrength >= 45
+        ? "Aceleracao moderada"
+        : "Fluxo comprimido";
+
+  return {
+    barSpacingSeconds,
+    callProbability,
+    momentumDirection,
+    momentumLabel,
+    momentumPerSecondPercent,
+    momentumStrength,
+    neutralProbability,
+    putProbability,
+    suggestedExpirySeconds,
+  };
+}
+
+function sanitizeBinaryOptionsRiskState(candidate) {
+  const bankroll = clampNumber(
+    parseOptionalNumber(candidate?.bankroll, BINARY_OPTIONS_RISK_DEFAULT_STATE.bankroll),
+    10,
+    100000000,
+  );
+  const payoutPercent = clampNumber(
+    parseOptionalNumber(candidate?.payoutPercent, BINARY_OPTIONS_RISK_DEFAULT_STATE.payoutPercent),
+    10,
+    99,
+  );
+  const stake = clampNumber(
+    parseOptionalNumber(candidate?.stake, BINARY_OPTIONS_RISK_DEFAULT_STATE.stake),
+    1,
+    bankroll,
+  );
+
+  return {
+    bankroll,
+    payoutPercent,
+    stake,
+  };
+}
+
+function readStoredBinaryOptionsRiskState() {
+  try {
+    const raw = localStorage.getItem(BINARY_OPTIONS_RISK_STORAGE_KEY);
+
+    if (!raw) {
+      return {
+        ...BINARY_OPTIONS_RISK_DEFAULT_STATE,
+      };
+    }
+
+    const parsed = JSON.parse(raw);
+    return sanitizeBinaryOptionsRiskState(parsed);
+  } catch {
+    return {
+      ...BINARY_OPTIONS_RISK_DEFAULT_STATE,
+    };
+  }
+}
+
+function saveBinaryOptionsRiskState() {
+  try {
+    localStorage.setItem(BINARY_OPTIONS_RISK_STORAGE_KEY, JSON.stringify(binaryOptionsRiskState));
+  } catch {
+    // Ignore storage errors and keep UX stateless.
+  }
+}
+
+function calculateBinaryOptionsRiskProjection(state = binaryOptionsRiskState) {
+  const safeState = sanitizeBinaryOptionsRiskState(state);
+  const projectedProfit = roundNumber(safeState.stake * (safeState.payoutPercent / 100), 2);
+  const projectedBalanceWin = roundNumber(safeState.bankroll + projectedProfit, 2);
+  const projectedBalanceLoss = roundNumber(Math.max(0, safeState.bankroll - safeState.stake), 2);
+  const stakePercent = roundNumber((safeState.stake / Math.max(safeState.bankroll, 1e-6)) * 100, 2);
+  const suggestedStake = roundNumber(safeState.bankroll * 0.02, 2);
+
+  return {
+    projectedBalanceLoss,
+    projectedBalanceWin,
+    projectedProfit,
+    safeState,
+    stakePercent,
+    suggestedStake,
+  };
+}
+
+function syncBinaryOptionsRiskPanel(container) {
+  if (!(container instanceof HTMLElement)) {
+    return;
+  }
+
+  const projection = calculateBinaryOptionsRiskProjection();
+  const fields = {
+    bankroll: String(projection.safeState.bankroll),
+    payoutPercent: String(projection.safeState.payoutPercent),
+    stake: String(projection.safeState.stake),
+  };
+
+  for (const [field, value] of Object.entries(fields)) {
+    const inputElements = container.querySelectorAll(`[data-binary-risk-input="${field}"]`);
+
+    for (const inputElement of inputElements) {
+      if (inputElement instanceof HTMLInputElement && inputElement.value !== value) {
+        inputElement.value = value;
+      }
+    }
+  }
+
+  const outputMap = {
+    balanceLoss: formatPrice(projection.projectedBalanceLoss, "usd"),
+    balanceWin: formatPrice(projection.projectedBalanceWin, "usd"),
+    payoutPercent: `${projection.safeState.payoutPercent.toFixed(2)}%`,
+    projectedProfit: formatPrice(projection.projectedProfit, "usd"),
+    stakePercent: `${projection.stakePercent.toFixed(2)}%`,
+    suggestedStake: formatPrice(projection.suggestedStake, "usd"),
+  };
+
+  for (const [key, value] of Object.entries(outputMap)) {
+    const outputElements = container.querySelectorAll(`[data-binary-risk-output="${key}"]`);
+
+    for (const outputElement of outputElements) {
+      if (outputElement instanceof HTMLElement) {
+        outputElement.textContent = value;
+      }
+    }
+  }
+}
+
+function updateBinaryOptionsRiskStateFromInput(inputElement) {
+  if (!(inputElement instanceof HTMLInputElement)) {
+    return;
+  }
+
+  const field = inputElement.dataset.binaryRiskInput;
+
+  if (field !== "bankroll" && field !== "payoutPercent" && field !== "stake") {
+    return;
+  }
+
+  binaryOptionsRiskState = sanitizeBinaryOptionsRiskState({
+    ...binaryOptionsRiskState,
+    [field]: inputElement.value,
+  });
+
+  saveBinaryOptionsRiskState();
+  syncBinaryOptionsRiskPanel(analysisTabContentElement);
+}
+
 function renderAnalysisTabs() {
   if (!(analysisTabsElement instanceof HTMLElement)) {
     return;
@@ -6655,7 +7027,9 @@ function renderAnalysisTabs() {
 
   analysisTabsElement.innerHTML = "";
 
-  for (const tab of ANALYSIS_TAB_DEFINITIONS) {
+  ensureActiveAnalysisTabForOperationalMode(chartOperationalMode);
+
+  for (const tab of resolveVisibleAnalysisTabs(chartOperationalMode)) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `analysis-tab-button${activeAnalysisTabId === tab.id ? " is-active" : ""}`;
@@ -6688,10 +7062,76 @@ function renderAnalysisTabContent(analysis, snapshot) {
     return;
   }
 
+  ensureActiveAnalysisTabForOperationalMode(chartOperationalMode);
+
   const currency = snapshot?.currency ?? "usd";
+  const isBinaryMode = isBinaryOptionsOperationalMode();
 
   if (activeAnalysisTabId === "gestao_risco") {
     analysisTabContentElement.innerHTML = "";
+
+    if (isBinaryMode) {
+      if (riskManagementTabPanel instanceof HTMLElement) {
+        riskManagementTabPanel.classList.add("is-hidden");
+        riskManagementTabPanel.setAttribute("aria-hidden", "true");
+      }
+
+      analysisTabContentElement.innerHTML = `
+        <div class="analysis-grid">
+          <article class="analysis-block">
+            <h4>Gestao de Risco Binaria</h4>
+            <p>Configure banca, payout e stake para controlar exposicao por ciclo de expiracao.</p>
+            <div class="analysis-binary-input-grid">
+              <label class="prop-desk-field" for="binary-bankroll-risk-input">
+                Banca inicial (USD)
+                <input id="binary-bankroll-risk-input" data-binary-risk-input="bankroll" type="number" min="10" step="10" />
+              </label>
+              <label class="prop-desk-field" for="binary-payout-risk-input">
+                Payout atual (%)
+                <input id="binary-payout-risk-input" data-binary-risk-input="payoutPercent" type="number" min="10" max="99" step="0.1" />
+              </label>
+              <label class="prop-desk-field" for="binary-stake-risk-input">
+                Valor da entrada (stake)
+                <input id="binary-stake-risk-input" data-binary-risk-input="stake" type="number" min="1" step="1" />
+              </label>
+            </div>
+          </article>
+          <article class="analysis-block">
+            <h4>Saida projetada por expiracao</h4>
+            <div class="analysis-binary-kpi-grid">
+              <article class="analysis-binary-kpi">
+                <span>Lucro projetado (win)</span>
+                <strong data-binary-risk-output="projectedProfit">--</strong>
+              </article>
+              <article class="analysis-binary-kpi">
+                <span>Saldo apos win</span>
+                <strong data-binary-risk-output="balanceWin">--</strong>
+              </article>
+              <article class="analysis-binary-kpi">
+                <span>Saldo apos loss</span>
+                <strong data-binary-risk-output="balanceLoss">--</strong>
+              </article>
+              <article class="analysis-binary-kpi">
+                <span>Stake / banca</span>
+                <strong data-binary-risk-output="stakePercent">--</strong>
+              </article>
+              <article class="analysis-binary-kpi">
+                <span>Payout monitorado</span>
+                <strong data-binary-risk-output="payoutPercent">--</strong>
+              </article>
+              <article class="analysis-binary-kpi">
+                <span>Stake sugerida (2%)</span>
+                <strong data-binary-risk-output="suggestedStake">--</strong>
+              </article>
+            </div>
+            <p>Mantenha stake sob controle para evitar erosao de banca em sequencias negativas.</p>
+          </article>
+        </div>
+      `;
+
+      syncBinaryOptionsRiskPanel(analysisTabContentElement);
+      return;
+    }
 
     if (riskManagementTabPanel instanceof HTMLElement) {
       riskManagementTabPanel.classList.remove("is-hidden");
@@ -6878,7 +7318,89 @@ function renderAnalysisTabContent(analysis, snapshot) {
     return;
   }
 
+  if (activeAnalysisTabId === "micro_timing") {
+    const microTiming = buildMicroTimingAnalysis(analysis, snapshot);
+    const momentumPerSecondLabel = `${microTiming.momentumPerSecondPercent >= 0 ? "+" : ""}${microTiming.momentumPerSecondPercent.toFixed(4)}%/s`;
+
+    analysisTabContentElement.innerHTML = `
+      <div class="analysis-grid">
+        <article class="analysis-block">
+          <h4>Probabilidade CALL/PUT</h4>
+          <div class="analysis-probability-rows">
+            <div class="analysis-probability-row">
+              <span>CALL</span>
+              <div class="analysis-probability-track"><div class="analysis-probability-fill buy" style="width: ${microTiming.callProbability.toFixed(1)}%"></div></div>
+              <strong>${microTiming.callProbability.toFixed(1)}%</strong>
+            </div>
+            <div class="analysis-probability-row">
+              <span>PUT</span>
+              <div class="analysis-probability-track"><div class="analysis-probability-fill sell" style="width: ${microTiming.putProbability.toFixed(1)}%"></div></div>
+              <strong>${microTiming.putProbability.toFixed(1)}%</strong>
+            </div>
+            <div class="analysis-probability-row">
+              <span>NEUTRO</span>
+              <div class="analysis-probability-track"><div class="analysis-probability-fill neutral" style="width: ${microTiming.neutralProbability.toFixed(1)}%"></div></div>
+              <strong>${microTiming.neutralProbability.toFixed(1)}%</strong>
+            </div>
+          </div>
+        </article>
+        <article class="analysis-block">
+          <h4>Forca do momentum em segundos</h4>
+          <p>Direcao dominante: ${escapeHtml(microTiming.momentumDirection)}</p>
+          <p>Intensidade: ${microTiming.momentumStrength.toFixed(1)} / 100 (${escapeHtml(microTiming.momentumLabel)})</p>
+          <p>Velocidade instantanea: ${escapeHtml(momentumPerSecondLabel)}</p>
+          <p>Amostra media: ${Math.round(microTiming.barSpacingSeconds)}s por barra • expiracao sugerida ${microTiming.suggestedExpirySeconds}s.</p>
+        </article>
+      </div>
+      <article class="analysis-block">
+        <h4>Checklist de execucao binaria</h4>
+        <ul class="analysis-list">
+          <li>Evite entrada quando momentum estiver neutro e payout abaixo de 70%.</li>
+          <li>Em aceleracao forte, prefira expiracoes curtas alinhadas ao fluxo dominante.</li>
+          <li>Se CALL/PUT estiverem muito proximos, reduzir stake e aguardar confirmacao.</li>
+        </ul>
+      </article>
+    `;
+    return;
+  }
+
   if (activeAnalysisTabId === "calculadora") {
+    if (isBinaryMode) {
+      analysisTabContentElement.innerHTML = `
+        <div class="analysis-grid">
+          <article class="analysis-block">
+            <h4>Calculadora de Binarias</h4>
+            <p>Projete stake e payout para avaliar retorno por ciclo de expiracao.</p>
+            <div class="analysis-binary-input-grid">
+              <label class="prop-desk-field" for="binary-bankroll-calc-input">
+                Banca inicial (USD)
+                <input id="binary-bankroll-calc-input" data-binary-risk-input="bankroll" type="number" min="10" step="10" />
+              </label>
+              <label class="prop-desk-field" for="binary-payout-calc-input">
+                Payout atual (%)
+                <input id="binary-payout-calc-input" data-binary-risk-input="payoutPercent" type="number" min="10" max="99" step="0.1" />
+              </label>
+              <label class="prop-desk-field" for="binary-stake-calc-input">
+                Valor da entrada (stake)
+                <input id="binary-stake-calc-input" data-binary-risk-input="stake" type="number" min="1" step="1" />
+              </label>
+            </div>
+          </article>
+          <article class="analysis-block">
+            <h4>Saida esperada</h4>
+            <p>Lucro projetado: <strong data-binary-risk-output="projectedProfit">--</strong></p>
+            <p>Saldo apos win: <strong data-binary-risk-output="balanceWin">--</strong></p>
+            <p>Saldo apos loss: <strong data-binary-risk-output="balanceLoss">--</strong></p>
+            <p>Stake / banca: <strong data-binary-risk-output="stakePercent">--</strong></p>
+            <p>Stake sugerida (2%): <strong data-binary-risk-output="suggestedStake">--</strong></p>
+          </article>
+        </div>
+      `;
+
+      syncBinaryOptionsRiskPanel(analysisTabContentElement);
+      return;
+    }
+
     const capitalRef = 10000;
     const riskBudget = capitalRef * 0.01;
     const stopDistancePercent = clampNumber(
@@ -7039,6 +7561,8 @@ function renderDeepAnalysisPanel(snapshot) {
     return;
   }
 
+  ensureActiveAnalysisTabForOperationalMode(chartOperationalMode);
+
   const analysis = buildQuantitativeAnalysis(snapshot);
 
   if (!analysis) {
@@ -7067,8 +7591,9 @@ function renderDeepAnalysisPanel(snapshot) {
   }
 
   if (analysisStatusElement instanceof HTMLElement) {
-    analysisStatusElement.textContent =
-      "Modelagem quantitativa desbloqueada: tecnica + SMC + harmonicos + WEGD + probabilidades + timing, sem bloqueio de plano.";
+    analysisStatusElement.textContent = isBinaryOptionsOperationalMode()
+      ? "Workspace Binario ativo: foco em micro-timing, CALL/PUT e controle de stake por expiracao."
+      : "Modelagem quantitativa desbloqueada: tecnica + SMC + harmonicos + WEGD + probabilidades + timing, sem bloqueio de plano.";
   }
 
   if (analysisSignalCardElement instanceof HTMLElement) {
@@ -7208,6 +7733,7 @@ function saveChartPreferences() {
     favoriteIntervals: getOrderedFavoriteTerminalIntervals(),
     interval: getSelectedTerminalInterval(),
     mode: chartModeSelect instanceof HTMLSelectElement ? chartModeSelect.value : "delayed",
+    operationalMode: chartOperationalMode,
     overlayEma:
       chartOverlayEmaToggle instanceof HTMLInputElement ? chartOverlayEmaToggle.checked : true,
     overlayLevels:
@@ -7249,6 +7775,14 @@ function hydrateChartPreferences() {
     && isValueInSelect(chartModeSelect, preferences.mode)
   ) {
     chartModeSelect.value = preferences.mode;
+  }
+
+  if (typeof preferences.operationalMode === "string") {
+    chartOperationalMode = normalizeChartOperationalMode(preferences.operationalMode);
+  }
+
+  if (chartOperationalModeSelect instanceof HTMLSelectElement) {
+    chartOperationalModeSelect.value = chartOperationalMode;
   }
 
   if (
@@ -10797,6 +11331,31 @@ function normalizeRequestedChartResolution(interval) {
   return getBackendResolutionForTerminalInterval(normalizedInterval);
 }
 
+const BINARY_OPTIONS_RANGE_TO_TICK_RESOLUTION_MAP = {
+  "1000R": "1000T",
+  "100R": "100T",
+  "10R": "10T",
+};
+
+function normalizeRequestedBinaryOptionsResolution(interval) {
+  const normalizedInterval = normalizeTerminalInterval(interval);
+  const backendResolution = getBackendResolutionForTerminalInterval(normalizedInterval);
+
+  if (typeof backendResolution === "string" && backendResolution.length > 0) {
+    return backendResolution;
+  }
+
+  if (normalizedInterval.endsWith("T")) {
+    return normalizedInterval;
+  }
+
+  if (normalizedInterval.endsWith("R")) {
+    return BINARY_OPTIONS_RANGE_TO_TICK_RESOLUTION_MAP[normalizedInterval] ?? null;
+  }
+
+  return null;
+}
+
 function shouldUseResolutionFallback(interval, message) {
   const normalizedInterval = normalizeTerminalInterval(interval);
 
@@ -10862,6 +11421,68 @@ async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "bina
 
     return payload?.data ?? null;
   });
+}
+
+async function requestBinaryOptionsChartEndpoint(assetId, range, mode, exchange = "binance", resolution = "1S") {
+  return runMarketRequestWithRetry(async () => {
+    const normalizedExchange = normalizeRequestedBroker(exchange);
+    const normalizedMode = mode === "live" ? "live" : "delayed";
+    const params = new URLSearchParams({
+      assetId,
+      exchange: normalizedExchange,
+      mode: normalizedMode,
+      range,
+      resolution,
+    });
+
+    const response = await fetch(buildApiUrl(`/v1/binary-options/strategy-chart?${params.toString()}`), {
+      headers: buildIntelligenceSyncCorrelationHeaders(),
+      method: "GET",
+    });
+
+    let payload = null;
+
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    if (!response.ok) {
+      const errorMessage = payload?.error?.message;
+      throw new Error(normalizeChartApiErrorMessage(errorMessage, "Nao foi possivel carregar o grafico de binarias"));
+    }
+
+    return payload?.data ?? null;
+  });
+}
+
+async function requestBinaryOptionsChart(assetId, range, mode, exchange, interval) {
+  const normalizedInterval = normalizeTerminalInterval(interval);
+  const requestedResolution = normalizeRequestedBinaryOptionsResolution(normalizedInterval);
+
+  if (typeof requestedResolution !== "string" || requestedResolution.length === 0) {
+    throw new Error("Intervalo nao suportado para o modo operacional de binarias");
+  }
+
+  const snapshot = await requestBinaryOptionsChartEndpoint(
+    assetId,
+    range,
+    mode,
+    exchange,
+    requestedResolution,
+  );
+  const fallbackReason = typeof snapshot?.fallbackReason === "string" ? snapshot.fallbackReason : "";
+  const resolvedBroker = typeof snapshot?.exchange?.resolved === "string"
+    ? snapshot.exchange.resolved
+    : "binance";
+
+  return {
+    fallbackReason,
+    resolvedBroker,
+    resolvedResolution: requestedResolution,
+    snapshot,
+  };
 }
 
 async function requestCryptoChart(assetId, range, mode, exchange, interval) {
@@ -11218,6 +11839,18 @@ function buildCryptoLiveStreamUrl(assetId, exchange, range, intervalMs, resoluti
   return buildApiUrl(`/v1/crypto/live-stream?${params.toString()}`);
 }
 
+function buildBinaryOptionsLiveStreamUrl(assetId, exchange, range, intervalMs, resolution) {
+  const params = new URLSearchParams({
+    assetId,
+    exchange,
+    intervalMs: String(intervalMs),
+    range,
+    resolution,
+  });
+
+  return buildApiUrl(`/v1/binary-options/live-stream?${params.toString()}`);
+}
+
 function applyChartSnapshot(snapshot, options = {}) {
   if (!snapshot || !Array.isArray(snapshot.points)) {
     throw new Error("Resposta de grafico invalida");
@@ -11255,6 +11888,7 @@ function applyChartSnapshot(snapshot, options = {}) {
     ? CHART_STYLE_LABELS[getSelectedTerminalStyle()] ?? getSelectedTerminalStyle()
     : CHART_STYLE_LABELS[resolveChartStyle()] ?? resolveChartStyle();
   const strategyLabel = currentChartStrategy === "institutional_macro" ? "institucional" : "crypto";
+  const operationalModeLabel = getChartOperationalModeLabel(chartOperationalMode);
   const displayProvider = typeof options.displayProvider === "string"
     ? options.displayProvider
     : snapshot.provider;
@@ -11282,7 +11916,7 @@ function applyChartSnapshot(snapshot, options = {}) {
   const transportLabel = transport === "stream" ? " • transporte stream" : "";
 
   setChartStatus(
-    `Grafico ${snapshot.assetId.toUpperCase()} (${modeLabel}, ${rangeLabel}, ${styleLabel}, ${intervalLabel}) • estrategia ${strategyLabel} • exchange ${selectedExchange} • provider ${providerLabel} • ${cacheLabel}${refreshLabel}${liveLabel}${transportLabel}${fallbackLabel} • atualizado ${updatedAtLabel}`,
+    `Grafico ${snapshot.assetId.toUpperCase()} (${modeLabel}, ${rangeLabel}, ${styleLabel}, ${intervalLabel}) • workspace ${operationalModeLabel} • estrategia ${strategyLabel} • exchange ${selectedExchange} • provider ${providerLabel} • ${cacheLabel}${refreshLabel}${liveLabel}${transportLabel}${fallbackLabel} • atualizado ${updatedAtLabel}`,
     statusMode,
   );
 
@@ -11334,6 +11968,146 @@ function startChartLiveFallbackPolling() {
   }, CHART_STREAM_FALLBACK_POLL_MS);
 }
 
+function connectBinaryOptionsLiveStream(intervalMs) {
+  if (!(chartAssetSelect instanceof HTMLSelectElement) || !(chartRangeSelect instanceof HTMLSelectElement)) {
+    return false;
+  }
+
+  if (chartModeSelect?.value !== "live" || !isNativeLiveModeSupported()) {
+    stopChartLiveStream();
+    return false;
+  }
+
+  const assetId = chartAssetSelect.value;
+  const range = chartRangeSelect.value;
+  const selectedInterval = getSelectedTerminalInterval();
+  const streamResolution = normalizeRequestedBinaryOptionsResolution(selectedInterval);
+
+  if (typeof streamResolution !== "string" || streamResolution.length === 0) {
+    startChartLiveFallbackPolling();
+    return false;
+  }
+
+  const selectedRequestedBroker = normalizeRequestedBroker(getSelectedBroker());
+  const exchange = selectedRequestedBroker === "auto" ? "binance" : normalizeBrokerName(selectedRequestedBroker);
+  const streamKey = `${assetId}:binary:${selectedRequestedBroker}:${exchange}:${range}:${streamResolution}:${intervalMs}`;
+
+  if (chartLiveStream && chartLiveStreamKey === streamKey) {
+    return true;
+  }
+
+  stopChartLiveStream();
+  chartLiveStreamKey = streamKey;
+
+  const streamUrl = buildBinaryOptionsLiveStreamUrl(assetId, exchange, range, intervalMs, streamResolution);
+  const eventSource = new EventSource(streamUrl);
+  chartLiveStream = eventSource;
+
+  eventSource.addEventListener("snapshot", (event) => {
+    let payload = null;
+
+    try {
+      payload = JSON.parse(event.data);
+    } catch {
+      payload = null;
+    }
+
+    const snapshot = payload?.chart ?? null;
+
+    if (!snapshot || !Array.isArray(snapshot.points)) {
+      return;
+    }
+
+    if (chartAssetSelect.value !== snapshot.assetId) {
+      return;
+    }
+
+    if (chartRangeSelect.value !== snapshot.range) {
+      return;
+    }
+
+    stopChartLiveFallbackPolling();
+    chartLiveStreamReconnectAttempt = 0;
+
+    const resolvedStreamBroker = normalizeBrokerName(snapshot?.exchange?.resolved ?? snapshot?.provider ?? exchange);
+    const selectedExchangeForStatus = resolveExchangeLabelFromBroker(resolvedStreamBroker);
+    const fallbackReason = typeof snapshot?.fallbackReason === "string" ? snapshot.fallbackReason : "";
+
+    try {
+      applyChartSnapshot(snapshot, {
+        displayProvider: resolvedStreamBroker,
+        fallbackReason,
+        selectedExchange: selectedExchangeForStatus,
+        transport: "stream",
+      });
+    } catch {
+      // Keep stream alive even if a malformed snapshot arrives.
+    }
+  });
+
+  eventSource.addEventListener("stream-error", (event) => {
+    let payload = null;
+
+    try {
+      payload = JSON.parse(event.data);
+    } catch {
+      payload = null;
+    }
+
+    const message = typeof payload?.message === "string"
+      ? payload.message
+      : "Stream de binarias reportou falha";
+
+    startChartLiveFallbackPolling();
+    const normalizedMessage = normalizeChartApiErrorMessage(message, "Stream de binarias reportou falha");
+
+    if (chartViewMode === "tv" && currentChartSnapshot) {
+      setChartLegendTransient(`Stream com oscilacao: ${normalizedMessage}`, "warn");
+    } else {
+      setChartStatus(normalizedMessage, "error");
+    }
+  });
+
+  eventSource.onerror = () => {
+    if (normalizeRequestedBroker(getSelectedBroker()) !== selectedRequestedBroker) {
+      return;
+    }
+
+    if (!chartLiveStream || chartLiveStreamKey !== streamKey) {
+      return;
+    }
+
+    stopChartLiveStream();
+    startChartLiveFallbackPolling();
+    chartLiveStreamReconnectAttempt += 1;
+    const backoffMs = Math.min(30000, 1200 * 2 ** chartLiveStreamReconnectAttempt);
+
+    if (chartViewMode === "tv" && currentChartSnapshot) {
+      setChartLegendTransient(`Reconectando stream live em ${Math.round(backoffMs / 1000)}s...`, "warn");
+    } else {
+      setChartStatus(`Reconectando stream live em ${Math.round(backoffMs / 1000)}s...`, "loading");
+    }
+
+    chartLiveStreamBackoffTimer = window.setTimeout(() => {
+      chartLiveStreamBackoffTimer = null;
+
+      if (chartModeSelect?.value !== "live") {
+        return;
+      }
+
+      configureChartAutoRefresh();
+
+      if (!chartLiveStream) {
+        void loadChart({
+          silent: true,
+        });
+      }
+    }, backoffMs);
+  };
+
+  return true;
+}
+
 function connectChartLiveStream(intervalMs) {
   if (typeof EventSource !== "function") {
     return false;
@@ -11348,6 +12122,10 @@ function connectChartLiveStream(intervalMs) {
   if (resolveChartPipelineStrategy(selectedTerminalSymbol) !== "crypto") {
     stopChartLiveStream();
     return false;
+  }
+
+  if (isBinaryOptionsOperationalMode()) {
+    return connectBinaryOptionsLiveStream(intervalMs);
   }
 
   if (chartModeSelect?.value !== "live" || !isNativeLiveModeSupported()) {
@@ -11731,6 +12509,7 @@ async function loadChart(options = {}) {
 
   try {
     currentChartStrategy = pipelineStrategy;
+    const binaryOperationalMode = isBinaryOptionsOperationalMode();
 
     if (pipelineStrategy === "institutional_macro") {
       const {
@@ -11777,16 +12556,28 @@ async function loadChart(options = {}) {
       resolvedBroker,
       resolvedResolution,
       snapshot,
-    } = await requestCryptoChart(
-      assetId,
-      range,
-      mode,
-      selectedBroker,
-      selectedInterval,
-    );
+    } = binaryOperationalMode
+      ? await requestBinaryOptionsChart(
+        assetId,
+        range,
+        mode,
+        selectedBroker,
+        selectedInterval,
+      )
+      : await requestCryptoChart(
+        assetId,
+        range,
+        mode,
+        selectedBroker,
+        selectedInterval,
+      );
 
-    const requestedResolution = normalizeRequestedChartResolution(selectedInterval);
+    const requestedResolution = binaryOperationalMode
+      ? normalizeRequestedBinaryOptionsResolution(selectedInterval)
+      : normalizeRequestedChartResolution(selectedInterval);
     const usedFallbackResolution =
+      !binaryOperationalMode
+      &&
       typeof resolvedResolution === "string"
       && resolvedResolution === TERMINAL_INTERVAL_BACKEND_FALLBACK
       && requestedResolution !== resolvedResolution;
@@ -11800,9 +12591,11 @@ async function loadChart(options = {}) {
     }
 
     const requestedBroker = normalizeRequestedBroker(selectedBroker);
-    const statusBroker = requestedBroker === "auto"
-      ? resolveAutoChartPrimaryBroker()
-      : normalizeBrokerName(resolvedBroker);
+    const statusBroker = binaryOperationalMode
+      ? normalizeBrokerName(resolvedBroker)
+      : requestedBroker === "auto"
+        ? resolveAutoChartPrimaryBroker()
+        : normalizeBrokerName(resolvedBroker);
     const selectedExchangeForStatus = resolveExchangeLabelFromBroker(statusBroker);
 
     applyChartSnapshot(snapshot, {
@@ -12730,6 +13523,9 @@ function setupChartLab() {
   }
 
   hydrateChartPreferences();
+  binaryOptionsRiskState = readStoredBinaryOptionsRiskState();
+  updateOperationalModeTag();
+  ensureActiveAnalysisTabForOperationalMode(chartOperationalMode);
 
   if (
     chartSymbolInput instanceof HTMLInputElement
@@ -12821,6 +13617,16 @@ function setupChartLab() {
       }
 
       saveChartPreferences();
+    });
+  }
+
+  if (chartOperationalModeSelect instanceof HTMLSelectElement) {
+    chartOperationalModeSelect.addEventListener("change", () => {
+      setChartOperationalMode(chartOperationalModeSelect.value, {
+        announce: true,
+        persist: true,
+        refreshChart: true,
+      });
     });
   }
 
@@ -13145,11 +13951,16 @@ function setupChartLab() {
       const exchange = getSelectedTerminalExchange();
       const modeLabel = CHART_MODE_LABELS[mode] ?? mode;
       const rangeLabel = CHART_RANGE_LABELS[range] ?? range;
+      const operationalModeLabel = getChartOperationalModeLabel(chartOperationalMode);
       const trend = currentChartSnapshot?.insights?.trend
         ? formatTrendLabel(currentChartSnapshot.insights.trend).toLowerCase()
         : "viés indefinido";
 
-      chatInput.value = `Analise tecnicamente o grafico de ${assetId} em ${rangeLabel}, corretora ${exchange}, modo ${modeLabel}. Quero um report completo com todos os blocos: resumo executivo, tecnica, SMC, harmonicos, WEGD, probabilistica, calculo de risco/retorno, timing, visual IA e noticias operacionais. Traga cenario de compra e venda com probabilidades, gatilho, invalidacao, TP1/TP2/TP3, confluencias e plano de gestao de risco. Se faltar dado, declare a limitacao e mantenha a analise objetiva com grau de confianca. Contexto atual: ${trend}.`;
+      if (isBinaryOptionsOperationalMode()) {
+        chatInput.value = `Analise o grafico de ${assetId} em ${rangeLabel}, corretora ${exchange}, modo ${modeLabel}, workspace ${operationalModeLabel}. Foque em micro-timing para opcoes binarias: probabilidade CALL/PUT, forca de momentum em segundos, janela de expiracao sugerida e controle de stake por payout. Traga leitura objetiva com gatilho de entrada, condicao de invalidacao rapida e cenario neutro. Se faltar dado, declare a limitacao com clareza. Contexto atual: ${trend}.`;
+      } else {
+        chatInput.value = `Analise tecnicamente o grafico de ${assetId} em ${rangeLabel}, corretora ${exchange}, modo ${modeLabel}, workspace ${operationalModeLabel}. Quero um report completo com todos os blocos: resumo executivo, tecnica, SMC, harmonicos, WEGD, probabilistica, calculo de risco/retorno, timing, visual IA e noticias operacionais. Traga cenario de compra e venda com probabilidades, gatilho, invalidacao, TP1/TP2/TP3, confluencias e plano de gestao de risco. Se faltar dado, declare a limitacao e mantenha a analise objetiva com grau de confianca. Contexto atual: ${trend}.`;
+      }
       chatInput.focus();
 
       if (chatForm && !isSending) {
@@ -13167,8 +13978,9 @@ function setupChartLab() {
       }
 
       const tabId = target.dataset.tab;
+      const availableTabs = resolveVisibleAnalysisTabs(chartOperationalMode);
 
-      if (!tabId || !ANALYSIS_TAB_DEFINITIONS.some((item) => item.id === tabId)) {
+      if (!tabId || !availableTabs.some((item) => item.id === tabId)) {
         return;
       }
 
@@ -13181,10 +13993,31 @@ function setupChartLab() {
     });
   }
 
+  if (analysisTabContentElement instanceof HTMLElement) {
+    analysisTabContentElement.addEventListener("input", (event) => {
+      const target = event.target;
+
+      if (!(target instanceof HTMLInputElement)) {
+        return;
+      }
+
+      if (typeof target.dataset.binaryRiskInput !== "string") {
+        return;
+      }
+
+      updateBinaryOptionsRiskStateFromInput(target);
+    });
+  }
+
   renderIntelligenceSyncOpsPanel();
 
   ensureInteractiveChart();
   setChartViewMode(chartViewMode);
+  setChartOperationalMode(chartOperationalMode, {
+    announce: false,
+    persist: false,
+    refreshChart: false,
+  });
   configureChartAutoRefresh();
   configureWatchlistAutoRefresh();
   setupChartKeyboardShortcuts();

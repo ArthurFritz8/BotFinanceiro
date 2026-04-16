@@ -1147,6 +1147,12 @@ body.sidebar-collapsed .app-shell {
   text-transform: uppercase;
 }
 
+.chart-lab-tag[data-operational-mode="binary_options"] {
+  background: rgba(244, 167, 68, 0.18);
+  border-color: rgba(255, 207, 130, 0.48);
+  color: #ffe6be;
+}
+
 .chart-controls {
   align-items: end;
   display: grid;
@@ -2485,6 +2491,41 @@ body.sidebar-collapsed .app-shell {
   display: grid;
   gap: 0.46rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.analysis-binary-input-grid {
+  display: grid;
+  gap: 0.38rem;
+  margin-top: 0.24rem;
+}
+
+.analysis-binary-kpi-grid {
+  display: grid;
+  gap: 0.36rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0.2rem;
+}
+
+.analysis-binary-kpi {
+  background: rgba(7, 20, 36, 0.76);
+  border: 1px solid rgba(118, 166, 224, 0.32);
+  border-radius: 9px;
+  display: grid;
+  gap: 0.14rem;
+  padding: 0.38rem 0.42rem;
+}
+
+.analysis-binary-kpi span {
+  color: #95b2d6;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.analysis-binary-kpi strong {
+  color: #eaf4ff;
+  font-size: 0.8rem;
 }
 
 .analysis-block {
@@ -4091,6 +4132,10 @@ body.sidebar-collapsed .app-shell {
 
   .analysis-probability-row {
     grid-template-columns: 68px minmax(0, 1fr) auto;
+  }
+
+  .analysis-binary-kpi-grid {
+    grid-template-columns: 1fr;
   }
 
   .analysis-tab-button {

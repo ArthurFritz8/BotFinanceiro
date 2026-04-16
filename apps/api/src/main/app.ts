@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 
 import { registerAirdropsRoutes } from "../modules/airdrops/interface/airdrops-routes.js";
 import { registerB3Routes } from "../modules/b3/interface/b3-routes.js";
+import { registerBinaryOptionsRoutes } from "../modules/binary_options/interface/binary-options-routes.js";
 import { registerBrokersRoutes } from "../modules/brokers/interface/brokers-routes.js";
 import { registerCommoditiesRoutes } from "../modules/commodities/interface/commodities-routes.js";
 import { registerCopilotRoutes } from "../modules/copilot/interface/copilot-routes.js";
@@ -86,6 +87,7 @@ export function buildApp() {
     (instance, _, done) => {
       registerAirdropsRoutes(instance);
       registerB3Routes(instance);
+      registerBinaryOptionsRoutes(instance);
       registerBrokersRoutes(instance);
       registerCommoditiesRoutes(instance);
       registerCopilotRoutes(instance);
