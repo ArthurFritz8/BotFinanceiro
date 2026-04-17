@@ -183,7 +183,8 @@ const BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_INSTITUTIONAL = "institutional";
 const INTELLIGENCE_SYNC_HEALTH_ENDPOINT = "/internal/health/intelligence-sync";
 const INTELLIGENCE_SYNC_HEALTH_REFRESH_MS = 20000;
 const INTELLIGENCE_SYNC_HEALTH_STALE_AFTER_MS = 90000;
-const INTELLIGENCE_SYNC_INTERNAL_TOKEN = (import.meta.env.VITE_INTERNAL_API_TOKEN ?? "").trim();
+const INTELLIGENCE_SYNC_INTERNAL_TOKEN_ENV = (import.meta.env.VITE_INTERNAL_API_TOKEN ?? "").trim();
+const INTELLIGENCE_SYNC_INTERNAL_TOKEN_SESSION_STORAGE_KEY = "botfinanceiro.internalApiToken.session.v1";
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
 const APP_ROUTE_CHAT = "chat";
 const APP_ROUTE_CHART_LAB = "chart-lab";
@@ -1805,6 +1806,7 @@ let intelligenceSyncHealthPollTimer = null;
 let intelligenceSyncHealthInFlight = false;
 let intelligenceSyncBackendHealthSnapshot = null;
 let intelligenceSyncBackendHealthError = "";
+let intelligenceSyncInternalToken = "";
 let intelligenceSyncMetrics = {
   alertLevel: "ok",
   averageLatencyMs: 0,
@@ -2165,6 +2167,119 @@ function isNativeLiveModeSupported() {
 
 function buildApiUrl(path) {
   return API_BASE_URL.length > 0 ? `${API_BASE_URL}${path}` : path;
+}
+
+function normalizeInternalApiToken(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function readStoredIntelligenceSyncInternalToken() {
+  try {
+    return normalizeInternalApiToken(
+      sessionStorage.getItem(INTELLIGENCE_SYNC_INTERNAL_TOKEN_SESSION_STORAGE_KEY),
+    );
+  } catch {
+    return "";
+  }
+}
+
+function persistIntelligenceSyncInternalToken(token) {
+  const normalizedToken = normalizeInternalApiToken(token);
+
+  try {
+    if (normalizedToken.length >= 16) {
+      sessionStorage.setItem(INTELLIGENCE_SYNC_INTERNAL_TOKEN_SESSION_STORAGE_KEY, normalizedToken);
+    } else {
+      sessionStorage.removeItem(INTELLIGENCE_SYNC_INTERNAL_TOKEN_SESSION_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore storage errors and keep token in memory.
+  }
+}
+
+function getIntelligenceSyncInternalToken() {
+  return intelligenceSyncInternalToken;
+}
+
+function hasIntelligenceSyncInternalToken() {
+  return getIntelligenceSyncInternalToken().length >= 16;
+}
+
+function setIntelligenceSyncInternalToken(token, options = {}) {
+  const normalizedToken = normalizeInternalApiToken(token);
+  intelligenceSyncInternalToken = normalizedToken;
+
+  if (options.persist !== false) {
+    persistIntelligenceSyncInternalToken(normalizedToken);
+  }
+
+  if (options.refresh !== true) {
+    return;
+  }
+
+  intelligenceSyncBackendHealthSnapshot = null;
+  intelligenceSyncBackendHealthError = "";
+
+  binaryOptionsGhostAuditBackendState.error = "";
+  binaryOptionsGhostAuditBackendState.fetchedAtMs = 0;
+  binaryOptionsGhostAuditBackendState.history = null;
+  binaryOptionsGhostAuditBackendState.requestKey = "";
+
+  renderIntelligenceSyncOpsPanel();
+  renderDeepAnalysisPanel(currentChartSnapshot);
+
+  if (activeAppRoute !== APP_ROUTE_CHART_LAB) {
+    return;
+  }
+
+  if (hasIntelligenceSyncInternalToken()) {
+    void refreshIntelligenceSyncHealthSnapshot({
+      reschedule: true,
+    });
+
+    if (currentChartSnapshot) {
+      void refreshBinaryOptionsGhostAuditHistory(currentChartSnapshot, {
+        force: true,
+      });
+    }
+
+    return;
+  }
+
+  stopIntelligenceSyncHealthPolling();
+}
+
+function exposeIntelligenceSyncInternalTokenHelpers() {
+  if (typeof window !== "object" || window === null) {
+    return;
+  }
+
+  window.__botfinanceiroSetInternalToken = (token) => {
+    setIntelligenceSyncInternalToken(token, {
+      persist: true,
+      refresh: true,
+    });
+
+    return hasIntelligenceSyncInternalToken();
+  };
+
+  window.__botfinanceiroClearInternalToken = () => {
+    setIntelligenceSyncInternalToken("", {
+      persist: true,
+      refresh: true,
+    });
+  };
+}
+
+function hydrateIntelligenceSyncInternalToken() {
+  const environmentToken = normalizeInternalApiToken(INTELLIGENCE_SYNC_INTERNAL_TOKEN_ENV);
+
+  if (environmentToken.length >= 16) {
+    intelligenceSyncInternalToken = environmentToken;
+    return;
+  }
+
+  intelligenceSyncInternalToken = readStoredIntelligenceSyncInternalToken();
 }
 
 function createSessionId() {
@@ -7314,7 +7429,7 @@ function getBinaryOptionsGhostTrackerStats(state = binaryOptionsGhostTrackerStat
 }
 
 function canFetchBinaryOptionsGhostAuditHistory() {
-  return typeof fetch === "function" && INTELLIGENCE_SYNC_INTERNAL_TOKEN.length >= 16;
+  return typeof fetch === "function" && hasIntelligenceSyncInternalToken();
 }
 
 function getBinaryOptionsGhostBackendStats(state = binaryOptionsGhostAuditBackendState) {
@@ -7361,7 +7476,7 @@ function buildBinaryOptionsGhostBackendStatusMessage(ghostBackendStats) {
     === BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION;
 
   if (!ghostBackendStats.enabled) {
-    return "Backend audit indisponivel: defina VITE_INTERNAL_API_TOKEN para consultar historico interno.";
+    return "Backend audit indisponivel: defina VITE_INTERNAL_API_TOKEN ou injete token em runtime com window.__botfinanceiroSetInternalToken('...').";
   }
 
   if (isSessionView && ghostBackendStats.error === "ghost-audit-session-id-invalid") {
@@ -7487,13 +7602,14 @@ async function refreshBinaryOptionsGhostAuditHistory(snapshot, options = {}) {
   const requestPath = query.length > 0
     ? `${BINARY_OPTIONS_GHOST_AUDIT_HISTORY_ENDPOINT}?${query}`
     : BINARY_OPTIONS_GHOST_AUDIT_HISTORY_ENDPOINT;
+  const internalToken = getIntelligenceSyncInternalToken();
 
   binaryOptionsGhostAuditBackendState.inFlight = true;
 
   try {
     const response = await fetch(buildApiUrl(requestPath), {
       headers: {
-        "x-internal-token": INTELLIGENCE_SYNC_INTERNAL_TOKEN,
+        "x-internal-token": internalToken,
       },
       method: "GET",
     });
@@ -10323,8 +10439,8 @@ function buildIntelligenceSyncOpsStatusMessage(snapshot) {
   if (summary.requests <= 0) {
     const baseMessage = "Aguardando primeiro ciclo de sincronizacao.";
 
-    if (INTELLIGENCE_SYNC_INTERNAL_TOKEN.length < 16) {
-      return `${baseMessage} Backend health requer VITE_INTERNAL_API_TOKEN.`;
+    if (!hasIntelligenceSyncInternalToken()) {
+      return `${baseMessage} Backend health requer VITE_INTERNAL_API_TOKEN ou window.__botfinanceiroSetInternalToken('...').`;
     }
 
     if (snapshot.source === "local" && intelligenceSyncBackendHealthError.length > 0) {
@@ -10409,7 +10525,7 @@ async function refreshIntelligenceSyncHealthSnapshot(options = {}) {
     return;
   }
 
-  if (INTELLIGENCE_SYNC_INTERNAL_TOKEN.length < 16) {
+  if (!hasIntelligenceSyncInternalToken()) {
     return;
   }
 
@@ -10424,9 +10540,10 @@ async function refreshIntelligenceSyncHealthSnapshot(options = {}) {
   intelligenceSyncHealthInFlight = true;
 
   try {
+    const internalToken = getIntelligenceSyncInternalToken();
     const response = await fetch(buildApiUrl(INTELLIGENCE_SYNC_HEALTH_ENDPOINT), {
       headers: {
-        "x-internal-token": INTELLIGENCE_SYNC_INTERNAL_TOKEN,
+        "x-internal-token": internalToken,
       },
       method: "GET",
     });
@@ -10470,7 +10587,7 @@ async function refreshIntelligenceSyncHealthSnapshot(options = {}) {
 function startIntelligenceSyncHealthPolling() {
   renderIntelligenceSyncOpsPanel();
 
-  if (INTELLIGENCE_SYNC_INTERNAL_TOKEN.length < 16) {
+  if (!hasIntelligenceSyncInternalToken()) {
     return;
   }
 
@@ -15802,6 +15919,9 @@ window.addEventListener("beforeunload", () => {
   stopWatchlistAutoRefresh();
   destroyInteractiveChart();
 });
+
+hydrateIntelligenceSyncInternalToken();
+exposeIntelligenceSyncInternalTokenHelpers();
 
 setupQuickPrompts();
 setupAppShellRouting();

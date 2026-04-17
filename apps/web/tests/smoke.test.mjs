@@ -144,7 +144,8 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /const INTELLIGENCE_SYNC_HEALTH_ENDPOINT = "\/internal\/health\/intelligence-sync"/);
   assert.match(mainSource, /const INTELLIGENCE_SYNC_HEALTH_REFRESH_MS = 20000/);
   assert.match(mainSource, /const INTELLIGENCE_SYNC_HEALTH_STALE_AFTER_MS = 90000/);
-  assert.match(mainSource, /const INTELLIGENCE_SYNC_INTERNAL_TOKEN = \(import\.meta\.env\.VITE_INTERNAL_API_TOKEN \?\? ""\)\.trim\(\);/);
+  assert.match(mainSource, /const INTELLIGENCE_SYNC_INTERNAL_TOKEN_ENV = \(import\.meta\.env\.VITE_INTERNAL_API_TOKEN \?\? ""\)\.trim\(\);/);
+  assert.match(mainSource, /const INTELLIGENCE_SYNC_INTERNAL_TOKEN_SESSION_STORAGE_KEY = "botfinanceiro\.internalApiToken\.session\.v1";/);
   assert.match(mainSource, /const TERMINAL_INTERVAL_TO_CHART_RANGE = \{/);
   assert.match(mainSource, /const TERMINAL_INTERVAL_BINARY_OPTIONS_FALLBACK = "1S";/);
   assert.match(mainSource, /function buildResolutionFallbackMessage\(interval, fallbackInterval = TERMINAL_INTERVAL_BACKEND_FALLBACK\)/);
@@ -166,6 +167,13 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /function queuePendingChartLoadRequest\(options = \{\}\)/);
   assert.match(mainSource, /function canRunInstitutionalMacroForSymbol\(symbol\)/);
   assert.match(mainSource, /function createIntelligenceSyncCorrelationId\(\)/);
+  assert.match(mainSource, /function getIntelligenceSyncInternalToken\(\)/);
+  assert.match(mainSource, /function hasIntelligenceSyncInternalToken\(\)/);
+  assert.match(mainSource, /function setIntelligenceSyncInternalToken\(token, options = \{\}\)/);
+  assert.match(mainSource, /function exposeIntelligenceSyncInternalTokenHelpers\(\)/);
+  assert.match(mainSource, /function hydrateIntelligenceSyncInternalToken\(\)/);
+  assert.match(mainSource, /window\.__botfinanceiroSetInternalToken = \(token\) => \{/);
+  assert.match(mainSource, /window\.__botfinanceiroClearInternalToken = \(\) => \{/);
   assert.match(mainSource, /function publishIntelligenceSyncTelemetryToBackend\(input = \{\}\)/);
   assert.match(mainSource, /function createSpotMarginGhostTrackerState\(\)/);
   assert.match(mainSource, /function resetSpotMarginGhostTrackerSession\(\)/);
@@ -195,7 +203,7 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /handleIntelligenceSyncOpsRouteChange\(safeRoute\);/);
   assert.match(mainSource, /buildApiUrl\(INTELLIGENCE_SYNC_HEALTH_ENDPOINT\)/);
   assert.match(mainSource, /buildApiUrl\(requestPath\)/);
-  assert.match(mainSource, /"x-internal-token": INTELLIGENCE_SYNC_INTERNAL_TOKEN/);
+  assert.match(mainSource, /"x-internal-token": internalToken/);
   assert.match(mainSource, /"x-intelligence-correlation-id": correlationId/);
   assert.match(mainSource, /buildApiUrl\(INTELLIGENCE_SYNC_TELEMETRY_ENDPOINT\)/);
   assert.match(mainSource, /if \(pipelineStrategy === "institutional_macro" && !canRunInstitutionalMacroForSymbol\(selectedTerminalSymbol\)\)/);
@@ -224,6 +232,8 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   );
   assert.match(mainSource, /const didSyncRange = syncChartRangeWithTerminalInterval\(normalizedInterval, \{/);
   assert.match(mainSource, /applyTerminalIntervalSelection\(intervalShortcut, \{/);
+  assert.match(mainSource, /hydrateIntelligenceSyncInternalToken\(\);/);
+  assert.match(mainSource, /exposeIntelligenceSyncInternalTokenHelpers\(\);/);
 });
 
 test("styles.css contem classes base do prop desk", async () => {

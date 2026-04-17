@@ -479,16 +479,18 @@ VITE_DEV_API_PROXY_TARGET=http://localhost:3000 npm run dev:web
 ```
 
 5. Com `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` configurados, o frontend habilita login e vincula historico ao usuario autenticado.
-6. O card "Conversas" permite criar e alternar multiplas threads; cada thread e persistida por usuario no banco.
-7. Sidebar Chat-First com rotas principais: `/` (Chat), `/chart-lab` (Chart Lab) e `/radar` (Radar), com destaque visual da rota ativa.
-8. O estado da rota e do menu colapsado e persistido no navegador para manter continuidade entre refreshs.
-9. O card "Chart Lab" permite alternar entre modo `Delay` e `Ao vivo`, visualizar preco e sinais tecnicos avancados (EMA, RSI, MACD, ATR, suporte/resistencia, acao tatica e niveis de risco) e enviar analise automatica ao chat com um clique.
-10. O bloco "Radar de oportunidades" dentro do Chart Lab carrega `/v1/airdrops/opportunities` com filtros de chain, confianca, score minimo e busca textual.
-11. Cada card do radar possui acao "Levar ao chat" para preencher automaticamente um prompt contextual (projeto, tarefas, score, confianca e fontes), acelerando analise operacional.
-12. O radar persiste filtros no navegador (chain, confianca, score, query e includeSpeculative), mantendo contexto entre reloads.
-13. Cada card agora inclui acao "Copiar prompt" para usar o contexto em qualquer fluxo externo (chat, runbook ou checklist operacional).
-14. Atalhos inteligentes incluem prompts dedicados para forex, futuros, opcoes, commodities, renda fixa, ETFs, setores globais, macro rates, carteira, B3, FIIs, equities globais, Wall Street e DeFi, acelerando consultas multi-mercado no Copiloto.
-15. Atalhos de rota Chat-First: `Alt+7` abre Chat, `Alt+8` abre Chart Lab e `Alt+9` abre Radar.
+6. Para desbloquear historico persistido do Ghost Tracker e o painel de health backend no Chart Lab, configure `VITE_INTERNAL_API_TOKEN` (minimo 16 caracteres) no frontend interno ou injete em runtime no navegador com `window.__botfinanceiroSetInternalToken("seu_token")`.
+7. Em ambientes publicos, evite embutir token interno no build; prefira injecao runtime de sessao para operadores.
+8. O card "Conversas" permite criar e alternar multiplas threads; cada thread e persistida por usuario no banco.
+9. Sidebar Chat-First com rotas principais: `/` (Chat), `/chart-lab` (Chart Lab) e `/radar` (Radar), com destaque visual da rota ativa.
+10. O estado da rota e do menu colapsado e persistido no navegador para manter continuidade entre refreshs.
+11. O card "Chart Lab" permite alternar entre modo `Delay` e `Ao vivo`, visualizar preco e sinais tecnicos avancados (EMA, RSI, MACD, ATR, suporte/resistencia, acao tatica e niveis de risco) e enviar analise automatica ao chat com um clique.
+12. O bloco "Radar de oportunidades" dentro do Chart Lab carrega `/v1/airdrops/opportunities` com filtros de chain, confianca, score minimo e busca textual.
+13. Cada card do radar possui acao "Levar ao chat" para preencher automaticamente um prompt contextual (projeto, tarefas, score, confianca e fontes), acelerando analise operacional.
+14. O radar persiste filtros no navegador (chain, confianca, score, query e includeSpeculative), mantendo contexto entre reloads.
+15. Cada card agora inclui acao "Copiar prompt" para usar o contexto em qualquer fluxo externo (chat, runbook ou checklist operacional).
+16. Atalhos inteligentes incluem prompts dedicados para forex, futuros, opcoes, commodities, renda fixa, ETFs, setores globais, macro rates, carteira, B3, FIIs, equities globais, Wall Street e DeFi, acelerando consultas multi-mercado no Copiloto.
+17. Atalhos de rota Chat-First: `Alt+7` abre Chat, `Alt+8` abre Chart Lab e `Alt+9` abre Radar.
 
 ## Frontend publico
 
