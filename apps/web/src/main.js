@@ -7,6 +7,7 @@ import {
   LineSeries,
 } from "lightweight-charts";
 import { isSupabaseConfigured, supabase } from "./shared/supabase-client.js";
+import { createCounter } from "@botfinanceiro/shared-utils";
 import { parseStreamPayload } from "./shared/parse-stream-payload.js";
 import { scheduleRender } from "./shared/schedule-render.js";
 import { filterOutOtc, getAssetFilterSnapshot } from "./shared/asset-filters.js";
@@ -58,6 +59,7 @@ const chartSymbolInput = document.querySelector("#chart-symbol");
 const chartOverlayEmaToggle = document.querySelector("#chart-overlay-ema");
 const chartOverlayLevelsToggle = document.querySelector("#chart-overlay-levels");
 const chartFitButton = document.querySelector("#chart-fit-button");
+const chartAnalyzeMarketButton = document.querySelector("#chart-analyze-market-button");
 const chartViewSwitch = document.querySelector("#chart-view-switch");
 const chartIntervalSwitch = document.querySelector("#chart-interval-switch");
 const chartIntervalMenuButton = document.querySelector("#chart-interval-menu-button");
@@ -10943,6 +10945,133 @@ function queuePendingChartLoadRequest(options = {}) {
   pendingChartLoadRequest = nextRequest;
 }
 
+const manualMarketAnalysisCounter = createCounter();
+const MANUAL_ANALYSIS_MIN_LOADING_MS = 220;
+const MANUAL_ANALYSIS_INVALID_FEEDBACK_MS = 360;
+
+if (typeof window !== "undefined") {
+  window.__botfinanceiroDebug = window.__botfinanceiroDebug ?? {};
+  window.__botfinanceiroDebug.manualMarketAnalysisSnapshot = () =>
+    manualMarketAnalysisCounter.snapshot();
+}
+
+let manualMarketAnalysisInFlight = false;
+
+function setManualAnalysisButtonState(state) {
+  if (!(chartAnalyzeMarketButton instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  const labelElement = chartAnalyzeMarketButton.querySelector(
+    ".chart-analyze-market-button__label",
+  );
+
+  chartAnalyzeMarketButton.dataset.state = state;
+
+  if (state === "loading") {
+    chartAnalyzeMarketButton.setAttribute("aria-busy", "true");
+    chartAnalyzeMarketButton.setAttribute("aria-disabled", "true");
+    chartAnalyzeMarketButton.disabled = true;
+
+    if (labelElement instanceof HTMLElement) {
+      labelElement.textContent = "PROCESSANDO MOTOR INSTITUCIONAL...";
+    }
+
+    return;
+  }
+
+  chartAnalyzeMarketButton.removeAttribute("aria-busy");
+  chartAnalyzeMarketButton.removeAttribute("aria-disabled");
+  chartAnalyzeMarketButton.disabled = false;
+
+  if (labelElement instanceof HTMLElement) {
+    labelElement.textContent = "ANALISAR MERCADO";
+  }
+}
+
+function flashManualAnalysisInvalid(message) {
+  if (!(chartAnalyzeMarketButton instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  manualMarketAnalysisCounter.increment("invalid");
+  chartAnalyzeMarketButton.dataset.state = "invalid";
+
+  if (typeof message === "string" && message.length > 0) {
+    setChartStatus(message, "warn");
+  }
+
+  window.setTimeout(() => {
+    if (chartAnalyzeMarketButton.dataset.state === "invalid") {
+      chartAnalyzeMarketButton.dataset.state = "idle";
+    }
+  }, MANUAL_ANALYSIS_INVALID_FEEDBACK_MS);
+}
+
+async function runManualMarketAnalysis(options = {}) {
+  if (manualMarketAnalysisInFlight) {
+    manualMarketAnalysisCounter.increment("blocked");
+    return;
+  }
+
+  const selectedAssetId =
+    chartAssetSelect instanceof HTMLSelectElement ? chartAssetSelect.value.trim() : "";
+
+  if (selectedAssetId.length === 0) {
+    flashManualAnalysisInvalid("Selecione um ativo antes de rodar a analise institucional.");
+    return;
+  }
+
+  manualMarketAnalysisInFlight = true;
+  manualMarketAnalysisCounter.increment(
+    options.source === "keyboard" ? "trigger:keyboard" : "trigger:click",
+  );
+
+  setManualAnalysisButtonState("loading");
+  updateChartLiveStatus(LIVE_STATUS.RECONNECTING, {
+    title: "Sincronizando Intelligence Desk com snapshot fresh",
+  });
+
+  const startedAt =
+    typeof performance !== "undefined" && typeof performance.now === "function"
+      ? performance.now()
+      : Date.now();
+
+  let outcome = "ok";
+
+  try {
+    await syncIntelligenceDeskForCurrentContext({
+      reason: `manual-cta:${options.source ?? "click"}`,
+      silent: false,
+    });
+  } catch (error) {
+    outcome = "error";
+    manualMarketAnalysisCounter.increment("error");
+
+    if (error instanceof Error) {
+      setChartStatus(`Falha ao rodar analise institucional: ${error.message}`, "error");
+    } else {
+      setChartStatus("Falha ao rodar analise institucional.", "error");
+    }
+  } finally {
+    const now =
+      typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now();
+    const elapsed = now - startedAt;
+    const remaining = Math.max(0, MANUAL_ANALYSIS_MIN_LOADING_MS - elapsed);
+
+    window.setTimeout(() => {
+      setManualAnalysisButtonState("idle");
+      manualMarketAnalysisInFlight = false;
+
+      if (outcome === "ok") {
+        manualMarketAnalysisCounter.increment("success");
+      }
+    }, remaining);
+  }
+}
+
 async function syncIntelligenceDeskForCurrentContext(options = {}) {
   const silent = options.silent === true;
   const reason = typeof options.reason === "string" && options.reason.length > 0
@@ -15332,6 +15461,37 @@ function setupChartLab() {
       }
 
       saveChartPreferences();
+    });
+  }
+
+  if (chartAnalyzeMarketButton instanceof HTMLButtonElement) {
+    chartAnalyzeMarketButton.addEventListener("click", () => {
+      void runManualMarketAnalysis({ source: "click" });
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (!event.altKey || event.shiftKey || event.ctrlKey || event.metaKey) {
+        return;
+      }
+
+      const key = typeof event.key === "string" ? event.key.toLowerCase() : "";
+
+      if (key !== "i") {
+        return;
+      }
+
+      const activeElement = document.activeElement;
+      const isTypingInField =
+        activeElement instanceof HTMLInputElement
+        || activeElement instanceof HTMLTextAreaElement
+        || (activeElement instanceof HTMLElement && activeElement.isContentEditable);
+
+      if (isTypingInField) {
+        return;
+      }
+
+      event.preventDefault();
+      void runManualMarketAnalysis({ source: "keyboard" });
     });
   }
 

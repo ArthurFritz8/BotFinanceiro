@@ -357,3 +357,36 @@ test("main.js aplica filterOutOtc na watchlist e wire LIVE indicator no SSE", as
   assert.match(source, /stopChartLiveStream\(\{ transitioning: true \}\)/);
   assert.match(source, /LIVE_STATUS\.OFFLINE/);
 });
+
+test("index.html expoe botao ANALISAR MERCADO premium com atalho Alt+I", async () => {
+  const html = await readWebFile("index.html");
+  assert.match(html, /id="chart-analyze-market-button"/);
+  assert.match(html, /class="chart-analyze-market-button"/);
+  assert.match(html, /aria-keyshortcuts="Alt\+I"/);
+  assert.match(html, /ANALISAR MERCADO/);
+  assert.match(html, /chart-analyze-market-button__spinner/);
+  assert.match(html, /id="chart-analyze-button"/);
+});
+
+test("styles.css define CTA premium com loading e shake respeitando reduced-motion", async () => {
+  const css = await readWebFile("src/styles.css");
+  assert.match(css, /\.chart-analyze-market-button \{/);
+  assert.match(css, /\.chart-analyze-market-button\[data-state="loading"\]/);
+  assert.match(css, /\.chart-analyze-market-button\[data-state="invalid"\]/);
+  assert.match(css, /@keyframes chart-analyze-market-spin/);
+  assert.match(css, /@keyframes chart-analyze-market-shake/);
+  assert.match(css, /prefers-reduced-motion/);
+});
+
+test("main.js wire CTA ANALISAR MERCADO ao Intelligence Desk com loading real e Alt+I", async () => {
+  const source = await readWebFile("src/main.js");
+  assert.match(source, /chartAnalyzeMarketButton = document\.querySelector\("#chart-analyze-market-button"\)/);
+  assert.match(source, /async function runManualMarketAnalysis\(options = \{\}\)/);
+  assert.match(source, /syncIntelligenceDeskForCurrentContext\(\{[\s\S]*reason: `manual-cta:\$\{options\.source \?\? "click"\}`,[\s\S]*silent: false,[\s\S]*\}\)/);
+  assert.match(source, /MANUAL_ANALYSIS_MIN_LOADING_MS = 220/);
+  assert.match(source, /flashManualAnalysisInvalid\("Selecione um ativo/);
+  assert.match(source, /options\.source === "keyboard" \? "trigger:keyboard" : "trigger:click"/);
+  assert.match(source, /key !== "i"/);
+  assert.match(source, /void runManualMarketAnalysis\(\{ source: "keyboard" \}\)/);
+  assert.match(source, /import \{ createCounter \} from "@botfinanceiro\/shared-utils"/);
+});
