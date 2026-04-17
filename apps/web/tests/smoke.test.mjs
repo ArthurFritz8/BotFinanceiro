@@ -311,3 +311,49 @@ test("dom-syncer expoe syncFields e syncAttribute", async () => {
   assert.match(source, /export function syncAttribute\(container, attribute, value\)/);
   assert.match(source, /target\.textContent !== nextText/);
 });
+
+test("asset-filters remove ativos OTC e sinteticos", async () => {
+  const source = await readWebFile("src/shared/asset-filters.js");
+  assert.match(source, /export function filterOutOtc\(assets\)/);
+  assert.match(source, /OTC_PATTERN = \/\\botc\\b\/i/);
+  assert.match(source, /SYNTHETIC_PATTERN/);
+  assert.match(source, /createCounter/);
+  assert.match(source, /export function isOtcAsset/);
+});
+
+test("live-status-indicator expoe setLiveStatus com 3 estados", async () => {
+  const source = await readWebFile("src/shared/live-status-indicator.js");
+  assert.match(source, /export function setLiveStatus\(element, status, options\)/);
+  assert.match(source, /STATUS_LIVE = "live"/);
+  assert.match(source, /STATUS_RECONNECTING = "reconnecting"/);
+  assert.match(source, /STATUS_OFFLINE = "offline"/);
+  assert.match(source, /aria-live/);
+  assert.match(source, /live-status--live/);
+});
+
+test("index.html expoe indicador de live status para o chart", async () => {
+  const html = await readWebFile("index.html");
+  assert.match(html, /id="chart-live-status"/);
+  assert.match(html, /class="live-status live-status--offline"/);
+  assert.match(html, /aria-live="polite"/);
+});
+
+test("styles.css define live-status com pulse e estados", async () => {
+  const css = await readWebFile("src/styles.css");
+  assert.match(css, /\.live-status \{/);
+  assert.match(css, /\.live-status--live/);
+  assert.match(css, /\.live-status--reconnecting/);
+  assert.match(css, /\.live-status--offline/);
+  assert.match(css, /@keyframes live-status-pulse/);
+  assert.match(css, /prefers-reduced-motion/);
+});
+
+test("main.js aplica filterOutOtc na watchlist e wire LIVE indicator no SSE", async () => {
+  const source = await readWebFile("src/main.js");
+  assert.match(source, /from "\.\/shared\/asset-filters\.js"/);
+  assert.match(source, /from "\.\/shared\/live-status-indicator\.js"/);
+  assert.match(source, /const TERMINAL_WATCHLIST = filterOutOtc\(TERMINAL_WATCHLIST_RAW\)/);
+  assert.match(source, /updateChartLiveStatus\(LIVE_STATUS\.LIVE\)/);
+  assert.match(source, /stopChartLiveStream\(\{ transitioning: true \}\)/);
+  assert.match(source, /LIVE_STATUS\.OFFLINE/);
+});

@@ -9,6 +9,8 @@ import {
 import { isSupabaseConfigured, supabase } from "./shared/supabase-client.js";
 import { parseStreamPayload } from "./shared/parse-stream-payload.js";
 import { scheduleRender } from "./shared/schedule-render.js";
+import { filterOutOtc, getAssetFilterSnapshot } from "./shared/asset-filters.js";
+import { setLiveStatus, getLiveStatusSnapshot, LIVE_STATUS } from "./shared/live-status-indicator.js";
 import "./styles.css";
 
 const chatForm = document.querySelector("#chat-form");
@@ -64,6 +66,21 @@ const chartIntervalMenuList = document.querySelector("#chart-interval-menu-list"
 const chartIntervalMenuCurrent = document.querySelector("#chart-interval-menu-current");
 const chartOperationalModeTagElement = document.querySelector("#chart-operational-mode-tag");
 const chartFallbackBadgeElement = document.querySelector("#chart-fallback-badge");
+const chartLiveStatusElement = document.querySelector("#chart-live-status");
+
+function updateChartLiveStatus(status, options) {
+  if (!(chartLiveStatusElement instanceof HTMLElement)) {
+    return;
+  }
+
+  setLiveStatus(chartLiveStatusElement, status, options ?? {});
+}
+
+if (typeof window !== "undefined") {
+  window.__botfinanceiroDebug = window.__botfinanceiroDebug ?? {};
+  window.__botfinanceiroDebug.liveStatusSnapshot = () => getLiveStatusSnapshot();
+  window.__botfinanceiroDebug.assetFilterSnapshot = () => getAssetFilterSnapshot();
+}
 const chartStatusElement = document.querySelector("#chart-status");
 const chartLegendElement = document.querySelector("#chart-legend");
 const chartCopilotStage = document.querySelector("#chart-copilot-stage");
@@ -1640,7 +1657,7 @@ const FOREX_FIAT_CODES = new Set([
   "USD",
   "ZAR",
 ]);
-const TERMINAL_WATCHLIST = [
+const TERMINAL_WATCHLIST_RAW = [
   {
     assetId: "bitcoin",
     exchange: "BINANCE",
@@ -1732,6 +1749,7 @@ const TERMINAL_WATCHLIST = [
     symbol: "DOTUSDT",
   },
 ];
+const TERMINAL_WATCHLIST = filterOutOtc(TERMINAL_WATCHLIST_RAW);
 const ASSET_TO_TERMINAL_SYMBOL = Object.fromEntries(
   TERMINAL_WATCHLIST.map((entry) => [entry.assetId, entry.symbol]),
 );
@@ -13489,7 +13507,7 @@ function applyChartSnapshot(snapshot, options = {}) {
   }
 }
 
-function stopChartLiveStream() {
+function stopChartLiveStream(options) {
   stopChartLiveFallbackPolling();
 
   if (chartLiveStreamBackoffTimer !== null) {
@@ -13503,6 +13521,9 @@ function stopChartLiveStream() {
   }
 
   chartLiveStreamKey = "";
+
+  const nextStatus = options && options.transitioning ? LIVE_STATUS.RECONNECTING : LIVE_STATUS.OFFLINE;
+  updateChartLiveStatus(nextStatus);
 }
 
 function stopChartLiveFallbackPolling() {
@@ -13586,6 +13607,7 @@ function connectBinaryOptionsLiveStream(intervalMs) {
 
     stopChartLiveFallbackPolling();
     chartLiveStreamReconnectAttempt = 0;
+    updateChartLiveStatus(LIVE_STATUS.LIVE);
 
     const resolvedStreamBroker = normalizeBrokerName(snapshot?.exchange?.resolved ?? snapshot?.provider ?? exchange);
     const selectedExchangeForStatus = resolveExchangeLabelFromBroker(resolvedStreamBroker);
@@ -13629,7 +13651,7 @@ function connectBinaryOptionsLiveStream(intervalMs) {
       return;
     }
 
-    stopChartLiveStream();
+    stopChartLiveStream({ transitioning: true });
     startChartLiveFallbackPolling();
     chartLiveStreamReconnectAttempt += 1;
     const backoffMs = Math.min(30000, 1200 * 2 ** chartLiveStreamReconnectAttempt);
@@ -13743,6 +13765,7 @@ function connectChartLiveStream(intervalMs) {
 
     stopChartLiveFallbackPolling();
     chartLiveStreamReconnectAttempt = 0;
+    updateChartLiveStatus(LIVE_STATUS.LIVE);
 
     try {
       const statusBroker = selectedRequestedBroker === "auto"
@@ -13811,7 +13834,7 @@ function connectChartLiveStream(intervalMs) {
       }
     }
 
-    stopChartLiveStream();
+    stopChartLiveStream({ transitioning: true });
     startChartLiveFallbackPolling();
     chartLiveStreamReconnectAttempt += 1;
     const backoffMs = Math.min(30000, 1200 * 2 ** chartLiveStreamReconnectAttempt);
