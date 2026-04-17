@@ -351,7 +351,8 @@ export class IntelligenceSyncTelemetryStore {
       return;
     }
 
-    const oldestSessionId = this.sessions.keys().next().value;
+    const iteratorResult = this.sessions.keys().next();
+    const oldestSessionId: string | undefined = iteratorResult.done ? undefined : iteratorResult.value;
 
     if (typeof oldestSessionId === "string") {
       this.sessions.delete(oldestSessionId);
