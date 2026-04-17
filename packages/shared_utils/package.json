@@ -2,5 +2,14 @@
   "name": "@botfinanceiro/shared-utils",
   "version": "0.1.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./safe-json-parse": "./src/safe-json-parse.js",
+    "./counter": "./src/counter.js"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  }
 }
