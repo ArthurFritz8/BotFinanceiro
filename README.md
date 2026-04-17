@@ -93,6 +93,10 @@ Politica de retencao:
 7. ADR 035: `docs/ADR/ADR-035-hardening-market-navigator-e-stream-futures.md`
 8. ADR 036: `docs/ADR/ADR-036-resiliencia-overview-e-chart-simbolo-externo.md`
 9. ADR 037: `docs/ADR/ADR-037-painel-interno-saude-market-navigator-modulos.md`
+10. ADR 038: `docs/ADR/ADR-038-sse-pipe-shared-controllers.md`
+11. ADR 039: `docs/ADR/ADR-039-provider-chain-com-circuit-breaker.md`
+12. ADR 040: `docs/ADR/ADR-040-fundacao-shared-utils-smc-core.md`
+13. ADR 041: `docs/ADR/ADR-041-dom-syncer-rAF-parse-stream-web.md`
 
 ## Relatorio completo desta entrega
 
