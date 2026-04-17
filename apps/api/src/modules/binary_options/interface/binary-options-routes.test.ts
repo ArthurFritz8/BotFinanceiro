@@ -108,6 +108,11 @@ void it("GET /v1/binary-options/strategy-chart suporta resolucao em segundos", a
         candlePattern: string;
         candlePatternSignal: "bearish" | "bullish" | "neutral";
         confidenceScore: number;
+        institutionalPoiHit: boolean;
+        institutionalPoiTag: "cluster" | "midnight_open" | "none" | "previous_high" | "previous_low";
+        kineticAccelerationPercentPerSecond2: number;
+        kineticDecelerationStrength: number;
+        kineticExhaustionState: "cooling" | "explosive" | "neutral";
         momentumVelocityPercentPerSecond: number;
         rejectionSignal: "bearish" | "bullish" | "none";
       };
@@ -134,6 +139,11 @@ void it("GET /v1/binary-options/strategy-chart suporta resolucao em segundos", a
   assert.equal(body.data.live, null);
   assert.equal(typeof body.data.insights.momentumVelocityPercentPerSecond, "number");
   assert.equal(typeof body.data.insights.confidenceScore, "number");
+  assert.equal(typeof body.data.insights.institutionalPoiHit, "boolean");
+  assert.ok(["none", "previous_low", "previous_high", "midnight_open", "cluster"].includes(body.data.insights.institutionalPoiTag));
+  assert.ok(["neutral", "cooling", "explosive"].includes(body.data.insights.kineticExhaustionState));
+  assert.equal(typeof body.data.insights.kineticDecelerationStrength, "number");
+  assert.equal(typeof body.data.insights.kineticAccelerationPercentPerSecond2, "number");
   assert.ok(["inside", "lower", "upper"].includes(body.data.insights.bollingerTouch));
   assert.ok(["none", "bullish", "bearish"].includes(body.data.insights.rejectionSignal));
   assert.equal(typeof body.data.insights.candlePattern, "string");

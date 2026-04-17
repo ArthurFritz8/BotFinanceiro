@@ -161,6 +161,8 @@ type BinaryCandlePattern =
   | "none";
 type BinaryRejectionSignal = "bearish" | "bullish" | "none";
 type BinaryBollingerTouch = "inside" | "lower" | "upper";
+type BinaryInstitutionalPoiTag = "cluster" | "midnight_open" | "none" | "previous_high" | "previous_low";
+type BinaryKineticExhaustionState = "cooling" | "explosive" | "neutral";
 
 interface RetryableErrorDetails {
   retryable?: boolean;
@@ -205,6 +207,21 @@ interface CandlePatternSnapshot {
   pattern: BinaryCandlePattern;
   signal: BinaryCandlePatternSignal;
   strength: number;
+}
+
+interface KineticExhaustionSnapshot {
+  accelerationPercentPerSecond2: number;
+  decelerationStrength: number;
+  explosiveAgainstBand: boolean;
+  isAbruptDeceleration: boolean;
+  state: BinaryKineticExhaustionState;
+  velocityNow: number;
+}
+
+interface InstitutionalPoiContext {
+  hit: boolean;
+  sideBias: BinaryMarketStructureSignal;
+  tag: BinaryInstitutionalPoiTag;
 }
 
 export interface BinaryOptionsChartPoint {
@@ -268,6 +285,11 @@ export interface BinaryOptionsChartInsights {
   emaFast: number;
   emaSlow: number;
   highPrice: number;
+  institutionalPoiHit: boolean;
+  institutionalPoiTag: BinaryInstitutionalPoiTag;
+  kineticAccelerationPercentPerSecond2: number;
+  kineticDecelerationStrength: number;
+  kineticExhaustionState: BinaryKineticExhaustionState;
   longMovingAverage: number;
   lowPrice: number;
   macdHistogram: number;
@@ -555,6 +577,178 @@ function computeMomentumVelocityPercentPerSecond(
 
   const variationPercent = ((lastPoint.close - firstPoint.close) / firstPoint.close) * 100;
   return roundMicroPercent(variationPercent / elapsedSeconds);
+}
+
+function resolveUtcMidnightOpen(points: BinaryOptionsChartPoint[]): number | null {
+  if (points.length === 0) {
+    return null;
+  }
+
+  const lastPoint = points[points.length - 1];
+
+  if (!lastPoint) {
+    return null;
+  }
+
+  const parsedDate = new Date(lastPoint.timestamp);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  const dayStartMs = Date.UTC(
+    parsedDate.getUTCFullYear(),
+    parsedDate.getUTCMonth(),
+    parsedDate.getUTCDate(),
+    0,
+    0,
+    0,
+    0,
+  );
+  const dayEndMs = dayStartMs + oneDayMs;
+
+  for (const point of points) {
+    const timestampMs = Date.parse(point.timestamp);
+
+    if (!Number.isFinite(timestampMs)) {
+      continue;
+    }
+
+    if (timestampMs >= dayStartMs && timestampMs < dayEndMs) {
+      return point.open;
+    }
+  }
+
+  return null;
+}
+
+function computeKineticExhaustionSnapshot(
+  points: BinaryOptionsChartPoint[],
+): KineticExhaustionSnapshot {
+  if (points.length < 8) {
+    return {
+      accelerationPercentPerSecond2: 0,
+      decelerationStrength: 0,
+      explosiveAgainstBand: false,
+      isAbruptDeceleration: false,
+      state: "neutral",
+      velocityNow: 0,
+    };
+  }
+
+  const windowPoints = points.slice(-12);
+  const splitIndex = Math.max(4, Math.floor(windowPoints.length / 2));
+  const previousWindow = windowPoints.slice(0, splitIndex + 1);
+  const currentWindow = windowPoints.slice(splitIndex);
+  const previousVelocity = computeMomentumVelocityPercentPerSecond(previousWindow, previousWindow.length);
+  const currentVelocity = computeMomentumVelocityPercentPerSecond(currentWindow, currentWindow.length);
+  const previousTimestampMs = Date.parse(previousWindow[previousWindow.length - 1]?.timestamp ?? "");
+  const currentTimestampMs = Date.parse(currentWindow[currentWindow.length - 1]?.timestamp ?? "");
+  const elapsedSeconds =
+    Number.isFinite(previousTimestampMs)
+    && Number.isFinite(currentTimestampMs)
+    && currentTimestampMs > previousTimestampMs
+      ? (currentTimestampMs - previousTimestampMs) / 1000
+      : Math.max(1, currentWindow.length - 1);
+
+  const accelerationPercentPerSecond2 = roundMicroPercent(
+    (currentVelocity - previousVelocity) / Math.max(elapsedSeconds, 1e-6),
+  );
+  const speedDrop = Math.max(0, Math.abs(previousVelocity) - Math.abs(currentVelocity));
+  const decelerationStrength = clamp(roundPercent(speedDrop * 150000), 0, 100);
+  const explosiveAgainstBand =
+    Math.abs(previousVelocity) >= 0.0018
+    && Math.abs(currentVelocity) >= 0.0012;
+  const isAbruptDeceleration =
+    Math.abs(previousVelocity) >= 0.0012
+    && Math.abs(currentVelocity) <= Math.abs(previousVelocity) * 0.62
+    && Math.sign(previousVelocity) === Math.sign(currentVelocity);
+
+  const state: BinaryKineticExhaustionState = explosiveAgainstBand && !isAbruptDeceleration
+    ? "explosive"
+    : isAbruptDeceleration
+      ? "cooling"
+      : "neutral";
+
+  return {
+    accelerationPercentPerSecond2,
+    decelerationStrength,
+    explosiveAgainstBand,
+    isAbruptDeceleration,
+    state,
+    velocityNow: currentVelocity,
+  };
+}
+
+function isPriceNearLevel(currentPrice: number, level: number, tolerancePercent: number): boolean {
+  if (!Number.isFinite(level) || level <= 0) {
+    return false;
+  }
+
+  return Math.abs(((currentPrice - level) / level) * 100) <= tolerancePercent;
+}
+
+function resolveInstitutionalPoiContext(input: {
+  atrPercent: number;
+  currentPrice: number;
+  marketStructure: BinaryOptionsMarketStructure;
+  points: BinaryOptionsChartPoint[];
+}): InstitutionalPoiContext {
+  const tolerancePercent = clamp(Math.max(input.atrPercent * 0.18, 0.05), 0.05, 0.35);
+  const nearPreviousLow =
+    input.marketStructure.previousSwingLow !== null
+    && isPriceNearLevel(input.currentPrice, input.marketStructure.previousSwingLow, tolerancePercent);
+  const nearPreviousHigh =
+    input.marketStructure.previousSwingHigh !== null
+    && isPriceNearLevel(input.currentPrice, input.marketStructure.previousSwingHigh, tolerancePercent);
+  const midnightOpen = resolveUtcMidnightOpen(input.points);
+  const nearMidnightOpen = midnightOpen !== null && isPriceNearLevel(input.currentPrice, midnightOpen, tolerancePercent);
+
+  if (nearPreviousLow && nearPreviousHigh) {
+    return {
+      hit: true,
+      sideBias: "none",
+      tag: "cluster",
+    };
+  }
+
+  if ((nearPreviousLow && nearMidnightOpen) || (nearPreviousHigh && nearMidnightOpen)) {
+    return {
+      hit: true,
+      sideBias: nearPreviousLow ? "bullish" : "bearish",
+      tag: "cluster",
+    };
+  }
+
+  if (nearPreviousLow) {
+    return {
+      hit: true,
+      sideBias: "bullish",
+      tag: "previous_low",
+    };
+  }
+
+  if (nearPreviousHigh) {
+    return {
+      hit: true,
+      sideBias: "bearish",
+      tag: "previous_high",
+    };
+  }
+
+  if (nearMidnightOpen) {
+    return {
+      hit: true,
+      sideBias: midnightOpen !== null && input.currentPrice <= midnightOpen ? "bullish" : "bearish",
+      tag: "midnight_open",
+    };
+  }
+
+  return {
+    hit: false,
+    sideBias: "none",
+    tag: "none",
+  };
 }
 
 function computeBollingerBands(
@@ -1344,17 +1538,56 @@ function buildInsights(points: BinaryOptionsChartPoint[]): BinaryOptionsChartIns
     : emaFast < emaSlow * 0.9998
       ? "bearish"
       : "sideways";
+  const marketSession = resolveMarketSession(lastPoint.timestamp);
+  const marketStructure = computeMarketStructure({
+    currentPrice,
+    points,
+    trend,
+  });
+  const smcConfluence = computeSmcConfluence({
+    atrPercent,
+    marketSession,
+    marketStructure,
+    trend,
+    volatilityPercent,
+  });
+  const kineticExhaustion = computeKineticExhaustionSnapshot(points);
+  const institutionalPoi = resolveInstitutionalPoiContext({
+    atrPercent,
+    currentPrice,
+    marketStructure,
+    points,
+  });
+  const hasKineticPoiAlignment = kineticExhaustion.isAbruptDeceleration && institutionalPoi.hit;
+  const shouldAbortForKineticNoise = kineticExhaustion.explosiveAgainstBand && !hasKineticPoiAlignment;
+  const hasLowerBandHotTrigger =
+    bollingerTouch === "lower"
+    && kineticExhaustion.isAbruptDeceleration
+    && kineticExhaustion.velocityNow <= -0.0002
+    && kineticExhaustion.accelerationPercentPerSecond2 >= 0;
+  const hasUpperBandHotTrigger =
+    bollingerTouch === "upper"
+    && kineticExhaustion.isAbruptDeceleration
+    && kineticExhaustion.velocityNow >= 0.0002
+    && kineticExhaustion.accelerationPercentPerSecond2 <= 0;
+  const hasKineticHotTrigger = hasLowerBandHotTrigger || hasUpperBandHotTrigger;
+  const touchedBandWithoutHotTrigger =
+    (bollingerTouch === "lower" || bollingerTouch === "upper") && !hasKineticHotTrigger;
 
   const bullishRejectionSignal =
+    !shouldAbortForKineticNoise
+    && hasLowerBandHotTrigger
+    && institutionalPoi.sideBias !== "bearish" &&
     rsi14 !== null
     && rsi14 <= 37
-    && bollingerTouch === "lower"
-    && (candlePattern.signal === "bullish" || momentumVelocityPercentPerSecond >= 0.0015);
+    && (candlePattern.signal === "bullish" || momentumVelocityPercentPerSecond >= 0.0011);
   const bearishRejectionSignal =
+    !shouldAbortForKineticNoise
+    && hasUpperBandHotTrigger
+    && institutionalPoi.sideBias !== "bullish" &&
     rsi14 !== null
     && rsi14 >= 63
-    && bollingerTouch === "upper"
-    && (candlePattern.signal === "bearish" || momentumVelocityPercentPerSecond <= -0.0015);
+    && (candlePattern.signal === "bearish" || momentumVelocityPercentPerSecond <= -0.0011);
   const rejectionSignal: BinaryRejectionSignal = bullishRejectionSignal
     ? "bullish"
     : bearishRejectionSignal
@@ -1362,12 +1595,20 @@ function buildInsights(points: BinaryOptionsChartPoint[]): BinaryOptionsChartIns
       : "none";
 
   const tradeAction: BinaryTradeAction = (() => {
+    if (shouldAbortForKineticNoise) {
+      return "wait";
+    }
+
+    if (touchedBandWithoutHotTrigger) {
+      return "wait";
+    }
+
     if (rejectionSignal === "bullish") {
-      return "buy";
+      return hasKineticPoiAlignment || institutionalPoi.sideBias !== "bearish" ? "buy" : "wait";
     }
 
     if (rejectionSignal === "bearish") {
-      return "sell";
+      return hasKineticPoiAlignment || institutionalPoi.sideBias !== "bullish" ? "sell" : "wait";
     }
 
     if (
@@ -1405,20 +1646,6 @@ function buildInsights(points: BinaryOptionsChartPoint[]): BinaryOptionsChartIns
     tradeAction,
   });
 
-  const marketSession = resolveMarketSession(lastPoint.timestamp);
-  const marketStructure = computeMarketStructure({
-    currentPrice,
-    points,
-    trend,
-  });
-  const smcConfluence = computeSmcConfluence({
-    atrPercent,
-    marketSession,
-    marketStructure,
-    trend,
-    volatilityPercent,
-  });
-
   const velocityComponent = clamp(Math.abs(momentumVelocityPercentPerSecond) * 9000, 0, 22);
   const rejectionComponent = rejectionSignal === "none" ? 0 : 16;
   const candleComponent = candlePattern.signal === "neutral" ? 0 : 10 * candlePattern.strength;
@@ -1432,6 +1659,14 @@ function buildInsights(points: BinaryOptionsChartPoint[]): BinaryOptionsChartIns
   const smcComponent = (smcConfluence.score - 50) * 0.12;
   const macdComponent = clamp(Math.abs(macdHistogram) * 24, 0, 14);
   const volatilityPenalty = Math.max(0, volatilityPercent - 5) * 2.6;
+  const kineticHotComponent = hasKineticHotTrigger
+    ? 14 + kineticExhaustion.decelerationStrength * 0.14
+    : kineticExhaustion.state === "cooling"
+      ? 2
+      : 0;
+  const institutionalPoiComponent = institutionalPoi.hit ? 6 : -2;
+  const kineticDecelerationPenalty = touchedBandWithoutHotTrigger ? 16 : 0;
+  const kineticNoisePenalty = shouldAbortForKineticNoise ? 18 : 0;
 
   const confidenceScore = clamp(
     Math.round(
@@ -1445,6 +1680,10 @@ function buildInsights(points: BinaryOptionsChartPoint[]): BinaryOptionsChartIns
       + trendComponent
       + bollingerCompressionComponent
       + smcComponent
+      + kineticHotComponent
+      + institutionalPoiComponent
+      - kineticDecelerationPenalty
+      - kineticNoisePenalty
       - volatilityPenalty,
     ),
     5,
@@ -1467,6 +1706,11 @@ function buildInsights(points: BinaryOptionsChartPoint[]): BinaryOptionsChartIns
     emaFast: roundPrice(emaFast),
     emaSlow: roundPrice(emaSlow),
     highPrice: roundPrice(highPrice),
+    institutionalPoiHit: institutionalPoi.hit,
+    institutionalPoiTag: institutionalPoi.tag,
+    kineticAccelerationPercentPerSecond2: kineticExhaustion.accelerationPercentPerSecond2,
+    kineticDecelerationStrength: kineticExhaustion.decelerationStrength,
+    kineticExhaustionState: kineticExhaustion.state,
     longMovingAverage: roundPrice(longMovingAverage),
     lowPrice: roundPrice(lowPrice),
     macdHistogram: roundPercent(macdHistogram),
