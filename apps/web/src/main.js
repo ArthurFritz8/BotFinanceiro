@@ -7,6 +7,8 @@ import {
   LineSeries,
 } from "lightweight-charts";
 import { isSupabaseConfigured, supabase } from "./shared/supabase-client.js";
+import { parseStreamPayload } from "./shared/parse-stream-payload.js";
+import { scheduleRender } from "./shared/schedule-render.js";
 import "./styles.css";
 
 const chatForm = document.querySelector("#chat-form");
@@ -8971,7 +8973,19 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
   `;
 }
 
+let latestDeepAnalysisSnapshot = null;
+
 function renderDeepAnalysisPanel(snapshot) {
+  // Wrapper com coalescing via requestAnimationFrame. Mantém semantica "latest-wins":
+  // callers disparando em burst (ticks SSE) resultam em um unico reflow por frame, e o
+  // snapshot renderizado sera o mais recente observado ate o proximo frame.
+  latestDeepAnalysisSnapshot = snapshot;
+  scheduleRender("deep-analysis", () => {
+    renderDeepAnalysisPanelImmediate(latestDeepAnalysisSnapshot);
+  });
+}
+
+function renderDeepAnalysisPanelImmediate(snapshot) {
   if (!(analysisPanel instanceof HTMLElement)) {
     return;
   }
@@ -11586,13 +11600,7 @@ function connectWatchlistStream(intervalMs) {
   watchlistStream = eventSource;
 
   eventSource.addEventListener("snapshot", (event) => {
-    let payload = null;
-
-    try {
-      payload = JSON.parse(event.data);
-    } catch {
-      payload = null;
-    }
+    const payload = parseStreamPayload(event, "watchlist");
 
     const batch = payload?.batch ?? null;
 
@@ -11621,13 +11629,7 @@ function connectWatchlistStream(intervalMs) {
   });
 
   eventSource.addEventListener("stream-error", (event) => {
-    let payload = null;
-
-    try {
-      payload = JSON.parse(event.data);
-    } catch {
-      payload = null;
-    }
+    const payload = parseStreamPayload(event, "watchlist:stream-error");
 
     const message = typeof payload?.message === "string"
       ? payload.message
@@ -13566,13 +13568,7 @@ function connectBinaryOptionsLiveStream(intervalMs) {
   chartLiveStream = eventSource;
 
   eventSource.addEventListener("snapshot", (event) => {
-    let payload = null;
-
-    try {
-      payload = JSON.parse(event.data);
-    } catch {
-      payload = null;
-    }
+    const payload = parseStreamPayload(event, "binary");
 
     const snapshot = payload?.chart ?? null;
 
@@ -13608,13 +13604,7 @@ function connectBinaryOptionsLiveStream(intervalMs) {
   });
 
   eventSource.addEventListener("stream-error", (event) => {
-    let payload = null;
-
-    try {
-      payload = JSON.parse(event.data);
-    } catch {
-      payload = null;
-    }
+    const payload = parseStreamPayload(event, "binary:stream-error");
 
     const message = typeof payload?.message === "string"
       ? payload.message
@@ -13728,13 +13718,7 @@ function connectChartLiveStream(intervalMs) {
   }
 
   eventSource.addEventListener("snapshot", (event) => {
-    let payload = null;
-
-    try {
-      payload = JSON.parse(event.data);
-    } catch {
-      payload = null;
-    }
+    const payload = parseStreamPayload(event, "chart");
 
     const snapshot = payload?.chart ?? null;
 
@@ -13776,13 +13760,7 @@ function connectChartLiveStream(intervalMs) {
   });
 
   eventSource.addEventListener("stream-error", (event) => {
-    let payload = null;
-
-    try {
-      payload = JSON.parse(event.data);
-    } catch {
-      payload = null;
-    }
+    const payload = parseStreamPayload(event, "chart:stream-error");
 
     const message = typeof payload?.message === "string"
       ? payload.message

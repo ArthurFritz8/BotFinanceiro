@@ -268,3 +268,46 @@ test("styles.css contem classes base do prop desk", async () => {
   assert.match(stylesSource, /\.prop-tracker-status\[data-state="alert"\]/);
   assert.match(stylesSource, /\.chart-status\[data-mode="warn"\]/);
 });
+
+test("main.js usa helpers compartilhados de parse SSE e scheduleRender", async () => {
+  const mainSource = await readWebFile("src/main.js");
+
+  assert.match(mainSource, /import \{ parseStreamPayload \} from "\.\/shared\/parse-stream-payload\.js";/);
+  assert.match(mainSource, /import \{ scheduleRender \} from "\.\/shared\/schedule-render\.js";/);
+  assert.match(mainSource, /parseStreamPayload\(event, "watchlist"\)/);
+  assert.match(mainSource, /parseStreamPayload\(event, "watchlist:stream-error"\)/);
+  assert.match(mainSource, /parseStreamPayload\(event, "chart"\)/);
+  assert.match(mainSource, /parseStreamPayload\(event, "chart:stream-error"\)/);
+  assert.match(mainSource, /parseStreamPayload\(event, "binary"\)/);
+  assert.match(mainSource, /parseStreamPayload\(event, "binary:stream-error"\)/);
+  assert.match(mainSource, /scheduleRender\("deep-analysis", \(\) => \{/);
+  assert.match(mainSource, /function renderDeepAnalysisPanelImmediate\(snapshot\)/);
+  assert.match(mainSource, /let latestDeepAnalysisSnapshot = null;/);
+  assert.doesNotMatch(
+    mainSource,
+    /try \{\s*\n\s*payload = JSON\.parse\(event\.data\);\s*\n\s*\} catch \{/,
+    "deve migrar todos os parse de event.data para parseStreamPayload",
+  );
+});
+
+test("parse-stream-payload sinaliza falhas com telemetria de counter", async () => {
+  const source = await readWebFile("src/shared/parse-stream-payload.js");
+  assert.match(source, /from "@botfinanceiro\/shared-utils"/);
+  assert.match(source, /createCounter\(\)/);
+  assert.match(source, /streamParseFailCounter\.increment\(slot\)/);
+  assert.match(source, /debugBag\.streamParseFailSnapshot = \(\) => streamParseFailCounter\.snapshot\(\);/);
+});
+
+test("schedule-render coalesca render por chave via rAF", async () => {
+  const source = await readWebFile("src/shared/schedule-render.js");
+  assert.match(source, /requestAnimationFrame/);
+  assert.match(source, /pendingByKey\.has\(key\)/);
+  assert.match(source, /pendingByKey\.delete\(key\)/);
+});
+
+test("dom-syncer expoe syncFields e syncAttribute", async () => {
+  const source = await readWebFile("src/shared/dom-syncer.js");
+  assert.match(source, /export function syncFields\(container, values, options = \{\}\)/);
+  assert.match(source, /export function syncAttribute\(container, attribute, value\)/);
+  assert.match(source, /target\.textContent !== nextText/);
+});
