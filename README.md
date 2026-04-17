@@ -98,6 +98,7 @@ Politica de retencao:
 12. ADR 040: `docs/ADR/ADR-040-fundacao-shared-utils-smc-core.md`
 13. ADR 041: `docs/ADR/ADR-041-dom-syncer-rAF-parse-stream-web.md`
 14. ADR 042: `docs/ADR/ADR-042-indicador-live-market-anti-otc-seletor-ativos.md`
+15. ADR 043: `docs/ADR/ADR-043-cta-analisar-mercado-intelligence-desk.md`
 
 ## Relatorio completo desta entrega
 
