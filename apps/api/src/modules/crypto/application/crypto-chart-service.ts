@@ -96,8 +96,16 @@ export interface CryptoMarketStructure {
   bias: MarketStructureBias;
   bosSignal: MarketStructureSignal;
   chochSignal: MarketStructureSignal;
+  fairValueGapActive: boolean;
+  fairValueGapBias: MarketStructureSignal;
+  fairValueGapLower: number | null;
+  fairValueGapUpper: number | null;
+  institutionalZone: "discount" | "equilibrium" | "premium";
   lastSwingHigh: number;
   lastSwingLow: number;
+  liquiditySweepReferenceHigh: number | null;
+  liquiditySweepReferenceLow: number | null;
+  liquiditySweepSignal: MarketStructureSignal;
   previousSwingHigh: number | null;
   previousSwingLow: number | null;
   swingRangePercent: number;
@@ -773,6 +781,20 @@ interface SwingPoint {
   timestamp: string;
 }
 
+interface FairValueGapContext {
+  active: boolean;
+  bias: MarketStructureSignal;
+  lower: number | null;
+  upper: number | null;
+}
+
+interface MicroTimingWeaknessContext {
+  accelerationPercentPerBar: number;
+  buyersLosingControl: boolean;
+  currentVelocityPercentPerBar: number;
+  sellersLosingControl: boolean;
+}
+
 function detectSwingPoints(points: CryptoChartPoint[], lookAround = 2): {
   highs: SwingPoint[];
   lows: SwingPoint[];
@@ -849,6 +871,153 @@ function computeSwingRangePercent(lastSwingHigh: number, lastSwingLow: number): 
   return roundPercent(((lastSwingHigh - lastSwingLow) / lastSwingLow) * 100);
 }
 
+function resolveInstitutionalZone(
+  currentPrice: number,
+  supportLevel: number,
+  resistanceLevel: number,
+): "discount" | "equilibrium" | "premium" {
+  const range = Math.max(1e-8, resistanceLevel - supportLevel);
+  const position = (currentPrice - supportLevel) / range;
+
+  if (position <= 0.35) {
+    return "discount";
+  }
+
+  if (position >= 0.65) {
+    return "premium";
+  }
+
+  return "equilibrium";
+}
+
+function detectActiveFairValueGap(
+  points: CryptoChartPoint[],
+  currentPrice: number,
+): FairValueGapContext {
+  if (points.length < 3) {
+    return {
+      active: false,
+      bias: "none",
+      lower: null,
+      upper: null,
+    };
+  }
+
+  const lowerBound = Math.max(2, points.length - 28);
+
+  for (let index = points.length - 1; index >= lowerBound; index -= 1) {
+    const leftPoint = points[index - 2];
+    const rightPoint = points[index];
+
+    if (!leftPoint || !rightPoint) {
+      continue;
+    }
+
+    if (leftPoint.high < rightPoint.low) {
+      const lower = leftPoint.high;
+      const upper = rightPoint.low;
+      const active =
+        currentPrice >= lower * 0.999
+        && currentPrice <= upper * 1.001;
+
+      if (active) {
+        return {
+          active: true,
+          bias: "bullish",
+          lower,
+          upper,
+        };
+      }
+    }
+
+    if (leftPoint.low > rightPoint.high) {
+      const lower = rightPoint.high;
+      const upper = leftPoint.low;
+      const active =
+        currentPrice >= lower * 0.999
+        && currentPrice <= upper * 1.001;
+
+      if (active) {
+        return {
+          active: true,
+          bias: "bearish",
+          lower,
+          upper,
+        };
+      }
+    }
+  }
+
+  return {
+    active: false,
+    bias: "none",
+    lower: null,
+    upper: null,
+  };
+}
+
+function computeSegmentVelocityPercent(points: CryptoChartPoint[]): number {
+  if (points.length < 2) {
+    return 0;
+  }
+
+  const firstPoint = points[0];
+  const lastPoint = points[points.length - 1];
+
+  if (!firstPoint || !lastPoint || firstPoint.close <= 0) {
+    return 0;
+  }
+
+  const variationPercent = ((lastPoint.close - firstPoint.close) / firstPoint.close) * 100;
+  const elapsedBars = Math.max(1, points.length - 1);
+
+  return roundPercent(variationPercent / elapsedBars);
+}
+
+function computeMicroTimingWeakness(
+  points: CryptoChartPoint[],
+  rsi14: number | null,
+): MicroTimingWeaknessContext {
+  if (points.length < 7) {
+    return {
+      accelerationPercentPerBar: 0,
+      buyersLosingControl: false,
+      currentVelocityPercentPerBar: 0,
+      sellersLosingControl: false,
+    };
+  }
+
+  const recentPoints = points.slice(-9);
+  const middleIndex = Math.max(3, Math.floor(recentPoints.length / 2));
+  const previousVelocity = computeSegmentVelocityPercent(recentPoints.slice(0, middleIndex + 1));
+  const currentVelocity = computeSegmentVelocityPercent(recentPoints.slice(middleIndex));
+  const acceleration = roundPercent(currentVelocity - previousVelocity);
+
+  let sellersLosingControl =
+    previousVelocity <= -0.03
+    && currentVelocity > previousVelocity
+    && acceleration >= 0.03;
+  let buyersLosingControl =
+    previousVelocity >= 0.03
+    && currentVelocity < previousVelocity
+    && acceleration <= -0.03;
+
+  if (rsi14 !== null && rsi14 <= 33 && acceleration > 0) {
+    sellersLosingControl = true;
+  }
+
+  if (rsi14 !== null && rsi14 >= 67 && acceleration < 0) {
+    buyersLosingControl = true;
+  }
+
+  return {
+    accelerationPercentPerBar: acceleration,
+    buyersLosingControl,
+    currentVelocityPercentPerBar: currentVelocity,
+    sellersLosingControl,
+  };
+}
+
 function computeMarketStructure(
   points: CryptoChartPoint[],
   currentPrice: number,
@@ -866,6 +1035,9 @@ function computeMarketStructure(
   const lastSwingLow = lastSwingLowPoint?.price ?? supportLevel;
   const previousSwingHigh = previousSwingHighPoint?.price ?? null;
   const previousSwingLow = previousSwingLowPoint?.price ?? null;
+  const lastPoint = points[points.length - 1] ?? null;
+  const sweepReferenceHigh = previousSwingHigh ?? lastSwingHigh;
+  const sweepReferenceLow = previousSwingLow ?? lastSwingLow;
 
   let bias: MarketStructureBias = "neutral";
 
@@ -884,6 +1056,24 @@ function computeMarketStructure(
   const bullishBreak = currentPrice > lastSwingHigh * 1.0008;
   const bearishBreak = currentPrice < lastSwingLow * 0.9992;
   const bosSignal: MarketStructureSignal = bullishBreak ? "bullish" : bearishBreak ? "bearish" : "none";
+  const fairValueGap = detectActiveFairValueGap(points, currentPrice);
+  const institutionalZone = resolveInstitutionalZone(currentPrice, supportLevel, resistanceLevel);
+  let liquiditySweepSignal: MarketStructureSignal = "none";
+
+  if (lastPoint) {
+    const bullishSweep =
+      lastPoint.low < sweepReferenceLow * 0.9992
+      && lastPoint.close > sweepReferenceLow * 1.0002;
+    const bearishSweep =
+      lastPoint.high > sweepReferenceHigh * 1.0008
+      && lastPoint.close < sweepReferenceHigh * 0.9998;
+
+    if (bullishSweep && !bearishSweep) {
+      liquiditySweepSignal = "bullish";
+    } else if (bearishSweep && !bullishSweep) {
+      liquiditySweepSignal = "bearish";
+    }
+  }
 
   let chochSignal: MarketStructureSignal = "none";
 
@@ -897,8 +1087,16 @@ function computeMarketStructure(
     bias,
     bosSignal,
     chochSignal,
+    fairValueGapActive: fairValueGap.active,
+    fairValueGapBias: fairValueGap.bias,
+    fairValueGapLower: fairValueGap.lower === null ? null : roundPrice(fairValueGap.lower),
+    fairValueGapUpper: fairValueGap.upper === null ? null : roundPrice(fairValueGap.upper),
+    institutionalZone,
     lastSwingHigh: roundPrice(lastSwingHigh),
     lastSwingLow: roundPrice(lastSwingLow),
+    liquiditySweepReferenceHigh: roundPrice(sweepReferenceHigh),
+    liquiditySweepReferenceLow: roundPrice(sweepReferenceLow),
+    liquiditySweepSignal,
     previousSwingHigh: previousSwingHigh === null ? null : roundPrice(previousSwingHigh),
     previousSwingLow: previousSwingLow === null ? null : roundPrice(previousSwingLow),
     swingRangePercent: computeSwingRangePercent(lastSwingHigh, lastSwingLow),
@@ -1287,55 +1485,107 @@ function computeTradePlan(
   atrPercent: number,
   emaFast: number,
   emaSlow: number,
+  marketStructure: CryptoMarketStructure,
+  microTimingWeakness: MicroTimingWeaknessContext,
 ): {
   confidenceScore: number;
   tradeAction: TradeAction;
   tradeLevels: CryptoTradeLevels;
 } {
+  const hasBullishSmcSweepSetup =
+    marketStructure.institutionalZone === "discount"
+    && marketStructure.liquiditySweepSignal === "bullish"
+    && microTimingWeakness.sellersLosingControl;
+  const hasBearishSmcSweepSetup =
+    marketStructure.institutionalZone === "premium"
+    && marketStructure.liquiditySweepSignal === "bearish"
+    && microTimingWeakness.buyersLosingControl;
+  const hasSmcSweepSetup = hasBullishSmcSweepSetup || hasBearishSmcSweepSetup;
+
   let score = 0;
 
   if (trend === "bullish") {
-    score += 2;
+    score += 0.6;
   } else if (trend === "bearish") {
-    score -= 2;
+    score -= 0.6;
   }
 
   if (rsi14 !== null) {
     if (rsi14 <= 38) {
-      score += 1;
+      score += 0.35;
     }
 
     if (rsi14 >= 62) {
-      score -= 1;
+      score -= 0.35;
     }
   }
 
   if (macdHistogram > 0) {
-    score += 1;
+    score += 0.45;
   } else if (macdHistogram < 0) {
-    score -= 1;
+    score -= 0.45;
   }
 
-  if (emaFast > emaSlow) {
-    score += 1;
-  } else if (emaFast < emaSlow) {
-    score -= 1;
+  if (hasBullishSmcSweepSetup) {
+    score += 2.4;
+  }
+
+  if (hasBearishSmcSweepSetup) {
+    score -= 2.4;
+  }
+
+  const hasBullishSmcPrerequisite =
+    marketStructure.institutionalZone === "discount"
+    && marketStructure.liquiditySweepSignal === "bullish";
+  const hasBearishSmcPrerequisite =
+    marketStructure.institutionalZone === "premium"
+    && marketStructure.liquiditySweepSignal === "bearish";
+
+  if (hasBullishSmcPrerequisite && !microTimingWeakness.sellersLosingControl) {
+    score -= 0.6;
+  }
+
+  if (hasBearishSmcPrerequisite && !microTimingWeakness.buyersLosingControl) {
+    score += 0.6;
   }
 
   if (volatilityPercent >= 4.5 || atrPercent >= 4) {
-    score -= 1;
+    score -= 0.9;
   }
 
   let tradeAction: TradeAction = "wait";
 
-  if (score >= 2) {
+  if (hasBullishSmcSweepSetup && score >= 1.2) {
     tradeAction = "buy";
-  } else if (score <= -2) {
+  } else if (hasBearishSmcSweepSetup && score <= -1.2) {
     tradeAction = "sell";
   }
 
-  const rawConfidence = 52 + Math.abs(score) * 11;
-  const confidenceScore = Math.min(92, Math.max(42, rawConfidence));
+  const setupGateBonus = hasSmcSweepSetup ? 20 : -10;
+  const microTimingBonus =
+    microTimingWeakness.sellersLosingControl || microTimingWeakness.buyersLosingControl
+      ? 6
+      : -4;
+  const trendAssist = trend === "sideways" ? -2 : 2;
+  const volatilityPenalty = Math.max(0, Math.max(volatilityPercent - 4.2, atrPercent - 3.4)) * 2.8;
+  let rawConfidence =
+    44
+    + Math.abs(score) * 11
+    + setupGateBonus
+    + microTimingBonus
+    + trendAssist
+    - volatilityPenalty;
+
+  if (!hasSmcSweepSetup) {
+    rawConfidence -= 10;
+  }
+
+  let confidenceScore = Math.min(94, Math.max(36, Math.round(rawConfidence)));
+
+  if (!hasSmcSweepSetup) {
+    confidenceScore = Math.min(confidenceScore, 72);
+  }
+
   const riskBandPercent = Math.max(
     0.8,
     Math.min(8, atrPercent > 0 ? atrPercent * 1.25 : volatilityPercent * 0.9),
@@ -1421,6 +1671,14 @@ function computeInsights(points: CryptoChartPoint[], range: CryptoChartRange): C
   }
 
   const rsi14 = computeRsi(prices, 14);
+  const marketStructure = computeMarketStructure(
+    points,
+    lastPrice,
+    trend,
+    supportLevel,
+    resistanceLevel,
+  );
+  const microTimingWeakness = computeMicroTimingWeakness(points, rsi14);
   const tradePlan = computeTradePlan(
     lastPrice,
     supportLevel,
@@ -1432,13 +1690,8 @@ function computeInsights(points: CryptoChartPoint[], range: CryptoChartRange): C
     atrPercent,
     emaFast,
     emaSlow,
-  );
-  const marketStructure = computeMarketStructure(
-    points,
-    lastPrice,
-    trend,
-    supportLevel,
-    resistanceLevel,
+    marketStructure,
+    microTimingWeakness,
   );
   const latestTimestamp = points[points.length - 1]?.timestamp ?? new Date().toISOString();
   const marketSession = resolveMarketSession(latestTimestamp);
