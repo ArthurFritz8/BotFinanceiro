@@ -22,3 +22,8 @@ Thumbs.db
 
 # Runtime local artifacts
 .runtime/
+
+# Generated local artifacts
+NUL
+apps/web/dev-dist/
+apps/web/test-results/
