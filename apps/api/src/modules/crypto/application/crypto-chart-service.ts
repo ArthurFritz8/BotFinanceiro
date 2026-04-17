@@ -19,6 +19,7 @@ import { env } from "../../../shared/config/env.js";
 import { AppError } from "../../../shared/errors/app-error.js";
 import { memoryCache } from "../../../shared/cache/memory-cache.js";
 import { cryptoLiveChartMetricsStore } from "../../../shared/observability/crypto-live-chart-metrics-store.js";
+import { resolveInstitutionalZone as resolveInstitutionalZoneShared } from "../../../shared/smc/institutional-zone.js";
 
 export type CryptoChartRange = "24h" | "7d" | "30d" | "90d" | "1y";
 export type CryptoChartResolution =
@@ -876,18 +877,7 @@ function resolveInstitutionalZone(
   supportLevel: number,
   resistanceLevel: number,
 ): "discount" | "equilibrium" | "premium" {
-  const range = Math.max(1e-8, resistanceLevel - supportLevel);
-  const position = (currentPrice - supportLevel) / range;
-
-  if (position <= 0.35) {
-    return "discount";
-  }
-
-  if (position >= 0.65) {
-    return "premium";
-  }
-
-  return "equilibrium";
+  return resolveInstitutionalZoneShared(currentPrice, supportLevel, resistanceLevel);
 }
 
 function detectActiveFairValueGap(

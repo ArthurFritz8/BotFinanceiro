@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { env } from "../../../shared/config/env.js";
 import { buildSuccessResponse } from "../../../shared/http/api-response.js";
+import { openSsePipe } from "../../../shared/http/sse-pipe.js";
 import { binaryOptionsGhostAuditStore } from "../../../shared/observability/binary-options-ghost-audit-store.js";
 import { BinaryOptionsService } from "../application/binary-options-service.js";
 
@@ -158,11 +159,6 @@ function normalizeOrigin(value: string): string {
 
 const allowedOrigins = new Set(env.CORS_ALLOWED_ORIGINS.map((origin) => normalizeOrigin(origin)));
 
-function writeSseEvent(reply: FastifyReply, eventName: string, payload: unknown): void {
-  reply.raw.write(`event: ${eventName}\n`);
-  reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
-}
-
 export async function getBinaryOptionsStrategyChart(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -246,105 +242,18 @@ export async function clearBinaryOptionsGhostAuditHistory(
 
 export function streamBinaryOptionsLiveChart(request: FastifyRequest, reply: FastifyReply): void {
   const parsedQuery = liveStreamQuerySchema.parse(request.query);
-  const requestOrigin =
-    typeof request.headers.origin === "string" ? normalizeOrigin(request.headers.origin) : "";
-  const originIsAllowed =
-    requestOrigin.length > 0 &&
-    (allowedOrigins.size === 0 || allowedOrigins.has(requestOrigin));
 
-  if (requestOrigin.length > 0 && !originIsAllowed) {
-    void reply.code(403).send({
-      error: "Origin not allowed",
-    });
-    return;
-  }
-
-  reply.raw.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-  reply.raw.setHeader("Cache-Control", "no-cache, no-transform");
-  reply.raw.setHeader("Connection", "keep-alive");
-  reply.raw.setHeader("X-Accel-Buffering", "no");
-
-  if (originIsAllowed) {
-    reply.raw.setHeader("Access-Control-Allow-Origin", requestOrigin);
-    reply.raw.setHeader("Vary", "Origin");
-  }
-
-  void reply.hijack();
-
-  if (typeof reply.raw.flushHeaders === "function") {
-    reply.raw.flushHeaders();
-  }
-
-  let isClosed = false;
-  let isInFlight = false;
-  let streamTimer: NodeJS.Timeout | null = null;
-
-  const cleanup = (): void => {
-    if (isClosed) {
-      return;
-    }
-
-    isClosed = true;
-
-    if (streamTimer) {
-      clearInterval(streamTimer);
-      streamTimer = null;
-    }
-
-    if (!reply.raw.writableEnded) {
-      reply.raw.end();
-    }
-  };
-
-  request.raw.on("close", cleanup);
-  request.raw.on("aborted", cleanup);
-
-  const pushSnapshot = async (): Promise<void> => {
-    if (isClosed || isInFlight) {
-      return;
-    }
-
-    isInFlight = true;
-
-    try {
-      const chart = await binaryOptionsService.getStrategySnapshot({
+  openSsePipe(request, reply, {
+    allowedOrigins,
+    intervalMs: parsedQuery.intervalMs,
+    pushSnapshot: () =>
+      binaryOptionsService.getStrategySnapshot({
         assetId: parsedQuery.assetId,
         exchange: parsedQuery.exchange,
         mode: "live",
         range: parsedQuery.range,
         resolution: parsedQuery.resolution,
-      });
-
-      if (isClosed) {
-        return;
-      }
-
-      writeSseEvent(reply, "snapshot", {
-        chart,
-        generatedAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      if (isClosed) {
-        return;
-      }
-
-      writeSseEvent(reply, "stream-error", {
-        generatedAt: new Date().toISOString(),
-        message: error instanceof Error ? error.message : "Falha no stream de binarias ao vivo",
-      });
-    } finally {
-      isInFlight = false;
-    }
-  };
-
-  writeSseEvent(reply, "meta", {
-    generatedAt: new Date().toISOString(),
-    mode: "live",
-    requestId: request.id,
+      }),
+    streamName: "de binarias",
   });
-  void pushSnapshot();
-
-  streamTimer = setInterval(() => {
-    void pushSnapshot();
-  }, parsedQuery.intervalMs);
 }
