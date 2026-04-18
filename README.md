@@ -100,6 +100,7 @@ Politica de retencao:
 14. ADR 042: `docs/ADR/ADR-042-indicador-live-market-anti-otc-seletor-ativos.md`
 15. ADR 043: `docs/ADR/ADR-043-cta-analisar-mercado-intelligence-desk.md`
 16. ADR 044: `docs/ADR/ADR-044-cache-bypass-fresh-fetch-cta-manual.md`
+17. ADR 045: `docs/ADR/ADR-045-coinbase-24h-stats-e-stream-oscilacao-defer.md`
 
 ## Relatorio completo desta entrega
 
