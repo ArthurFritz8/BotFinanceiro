@@ -2005,3 +2005,87 @@ void it("GET /v1/crypto/live-chart?fresh=true bypassa cache fresco e refaz refre
   assert.equal(klineCalls, 2);
   assert.equal(tickerCalls, 2);
 });
+
+void it("GET /v1/crypto/live-chart com exchange=coinbase usa /stats para preencher changePercent24h", async () => {
+  let candleCalls = 0;
+  let tickerCalls = 0;
+  let statsCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("api.exchange.coinbase.com/products/BTC-USD/candles")) {
+      candleCalls += 1;
+      const now = Date.now();
+      return Promise.resolve(
+        new Response(
+          JSON.stringify([
+            [Math.floor(now / 1000) - 1200, 64900, 65140, 65000, 65080, 110.5],
+            [Math.floor(now / 1000) - 900, 65000, 65190, 65080, 65120, 98.2],
+            [Math.floor(now / 1000) - 600, 65050, 65230, 65120, 65190, 103.3],
+            [Math.floor(now / 1000) - 300, 65120, 65310, 65190, 65240, 119.7],
+            [Math.floor(now / 1000), 65180, 65380, 65240, 65310, 124.4],
+          ]),
+          { headers: { "content-type": "application/json" }, status: 200 },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.exchange.coinbase.com/products/BTC-USD/ticker")) {
+      tickerCalls += 1;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            price: "65310.55",
+            time: new Date().toISOString(),
+            volume: "15368.79",
+          }),
+          { headers: { "content-type": "application/json" }, status: 200 },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.exchange.coinbase.com/products/BTC-USD/stats")) {
+      statsCalls += 1;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            high: "66000",
+            last: "65310.55",
+            low: "63500",
+            open: "64000",
+            volume: "15368.79",
+            volume_30day: "350000",
+          }),
+          { headers: { "content-type": "application/json" }, status: 200 },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=coinbase",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.ok(candleCalls >= 1);
+  assert.ok(tickerCalls >= 1);
+  assert.ok(statsCalls >= 1, "Coinbase /stats deveria ser consultado para obter open price 24h");
+
+  const body = response.json<{
+    data: {
+      live: { changePercent24h: number | null; source: string } | null;
+      provider: string;
+    };
+  }>();
+
+  assert.equal(body.data.provider, "coinbase");
+  assert.equal(body.data.live?.source, "coinbase");
+  assert.ok(
+    typeof body.data.live?.changePercent24h === "number" && !Number.isNaN(body.data.live.changePercent24h),
+    "changePercent24h deveria ser numero quando /stats fornece open",
+  );
+});

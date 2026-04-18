@@ -654,11 +654,15 @@ export class MultiExchangeMarketDataAdapter {
 
   private async getCoinbaseTicker(assetId: string): Promise<MultiExchangeTickerSnapshot> {
     const pair = resolvePair(assetId, "coinbase");
-    const payload = await this.requestJson(
-      `https://api.exchange.coinbase.com/products/${encodeURIComponent(pair)}/ticker`,
-    );
+    const tickerEndpoint = `https://api.exchange.coinbase.com/products/${encodeURIComponent(pair)}/ticker`;
+    const statsEndpoint = `https://api.exchange.coinbase.com/products/${encodeURIComponent(pair)}/stats`;
 
-    const ticker = payload as Record<string, unknown>;
+    const [tickerPayload, statsPayloadResult] = await Promise.all([
+      this.requestJson(tickerEndpoint),
+      this.requestJson(statsEndpoint).catch(() => null),
+    ]);
+
+    const ticker = tickerPayload as Record<string, unknown>;
     const lastPrice = parseFloatSafe(typeof ticker.price === "string" ? ticker.price : undefined);
 
     if (lastPrice === null) {
@@ -669,7 +673,17 @@ export class MultiExchangeMarketDataAdapter {
       });
     }
 
-    const openPrice = parseFloatSafe(typeof ticker.open === "string" ? ticker.open : undefined);
+    const stats =
+      statsPayloadResult !== null && typeof statsPayloadResult === "object"
+        ? (statsPayloadResult as Record<string, unknown>)
+        : null;
+
+    const openPrice =
+      parseFloatSafe(typeof stats?.open === "string" ? stats.open : undefined)
+      ?? parseFloatSafe(typeof ticker.open === "string" ? ticker.open : undefined);
+
+    const volumeFromStats = parseFloatSafe(typeof stats?.volume === "string" ? stats.volume : undefined);
+    const volumeFromTicker = parseFloatSafe(typeof ticker.volume === "string" ? ticker.volume : undefined);
 
     return {
       assetId,
@@ -678,7 +692,7 @@ export class MultiExchangeMarketDataAdapter {
       fetchedAt: new Date().toISOString(),
       lastPrice: roundPrice(lastPrice),
       symbol: normalizeBrokerSymbol(pair),
-      volume24h: parseFloatSafe(typeof ticker.volume === "string" ? ticker.volume : undefined),
+      volume24h: volumeFromStats ?? volumeFromTicker,
     };
   }
 
