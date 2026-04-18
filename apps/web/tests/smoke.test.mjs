@@ -434,3 +434,31 @@ test("main.js hidrata catalogo de ativos via /v1/crypto/asset-catalog com fallba
   assert.match(source, /chartAssetSelect\.replaceChildren\(fragment\)/);
 });
 
+test("index.html expoe grid institucional SMC + HFT com checklist abaixo do sinal", async () => {
+  const html = await readWebFile("index.html");
+  assert.match(html, /id="institutional-summary"/);
+  assert.match(html, /id="institutional-summary-grid"/);
+  assert.match(html, /id="institutional-context-strip"/);
+  assert.match(html, /id="institutional-checklist"/);
+});
+
+test("main.js renderiza resumo institucional com KPIs adaptativos + ghost tracker + prop desk", async () => {
+  const source = await readWebFile("src/main.js");
+  assert.match(source, /function renderInstitutionalSummary\(analysis, snapshot, options = \{\}\)/);
+  assert.match(source, /function buildKineticEngineKpi\(/);
+  assert.match(source, /function buildMarketStructureKpi\(/);
+  assert.match(source, /function getSpotMarginGhostTrackerStats\(/);
+  assert.match(source, /resolvedTrades >= 5/);
+  assert.match(source, /propDeskState\.riskPercent/);
+});
+
+test("styles.css define grid responsivo institucional com tons bull/bear/neutral + reduced-motion", async () => {
+  const css = await readWebFile("src/styles.css");
+  assert.match(css, /\.institutional-summary\b/);
+  assert.match(css, /\.institutional-kpi\[data-tone="bull"\]/);
+  assert.match(css, /\.institutional-kpi\[data-tone="bear"\]/);
+  assert.match(css, /\.institutional-check\[data-ok="true"\]/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(css, /@media \(min-width: 1024px\)/);
+});
+
