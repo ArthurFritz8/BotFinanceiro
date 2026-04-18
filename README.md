@@ -105,6 +105,7 @@ Politica de retencao:
 19. ADR 047: `docs/ADR/ADR-047-expansao-catalogo-60-ativos-chart-lab-cta.md`
 20. ADR 048: `docs/ADR/ADR-048-intelligence-desk-360-institutional-summary.md`
 21. ADR 049: `docs/ADR/ADR-049-ghost-tracker-persistence-confluence-badge-tooltips.md`
+22. ADR 050: `docs/ADR/ADR-050-rate-limit-publico-owasp-a05.md`
 
 ## Relatorio completo desta entrega
 
