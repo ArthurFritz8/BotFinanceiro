@@ -103,6 +103,7 @@ Politica de retencao:
 17. ADR 045: `docs/ADR/ADR-045-coinbase-24h-stats-e-stream-oscilacao-defer.md`
 18. ADR 046: `docs/ADR/ADR-046-catalogo-unificado-30-assets-multi-broker.md`
 19. ADR 047: `docs/ADR/ADR-047-expansao-catalogo-60-ativos-chart-lab-cta.md`
+20. ADR 048: `docs/ADR/ADR-048-intelligence-desk-360-institutional-summary.md`
 
 ## Relatorio completo desta entrega
 
