@@ -462,3 +462,32 @@ test("styles.css define grid responsivo institucional com tons bull/bear/neutral
   assert.match(css, /@media \(min-width: 1024px\)/);
 });
 
+test("main.js persiste ghost tracker no localStorage com schema guard e debounce", async () => {
+  const source = await readWebFile("src/main.js");
+  assert.match(source, /GHOST_TRACKER_PERSISTENCE_KEY\s*=\s*"botfinanceiro:ghost-tracker:v1"/);
+  assert.match(source, /function sanitizePersistedGhostTrackerState\(/);
+  assert.match(source, /function hydrateGhostTrackerStatesFromStorage\(/);
+  assert.match(source, /function schedulePersistGhostTrackerStates\(/);
+  assert.match(source, /hydrateGhostTrackerStatesFromStorage\(\);/);
+});
+
+test("index.html expoe badge de confluencia dentro do resumo institucional", async () => {
+  const html = await readWebFile("index.html");
+  assert.match(html, /id="institutional-confluence-badge"/);
+});
+
+test("main.js renderiza badge de confluencia derivado do checklist (score/5) + tooltips nos KPIs", async () => {
+  const source = await readWebFile("src/main.js");
+  assert.match(source, /institutionalConfluenceBadgeElement/);
+  assert.match(source, /checks\.reduce\(\(acc, check\) => acc \+ \(check\.ok \? 1 : 0\), 0\)/);
+  assert.match(source, /institutional-confluence-badge__dot/);
+  assert.match(source, /title="\$\{escapeHtml\(kpi\.tooltip \?\? ""\)\}"/);
+});
+
+test("styles.css define badge de confluencia com dots preenchidos por data-ok=true", async () => {
+  const css = await readWebFile("src/styles.css");
+  assert.match(css, /\.institutional-confluence-badge\b/);
+  assert.match(css, /\.institutional-confluence-badge__dot\[data-ok="true"\]/);
+  assert.match(css, /\.institutional-confluence-badge\[data-tone="bull"\]/);
+});
+
