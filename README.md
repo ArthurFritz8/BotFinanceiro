@@ -99,6 +99,7 @@ Politica de retencao:
 13. ADR 041: `docs/ADR/ADR-041-dom-syncer-rAF-parse-stream-web.md`
 14. ADR 042: `docs/ADR/ADR-042-indicador-live-market-anti-otc-seletor-ativos.md`
 15. ADR 043: `docs/ADR/ADR-043-cta-analisar-mercado-intelligence-desk.md`
+16. ADR 044: `docs/ADR/ADR-044-cache-bypass-fresh-fetch-cta-manual.md`
 
 ## Relatorio completo desta entrega
 
