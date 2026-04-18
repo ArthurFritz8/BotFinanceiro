@@ -407,3 +407,30 @@ test("Stream-error de chart live difere legenda transient para coalescer com sna
   assert.match(source, /chartStreamErrorLegendTimer = setTimeout\(/);
   assert.match(source, /clearTimeout\(chartStreamErrorLegendTimer\)/);
 });
+
+test("index.html expoe seletor de ativos do chart com 30 opcoes globais (BTC, ETH, LTC, TRX, DOT, MATIC)", async () => {
+  const html = await readWebFile("index.html");
+  const selectStart = html.indexOf("id=\"chart-asset\"");
+  assert.ok(selectStart >= 0, "select chart-asset deve existir no HTML");
+  const selectEnd = html.indexOf("</select>", selectStart);
+  const selectMarkup = html.slice(selectStart, selectEnd);
+
+  const optionMatches = selectMarkup.match(/<option\s+value="/g) ?? [];
+  assert.ok(
+    optionMatches.length >= 30,
+    `select chart-asset deve listar pelo menos 30 ativos (encontrado: ${optionMatches.length})`,
+  );
+
+  for (const required of ["bitcoin", "ethereum", "litecoin", "tron", "polkadot", "polygon-pos", "binancecoin", "solana"]) {
+    assert.match(selectMarkup, new RegExp(`value="${required}"`), `select chart-asset deve conter ${required}`);
+  }
+});
+
+test("main.js hidrata catalogo de ativos via /v1/crypto/asset-catalog com fallback estatico silencioso", async () => {
+  const source = await readWebFile("src/main.js");
+  assert.match(source, /async function hydrateChartAssetCatalog\(\)/);
+  assert.match(source, /void hydrateChartAssetCatalog\(\);/);
+  assert.match(source, /\/v1\/crypto\/asset-catalog/);
+  assert.match(source, /chartAssetSelect\.replaceChildren\(fragment\)/);
+});
+

@@ -14171,6 +14171,60 @@ function buildContingencyChartSnapshot(input) {
   };
 }
 
+/**
+ * Hidrata dinamicamente o `<select id="chart-asset">` com o catalogo canonico
+ * exposto por `GET /v1/crypto/asset-catalog`. Mantem a selecao atual quando
+ * possivel e degrada silenciosamente para a lista estatica do HTML se o
+ * endpoint falhar (preserva offline-first e SSR-less).
+ */
+async function hydrateChartAssetCatalog() {
+  if (!(chartAssetSelect instanceof HTMLSelectElement)) {
+    return;
+  }
+
+  try {
+    const response = await fetch(buildApiUrl("/v1/crypto/asset-catalog"), {
+      headers: { accept: "application/json" },
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = await response.json();
+    const assets = Array.isArray(payload?.data?.assets) ? payload.data.assets : [];
+
+    if (assets.length === 0) {
+      return;
+    }
+
+    const previousValue = chartAssetSelect.value;
+    const previousValueStillValid = assets.some((asset) => asset?.id === previousValue);
+    const fragment = document.createDocumentFragment();
+
+    for (const asset of assets) {
+      if (!asset || typeof asset.id !== "string" || typeof asset.name !== "string") {
+        continue;
+      }
+
+      const option = document.createElement("option");
+      option.value = asset.id;
+      option.textContent = typeof asset.symbol === "string" && asset.symbol.length > 0
+        ? `${asset.name} (${asset.symbol})`
+        : asset.name;
+      fragment.appendChild(option);
+    }
+
+    chartAssetSelect.replaceChildren(fragment);
+
+    if (previousValueStillValid) {
+      chartAssetSelect.value = previousValue;
+    }
+  } catch {
+    // Silencioso: o `<select>` ja vem populado com a lista estatica de fallback.
+  }
+}
+
 async function loadChart(options = {}) {
   if (!chartAssetSelect || !chartRangeSelect) {
     return;
@@ -15782,6 +15836,7 @@ function setupChartLab() {
   configureWatchlistAutoRefresh();
   setupChartKeyboardShortcuts();
   saveChartPreferences();
+  void hydrateChartAssetCatalog();
   void loadChart();
 }
 
