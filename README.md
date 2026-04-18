@@ -107,6 +107,7 @@ Politica de retencao:
 21. ADR 049: `docs/ADR/ADR-049-ghost-tracker-persistence-confluence-badge-tooltips.md`
 22. ADR 050: `docs/ADR/ADR-050-rate-limit-publico-owasp-a05.md`
 23. ADR 051: `docs/ADR/ADR-051-cabecalhos-seguranca-http-owasp-a05.md`
+24. ADR 052: `docs/ADR/ADR-052-ci-matrix-node-20-22-lts.md`
 
 ## Relatorio completo desta entrega
 
