@@ -109,6 +109,7 @@ Politica de retencao:
 23. ADR 051: `docs/ADR/ADR-051-cabecalhos-seguranca-http-owasp-a05.md`
 24. ADR 052: `docs/ADR/ADR-052-ci-matrix-node-20-22-lts.md`
 25. ADR 053: `docs/ADR/ADR-053-metrics-prometheus-endpoint.md`
+26. ADR 054: `docs/ADR/ADR-054-web-push-notifications-zero-cost.md`
 
 ## Relatorio completo desta entrega
 
