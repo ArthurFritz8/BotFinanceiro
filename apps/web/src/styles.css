@@ -2726,6 +2726,79 @@ body.sidebar-collapsed .app-shell {
   border-color: rgba(255, 127, 149, 0.48);
 }
 
+.institutional-confluence-badge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.46rem 0.6rem;
+  background: rgba(6, 18, 33, 0.6);
+  border: 1px solid rgba(118, 166, 224, 0.3);
+  border-radius: 10px;
+}
+
+.institutional-confluence-badge[data-tone="bull"] {
+  border-color: rgba(101, 235, 182, 0.5);
+  background: linear-gradient(120deg, rgba(101, 235, 182, 0.08), rgba(6, 18, 33, 0.6));
+}
+
+.institutional-confluence-badge[data-tone="bear"] {
+  border-color: rgba(255, 127, 149, 0.5);
+  background: linear-gradient(120deg, rgba(255, 127, 149, 0.08), rgba(6, 18, 33, 0.6));
+}
+
+.institutional-confluence-badge[data-tone="neutral"] {
+  border-color: rgba(255, 200, 96, 0.42);
+}
+
+.institutional-confluence-badge__score {
+  display: flex;
+  align-items: baseline;
+  gap: 0.46rem;
+}
+
+.institutional-confluence-badge__score strong {
+  color: #f0f7ff;
+  font-size: 1.1rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.institutional-confluence-badge[data-tone="bull"] .institutional-confluence-badge__score strong {
+  color: #6ff0b8;
+}
+
+.institutional-confluence-badge[data-tone="bear"] .institutional-confluence-badge__score strong {
+  color: #ff92a6;
+}
+
+.institutional-confluence-badge__score span {
+  color: #9bb9dc;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.institutional-confluence-badge__dots {
+  display: inline-flex;
+  gap: 0.26rem;
+}
+
+.institutional-confluence-badge__dot {
+  width: 0.58rem;
+  height: 0.58rem;
+  border-radius: 999px;
+  background: rgba(118, 166, 224, 0.18);
+  border: 1px solid rgba(118, 166, 224, 0.32);
+}
+
+.institutional-confluence-badge__dot[data-ok="true"] {
+  background: #6ff0b8;
+  border-color: rgba(111, 240, 184, 0.7);
+  box-shadow: 0 0 6px rgba(111, 240, 184, 0.45);
+}
+
 .institutional-summary-grid {
   display: grid;
   gap: 0.46rem;
@@ -2751,6 +2824,7 @@ body.sidebar-collapsed .app-shell {
   background: rgba(6, 18, 33, 0.72);
   border: 1px solid rgba(118, 166, 224, 0.3);
   border-radius: 11px;
+  cursor: help;
   transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
