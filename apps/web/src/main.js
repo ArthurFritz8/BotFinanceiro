@@ -123,6 +123,7 @@ const intelligenceSyncOpsUpdatedElement = document.querySelector("#intelligence-
 const analysisSignalCardElement = document.querySelector("#analysis-signal-card");
 const analysisContextCardElement = document.querySelector("#analysis-context-card");
 const institutionalSummaryElement = document.querySelector("#institutional-summary");
+const institutionalConfluenceBadgeElement = document.querySelector("#institutional-confluence-badge");
 const institutionalSummaryGridElement = document.querySelector("#institutional-summary-grid");
 const institutionalContextStripElement = document.querySelector("#institutional-context-strip");
 const institutionalChecklistElement = document.querySelector("#institutional-checklist");
@@ -1931,6 +1932,96 @@ let binaryOptionsGhostAuditBackendState = createBinaryOptionsGhostAuditBackendSt
 let binaryOptionsGhostAuditViewMode = BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION;
 let isPropDeskInitialized = false;
 let isWatchlistRiskSummaryCollapsed = false;
+
+const GHOST_TRACKER_PERSISTENCE_KEY = "botfinanceiro:ghost-tracker:v1";
+const GHOST_TRACKER_PERSIST_DEBOUNCE_MS = 180;
+let ghostTrackerPersistTimer = null;
+
+function sanitizePersistedGhostTrackerState(candidate, factory) {
+  const base = factory();
+
+  if (!candidate || typeof candidate !== "object") {
+    return base;
+  }
+
+  const openSignals = Array.isArray(candidate.openSignals)
+    ? candidate.openSignals.filter((signal) => signal && typeof signal === "object")
+    : [];
+  const recentResults = Array.isArray(candidate.recentResults)
+    ? candidate.recentResults.filter((entry) => entry && typeof entry === "object")
+    : [];
+
+  return {
+    ...base,
+    lastSignalAtMs: Number.isFinite(candidate.lastSignalAtMs) ? candidate.lastSignalAtMs : 0,
+    lastSettledAtMs: Number.isFinite(candidate.lastSettledAtMs) ? candidate.lastSettledAtMs : 0,
+    losses: Number.isFinite(candidate.losses) ? Math.max(0, Math.trunc(candidate.losses)) : 0,
+    openSignals,
+    pushes: Number.isFinite(candidate.pushes) ? Math.max(0, Math.trunc(candidate.pushes)) : 0,
+    recentResults,
+    sessionKey: typeof candidate.sessionKey === "string" ? candidate.sessionKey : "",
+    startedAtMs: Number.isFinite(candidate.startedAtMs) ? candidate.startedAtMs : Date.now(),
+    wins: Number.isFinite(candidate.wins) ? Math.max(0, Math.trunc(candidate.wins)) : 0,
+  };
+}
+
+function hydrateGhostTrackerStatesFromStorage() {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(GHOST_TRACKER_PERSISTENCE_KEY);
+
+    if (!raw) {
+      return;
+    }
+
+    const parsed = JSON.parse(raw);
+
+    if (!parsed || typeof parsed !== "object") {
+      return;
+    }
+
+    binaryOptionsGhostTrackerState = sanitizePersistedGhostTrackerState(
+      parsed.binary,
+      createBinaryOptionsGhostTrackerState,
+    );
+    spotMarginGhostTrackerState = sanitizePersistedGhostTrackerState(
+      parsed.spot,
+      createSpotMarginGhostTrackerState,
+    );
+  } catch {
+    // Corrupcao de storage nao deve bloquear a UI; mantem estado fresco.
+  }
+}
+
+function schedulePersistGhostTrackerStates() {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return;
+  }
+
+  if (ghostTrackerPersistTimer !== null) {
+    return;
+  }
+
+  ghostTrackerPersistTimer = window.setTimeout(() => {
+    ghostTrackerPersistTimer = null;
+
+    try {
+      const payload = JSON.stringify({
+        binary: binaryOptionsGhostTrackerState,
+        spot: spotMarginGhostTrackerState,
+        version: 1,
+      });
+      window.localStorage.setItem(GHOST_TRACKER_PERSISTENCE_KEY, payload);
+    } catch {
+      // Quota excedida ou modo privado: auditoria fica em memoria apenas.
+    }
+  }, GHOST_TRACKER_PERSIST_DEBOUNCE_MS);
+}
+
+hydrateGhostTrackerStatesFromStorage();
 
 function mapSymbolToExchange(symbol, exchange) {
   const normalizedSymbol = sanitizeTerminalSymbol(symbol);
@@ -7932,6 +8023,7 @@ function updateBinaryOptionsGhostTracker(snapshot, microTiming) {
   const nowMs = Date.now();
   settleBinaryOptionsGhostSignals(currentPrice, snapshot, nowMs);
   registerBinaryOptionsGhostSignal(snapshot, microTiming, currentPrice, nowMs);
+  schedulePersistGhostTrackerStates();
 }
 
 function resolveSpotMarginTriggerHeat(input) {
@@ -8147,6 +8239,7 @@ function updateSpotMarginGhostTracker(snapshot, analysis) {
   const nowMs = Date.now();
   settleSpotMarginGhostSignals(currentPrice, snapshot, nowMs);
   registerSpotMarginGhostSignal(snapshot, analysis, currentPrice, nowMs);
+  schedulePersistGhostTrackerStates();
 }
 
 function sanitizeBinaryOptionsRiskState(candidate) {
@@ -9140,6 +9233,10 @@ function renderDeepAnalysisPanelImmediate(snapshot) {
 }
 
 function clearInstitutionalSummary() {
+  if (institutionalConfluenceBadgeElement instanceof HTMLElement) {
+    institutionalConfluenceBadgeElement.innerHTML = "";
+    institutionalConfluenceBadgeElement.removeAttribute("data-score");
+  }
   if (institutionalSummaryGridElement instanceof HTMLElement) {
     institutionalSummaryGridElement.innerHTML = "";
   }
@@ -9242,24 +9339,39 @@ function renderInstitutionalSummary(analysis, snapshot, options = {}) {
     : getSpotMarginGhostTrackerStats();
   const resolvedTrades = Number.isFinite(ghostStats?.resolvedTrades) ? ghostStats.resolvedTrades : 0;
   const winRate = Number.isFinite(ghostStats?.winRate) ? ghostStats.winRate : 0;
+  const openSignalsCount = Number.isFinite(ghostStats?.openSignals) ? ghostStats.openSignals : 0;
+  const winsCount = Number.isFinite(ghostStats?.wins) ? ghostStats.wins : 0;
+  const lossesCount = Number.isFinite(ghostStats?.losses) ? ghostStats.losses : 0;
+  const pushesCount = Number.isFinite(ghostStats?.pushes) ? ghostStats.pushes : 0;
   const hasEnoughSamples = resolvedTrades >= 5;
   const winRateKpi = hasEnoughSamples
     ? {
       label: `${winRate.toFixed(1)}%`,
       tone: winRate >= 60 ? "bull" : winRate >= 45 ? "neutral" : "bear",
       hint: `${resolvedTrades} trades auditados (sessao)`,
+      tooltip: `Wins ${winsCount} · Losses ${lossesCount} · Pushes ${pushesCount} · Abertos ${openSignalsCount}`,
     }
     : {
       label: "Aquecendo",
       tone: "neutral",
       hint: `${resolvedTrades}/5 trades para ativar auditoria`,
+      tooltip: `Amostra insuficiente: win rate honesto exige >= 5 trades resolvidos. Atual: ${resolvedTrades}`,
     };
 
   // KPI 2 — Estrutura de mercado (SMC)
   const structureKpi = buildMarketStructureKpi(analysis);
+  structureKpi.tooltip = `Estrutura: ${analysis?.smc?.structure ?? "n/d"} · Zona: ${analysis?.context?.zone ?? "n/d"}`;
 
   // KPI 3 — Motor cinetico (adaptativo)
   const kineticKpi = buildKineticEngineKpi(analysis, microTiming, operationalMode);
+  if (operationalMode === CHART_OPERATIONAL_MODE_BINARY_OPTIONS && microTiming) {
+    const momentumPct = (toFiniteNumber(microTiming.momentumStrength, 0) * 100).toFixed(0);
+    const neutralPct = (toFiniteNumber(microTiming.neutralProbability, 0) * 100).toFixed(0);
+    kineticKpi.tooltip = `Momentum ${momentumPct}% · Neutro ${neutralPct}% · Thresholds HOT >=70/<=40`;
+  } else {
+    const confidencePct = toFiniteNumber(analysis?.signal?.confidence, 0).toFixed(0);
+    kineticKpi.tooltip = `Confianca do sinal ${confidencePct}% · Thresholds FORTE >=70, MODERADO >=50`;
+  }
 
   // KPI 4 — Risco base (dinamico do Prop Desk)
   const effectiveRiskPercent = propDeskState.propModeEnabled
@@ -9271,6 +9383,7 @@ function renderInstitutionalSummary(analysis, snapshot, options = {}) {
     hint: propDeskState.propModeEnabled
       ? "Mesa proprietaria: teto 1%/trade"
       : `Exposicao por trade • ${propDeskState.exitStrategy === "three_by_seven" ? "3x7" : "AB"}`,
+    tooltip: `Estrategia de saida: ${propDeskState.exitStrategy ?? "n/d"} · Prop mode: ${propDeskState.propModeEnabled ? "on" : "off"}`,
   };
 
   const kpis = [
@@ -9281,7 +9394,7 @@ function renderInstitutionalSummary(analysis, snapshot, options = {}) {
   ];
 
   institutionalSummaryGridElement.innerHTML = kpis.map((kpi) => `
-    <article class="institutional-kpi" role="listitem" data-tone="${escapeHtml(kpi.tone)}">
+    <article class="institutional-kpi" role="listitem" data-tone="${escapeHtml(kpi.tone)}" title="${escapeHtml(kpi.tooltip ?? "")}">
       <span class="institutional-kpi__title">${escapeHtml(kpi.title)}</span>
       <strong class="institutional-kpi__value">${escapeHtml(kpi.label)}</strong>
       <span class="institutional-kpi__hint">${escapeHtml(kpi.hint)}</span>
@@ -9370,6 +9483,28 @@ function renderInstitutionalSummary(analysis, snapshot, options = {}) {
       <span class="institutional-check__hint">${escapeHtml(check.hint)}</span>
     </li>
   `).join("");
+
+  // Badge de confluencia — score 0/5 derivado do proprio checklist (zero duplo compute)
+  if (institutionalConfluenceBadgeElement instanceof HTMLElement) {
+    const confluenceScore = checks.reduce((acc, check) => acc + (check.ok ? 1 : 0), 0);
+    const confluenceTone = confluenceScore >= 4 ? "bull" : confluenceScore >= 2 ? "neutral" : "bear";
+    const confluenceTitle = confluenceScore >= 4
+      ? "Confluencia forte"
+      : confluenceScore >= 2
+        ? "Confluencia parcial"
+        : "Confluencia fraca";
+    const activeLabels = checks.filter((check) => check.ok).map((check) => check.label.split(" ")[0]).join(", ");
+    const dots = checks.map((check) => `<span class="institutional-confluence-badge__dot" data-ok="${check.ok ? "true" : "false"}" aria-hidden="true"></span>`).join("");
+    institutionalConfluenceBadgeElement.dataset.score = String(confluenceScore);
+    institutionalConfluenceBadgeElement.dataset.tone = confluenceTone;
+    institutionalConfluenceBadgeElement.innerHTML = `
+      <div class="institutional-confluence-badge__score" title="${escapeHtml(activeLabels || "Nenhum fator confluente")}">
+        <strong>${confluenceScore}/5</strong>
+        <span>${escapeHtml(confluenceTitle)}</span>
+      </div>
+      <div class="institutional-confluence-badge__dots" aria-label="Fatores confluentes ${confluenceScore} de 5">${dots}</div>
+    `;
+  }
 
   if (institutionalSummaryElement instanceof HTMLElement) {
     institutionalSummaryElement.dataset.tone = analysis.signal.tone;

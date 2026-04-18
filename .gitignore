@@ -27,3 +27,10 @@ Thumbs.db
 NUL
 apps/web/dev-dist/
 apps/web/test-results/
+
+# Local debug artifacts (stdout dumps from ad-hoc runs)
+out.txt
+out*.txt
+test_*_output.txt
+test_output.txt
+tests*.tap
