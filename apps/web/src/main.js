@@ -183,6 +183,7 @@ const BROKER_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
 const BROKER_CIRCUIT_BREAKER_COOLDOWN_MS = 120000;
 const CHART_AUTO_BROKER_STICKY_MS = 180000;
 const CHART_TRANSIENT_LEGEND_MIN_INTERVAL_MS = 8000;
+const CHART_STREAM_ERROR_LEGEND_DEFER_MS = 2500;
 const WATCHLIST_STREAM_FALLBACK_POLL_MS = 6000;
 const CHART_STREAM_FALLBACK_POLL_MS = 4000;
 const CHART_CONTEXT_SYNC_DEBOUNCE_MS = 280;
@@ -1816,6 +1817,7 @@ let chartAutoPreferredBroker = "binance";
 let chartAutoPreferredBrokerLockUntilMs = 0;
 let chartLastTransientLegendMessage = "";
 let chartLastTransientLegendAtMs = 0;
+let chartStreamErrorLegendTimer = null;
 let chartLiveFallbackPollTimer = null;
 let chartContextSyncTimer = null;
 let pendingChartLoadRequest = null;
@@ -13654,6 +13656,11 @@ function stopChartLiveStream(options) {
     chartLiveStreamBackoffTimer = null;
   }
 
+  if (chartStreamErrorLegendTimer !== null) {
+    window.clearTimeout(chartStreamErrorLegendTimer);
+    chartStreamErrorLegendTimer = null;
+  }
+
   if (chartLiveStream) {
     chartLiveStream.close();
     chartLiveStream = null;
@@ -13746,6 +13753,10 @@ function connectBinaryOptionsLiveStream(intervalMs) {
 
     stopChartLiveFallbackPolling();
     chartLiveStreamReconnectAttempt = 0;
+    if (chartStreamErrorLegendTimer !== null) {
+      clearTimeout(chartStreamErrorLegendTimer);
+      chartStreamErrorLegendTimer = null;
+    }
     updateChartLiveStatus(LIVE_STATUS.LIVE);
 
     const resolvedStreamBroker = normalizeBrokerName(snapshot?.exchange?.resolved ?? snapshot?.provider ?? exchange);
@@ -13904,6 +13915,10 @@ function connectChartLiveStream(intervalMs) {
 
     stopChartLiveFallbackPolling();
     chartLiveStreamReconnectAttempt = 0;
+    if (chartStreamErrorLegendTimer !== null) {
+      clearTimeout(chartStreamErrorLegendTimer);
+      chartStreamErrorLegendTimer = null;
+    }
     updateChartLiveStatus(LIVE_STATUS.LIVE);
 
     try {
@@ -13945,7 +13960,13 @@ function connectChartLiveStream(intervalMs) {
     const normalizedMessage = normalizeBrokerApiErrorMessage(message, "Stream de chart reportou falha");
 
     if (chartViewMode === "tv" && currentChartSnapshot) {
-      setChartLegendTransient(`Stream com oscilacao: ${normalizedMessage}`, "warn");
+      if (chartStreamErrorLegendTimer !== null) {
+        clearTimeout(chartStreamErrorLegendTimer);
+      }
+      chartStreamErrorLegendTimer = setTimeout(() => {
+        chartStreamErrorLegendTimer = null;
+        setChartLegendTransient(`Stream com oscilacao: ${normalizedMessage}`, "warn");
+      }, CHART_STREAM_ERROR_LEGEND_DEFER_MS);
     } else {
       setChartStatus(normalizedMessage, "error");
     }

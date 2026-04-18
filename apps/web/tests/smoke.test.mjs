@@ -399,3 +399,11 @@ test("CTA Analisar Mercado dispara fetch fresh bypassando cache do live-chart", 
   assert.match(source, /params\.set\("fresh", "true"\)/);
   assert.match(source, /manualMarketAnalysisCounter\.increment\("fresh-fetch"\)/);
 });
+
+test("Stream-error de chart live difere legenda transient para coalescer com snapshot rapido (recovery silencioso)", async () => {
+  const source = await readWebFile("src/main.js");
+  assert.match(source, /const CHART_STREAM_ERROR_LEGEND_DEFER_MS = 2500;/);
+  assert.match(source, /let chartStreamErrorLegendTimer = null;/);
+  assert.match(source, /chartStreamErrorLegendTimer = setTimeout\(/);
+  assert.match(source, /clearTimeout\(chartStreamErrorLegendTimer\)/);
+});
