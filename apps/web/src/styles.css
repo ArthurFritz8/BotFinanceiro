@@ -2708,6 +2708,195 @@ body.sidebar-collapsed .app-shell {
   margin-top: 0.56rem;
 }
 
+.institutional-summary {
+  display: grid;
+  gap: 0.58rem;
+  margin-top: 0.58rem;
+  padding: 0.68rem;
+  background: linear-gradient(135deg, rgba(10, 24, 44, 0.82), rgba(8, 20, 38, 0.92));
+  border: 1px solid rgba(122, 166, 224, 0.32);
+  border-radius: 14px;
+}
+
+.institutional-summary[data-tone="buy"] {
+  border-color: rgba(101, 235, 182, 0.44);
+}
+
+.institutional-summary[data-tone="sell"] {
+  border-color: rgba(255, 127, 149, 0.48);
+}
+
+.institutional-summary-grid {
+  display: grid;
+  gap: 0.46rem;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+}
+
+@media (min-width: 640px) {
+  .institutional-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .institutional-summary-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.institutional-kpi {
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.52rem 0.6rem;
+  background: rgba(6, 18, 33, 0.72);
+  border: 1px solid rgba(118, 166, 224, 0.3);
+  border-radius: 11px;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.institutional-kpi[data-tone="bull"] {
+  border-color: rgba(101, 235, 182, 0.58);
+  box-shadow: 0 0 0 1px rgba(101, 235, 182, 0.12) inset;
+}
+
+.institutional-kpi[data-tone="bear"] {
+  border-color: rgba(255, 127, 149, 0.58);
+  box-shadow: 0 0 0 1px rgba(255, 127, 149, 0.12) inset;
+}
+
+.institutional-kpi[data-tone="neutral"] {
+  border-color: rgba(255, 200, 96, 0.42);
+}
+
+.institutional-kpi__title {
+  color: #9bb9dc;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.institutional-kpi__value {
+  color: #f0f7ff;
+  font-size: 1.12rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.institutional-kpi[data-tone="bull"] .institutional-kpi__value {
+  color: #6ff0b8;
+}
+
+.institutional-kpi[data-tone="bear"] .institutional-kpi__value {
+  color: #ff92a6;
+}
+
+.institutional-kpi__hint {
+  color: #8ca9ce;
+  font-size: 0.62rem;
+}
+
+.institutional-context-strip {
+  display: grid;
+  gap: 0.4rem;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+}
+
+@media (min-width: 640px) {
+  .institutional-context-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.institutional-context-block {
+  display: grid;
+  gap: 0.12rem;
+  padding: 0.36rem 0.46rem;
+  background: rgba(6, 18, 33, 0.55);
+  border: 1px solid rgba(94, 138, 196, 0.26);
+  border-radius: 9px;
+}
+
+.institutional-context-block span {
+  color: #95b2d6;
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.institutional-context-block strong {
+  color: #eaf4ff;
+  font-size: 0.74rem;
+}
+
+.institutional-checklist {
+  display: grid;
+  gap: 0.28rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.institutional-check {
+  display: grid;
+  align-items: center;
+  gap: 0.28rem 0.52rem;
+  grid-template-columns: auto 1fr;
+  padding: 0.36rem 0.46rem;
+  background: rgba(6, 18, 33, 0.55);
+  border: 1px solid rgba(94, 138, 196, 0.22);
+  border-radius: 9px;
+}
+
+.institutional-check[data-ok="true"] {
+  border-color: rgba(101, 235, 182, 0.42);
+}
+
+.institutional-check[data-ok="false"] {
+  border-color: rgba(255, 154, 120, 0.38);
+}
+
+.institutional-check__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  line-height: 1;
+  grid-row: span 2;
+}
+
+.institutional-check[data-ok="true"] .institutional-check__icon {
+  background: rgba(101, 235, 182, 0.18);
+  color: #6ff0b8;
+}
+
+.institutional-check[data-ok="false"] .institutional-check__icon {
+  background: rgba(255, 154, 120, 0.18);
+  color: #ff9a78;
+}
+
+.institutional-check__label {
+  color: #eaf4ff;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.institutional-check__hint {
+  color: #8ca9ce;
+  font-size: 0.6rem;
+  grid-column: 2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .institutional-kpi {
+    transition: none;
+  }
+}
+
 .analysis-grid {
   display: grid;
   gap: 0.46rem;

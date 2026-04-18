@@ -122,6 +122,10 @@ const intelligenceSyncOpsRequestsElement = document.querySelector("#intelligence
 const intelligenceSyncOpsUpdatedElement = document.querySelector("#intelligence-sync-ops-updated");
 const analysisSignalCardElement = document.querySelector("#analysis-signal-card");
 const analysisContextCardElement = document.querySelector("#analysis-context-card");
+const institutionalSummaryElement = document.querySelector("#institutional-summary");
+const institutionalSummaryGridElement = document.querySelector("#institutional-summary-grid");
+const institutionalContextStripElement = document.querySelector("#institutional-context-strip");
+const institutionalChecklistElement = document.querySelector("#institutional-checklist");
 const analysisTabsElement = document.querySelector("#analysis-tabs");
 const analysisTabContentElement = document.querySelector("#analysis-tab-content");
 const riskManagementTabPanel = document.querySelector("#risk-management-tab-panel");
@@ -7452,6 +7456,27 @@ function getBinaryOptionsGhostTrackerStats(state = binaryOptionsGhostTrackerStat
   };
 }
 
+/**
+ * Mirror de `getBinaryOptionsGhostTrackerStats` para o modo Spot/Margem.
+ * Retorna o shape minimo consumido pelo resumo institucional sem acoplar
+ * ao estado de opcoes binarias.
+ */
+function getSpotMarginGhostTrackerStats(state = spotMarginGhostTrackerState) {
+  const resolvedTrades = state.wins + state.losses;
+  const winRate = resolvedTrades > 0 ? roundNumber((state.wins / resolvedTrades) * 100, 1) : 0;
+
+  return {
+    losses: state.losses,
+    openSignals: state.openSignals.length,
+    pushes: state.pushes,
+    resolvedTrades,
+    sampleState:
+      resolvedTrades >= 20 ? "amostra robusta" : resolvedTrades >= 8 ? "amostra moderada" : "amostra inicial",
+    wins: state.wins,
+    winRate,
+  };
+}
+
 function canFetchBinaryOptionsGhostAuditHistory() {
   return typeof fetch === "function" && hasIntelligenceSyncInternalToken();
 }
@@ -9030,6 +9055,8 @@ function renderDeepAnalysisPanelImmediate(snapshot) {
       analysisContextCardElement.innerHTML = "";
     }
 
+    clearInstitutionalSummary();
+
     if (analysisTabsElement instanceof HTMLElement) {
       analysisTabsElement.innerHTML = "";
     }
@@ -9102,10 +9129,251 @@ function renderDeepAnalysisPanelImmediate(snapshot) {
     `;
   }
 
+  renderInstitutionalSummary(analysis, snapshot, {
+    microTiming: precomputedMicroTiming,
+  });
+
   renderAnalysisTabs();
   renderAnalysisTabContent(analysis, snapshot, {
     microTiming: precomputedMicroTiming,
   });
+}
+
+function clearInstitutionalSummary() {
+  if (institutionalSummaryGridElement instanceof HTMLElement) {
+    institutionalSummaryGridElement.innerHTML = "";
+  }
+  if (institutionalContextStripElement instanceof HTMLElement) {
+    institutionalContextStripElement.innerHTML = "";
+  }
+  if (institutionalChecklistElement instanceof HTMLElement) {
+    institutionalChecklistElement.innerHTML = "";
+  }
+  if (institutionalSummaryElement instanceof HTMLElement) {
+    institutionalSummaryElement.removeAttribute("data-tone");
+  }
+}
+
+/**
+ * Deriva o KPI "Motor Cinético" adaptativo ao modo operacional.
+ * - Binary options: usa microTiming (momentumStrength + neutralProbability)
+ * - Spot/Margem: usa signal.confidence como proxy do edge probabilistico
+ */
+function buildKineticEngineKpi(analysis, microTiming, operationalMode) {
+  if (operationalMode === CHART_OPERATIONAL_MODE_BINARY_OPTIONS && microTiming) {
+    const strength = toFiniteNumber(microTiming.momentumStrength, 0);
+    const neutral = toFiniteNumber(microTiming.neutralProbability, 1);
+
+    if (strength >= 0.7 && neutral <= 0.4) {
+      return { label: "HOT", tone: "bull", hint: "Exaustao direcional detectada" };
+    }
+
+    if (strength >= 0.45 && neutral <= 0.55) {
+      return { label: "WARM", tone: "neutral", hint: "Tick acelerando, aguardando gatilho" };
+    }
+
+    return { label: "COLD", tone: "bear", hint: "Mercado frio, evite entradas" };
+  }
+
+  const confidence = toFiniteNumber(analysis?.signal?.confidence, 0);
+
+  if (confidence >= 70) {
+    return { label: "FORTE", tone: "bull", hint: "Edge probabilistico alto" };
+  }
+
+  if (confidence >= 50) {
+    return { label: "MODERADO", tone: "neutral", hint: "Confluencia parcial" };
+  }
+
+  return { label: "FRACO", tone: "bear", hint: "Sem edge suficiente, aguardar" };
+}
+
+/**
+ * Deriva o KPI "Estrutura de Mercado" combinando zona institucional,
+ * tendencia dominante e tone do sinal. Sem inventar: tudo vem de campos
+ * ja computados em analyzeChartSnapshot.
+ */
+function buildMarketStructureKpi(analysis) {
+  const zone = typeof analysis?.context?.zone === "string" ? analysis.context.zone : "";
+  const trend = typeof analysis?.context?.trend === "string"
+    ? analysis.context.trend.toLowerCase()
+    : "";
+  const tone = typeof analysis?.signal?.tone === "string" ? analysis.signal.tone : "neutral";
+
+  const normalizedZone = /premium/i.test(zone)
+    ? "Premium Zone"
+    : /discount|desconto/i.test(zone)
+      ? "Discount Zone"
+      : "Equilibrium";
+
+  if (tone === "buy" || trend === "alta") {
+    return { label: "Bullish", tone: "bull", hint: normalizedZone };
+  }
+
+  if (tone === "sell" || trend === "baixa") {
+    return { label: "Bearish", tone: "bear", hint: normalizedZone };
+  }
+
+  return { label: "Lateral", tone: "neutral", hint: normalizedZone };
+}
+
+/**
+ * Resumo institucional — grid de 4 KPIs + contexto + checklist HFT/SMC.
+ * Consome dados ja computados (analysis, snapshot, ghostStats, propDeskState).
+ */
+function renderInstitutionalSummary(analysis, snapshot, options = {}) {
+  if (!(institutionalSummaryGridElement instanceof HTMLElement)
+    || !(institutionalContextStripElement instanceof HTMLElement)
+    || !(institutionalChecklistElement instanceof HTMLElement)) {
+    return;
+  }
+
+  if (!analysis || typeof analysis !== "object" || !analysis.signal) {
+    clearInstitutionalSummary();
+    return;
+  }
+
+  const microTiming = options?.microTiming ?? null;
+  const operationalMode = chartOperationalMode;
+
+  // KPI 1 — Assertividade real (Ghost Tracker, fail-honest)
+  const ghostStats = isBinaryOptionsOperationalMode()
+    ? getBinaryOptionsGhostTrackerStats()
+    : getSpotMarginGhostTrackerStats();
+  const resolvedTrades = Number.isFinite(ghostStats?.resolvedTrades) ? ghostStats.resolvedTrades : 0;
+  const winRate = Number.isFinite(ghostStats?.winRate) ? ghostStats.winRate : 0;
+  const hasEnoughSamples = resolvedTrades >= 5;
+  const winRateKpi = hasEnoughSamples
+    ? {
+      label: `${winRate.toFixed(1)}%`,
+      tone: winRate >= 60 ? "bull" : winRate >= 45 ? "neutral" : "bear",
+      hint: `${resolvedTrades} trades auditados (sessao)`,
+    }
+    : {
+      label: "Aquecendo",
+      tone: "neutral",
+      hint: `${resolvedTrades}/5 trades para ativar auditoria`,
+    };
+
+  // KPI 2 — Estrutura de mercado (SMC)
+  const structureKpi = buildMarketStructureKpi(analysis);
+
+  // KPI 3 — Motor cinetico (adaptativo)
+  const kineticKpi = buildKineticEngineKpi(analysis, microTiming, operationalMode);
+
+  // KPI 4 — Risco base (dinamico do Prop Desk)
+  const effectiveRiskPercent = propDeskState.propModeEnabled
+    ? Math.min(propDeskState.riskPercent, 1)
+    : propDeskState.riskPercent;
+  const riskKpi = {
+    label: `${effectiveRiskPercent.toFixed(2)}%`,
+    tone: "neutral",
+    hint: propDeskState.propModeEnabled
+      ? "Mesa proprietaria: teto 1%/trade"
+      : `Exposicao por trade • ${propDeskState.exitStrategy === "three_by_seven" ? "3x7" : "AB"}`,
+  };
+
+  const kpis = [
+    { title: "Assertividade real", ...winRateKpi },
+    { title: "Estrutura SMC", ...structureKpi },
+    { title: operationalMode === CHART_OPERATIONAL_MODE_BINARY_OPTIONS ? "Motor cinetico" : "Edge probabilistico", ...kineticKpi },
+    { title: "Risco base", ...riskKpi },
+  ];
+
+  institutionalSummaryGridElement.innerHTML = kpis.map((kpi) => `
+    <article class="institutional-kpi" role="listitem" data-tone="${escapeHtml(kpi.tone)}">
+      <span class="institutional-kpi__title">${escapeHtml(kpi.title)}</span>
+      <strong class="institutional-kpi__value">${escapeHtml(kpi.label)}</strong>
+      <span class="institutional-kpi__hint">${escapeHtml(kpi.hint)}</span>
+    </article>
+  `).join("");
+
+  // Context strip — 3 blocos (volatilidade, momento, confluencia)
+  const rangeLow = toFiniteNumber(analysis?.context?.rangeLow, 0);
+  const rangeHigh = toFiniteNumber(analysis?.context?.rangeHigh, 0);
+  const rangePct = rangeLow > 0 && rangeHigh > rangeLow
+    ? ((rangeHigh - rangeLow) / rangeLow) * 100
+    : 0;
+  const volatilityLabel = rangePct > 0 ? `${rangePct.toFixed(2)}% range` : "n/d";
+  const energy = toFiniteNumber(analysis?.wegd?.energy, 0);
+  const momentumLabel = operationalMode === CHART_OPERATIONAL_MODE_BINARY_OPTIONS && microTiming
+    ? `${(toFiniteNumber(microTiming.momentumStrength, 0) * 100).toFixed(0)}% strength`
+    : `${energy.toFixed(0)}/99 energy`;
+  const confluenceSource = analysis?.smc?.structure ?? analysis?.context?.trend ?? "lateral";
+  const confluenceLabel = /alta|bull/i.test(String(confluenceSource))
+    ? "Bullish alinhada"
+    : /baixa|bear/i.test(String(confluenceSource))
+      ? "Bearish alinhada"
+      : "Mista/lateral";
+
+  const contextBlocks = [
+    { label: "Volatilidade atual", value: volatilityLabel },
+    { label: operationalMode === CHART_OPERATIONAL_MODE_BINARY_OPTIONS ? "Aceleracao do tick" : "Energia WEGD", value: momentumLabel },
+    { label: "Confluencia maior", value: confluenceLabel },
+  ];
+
+  institutionalContextStripElement.innerHTML = contextBlocks.map((block) => `
+    <article class="institutional-context-block" role="listitem">
+      <span>${escapeHtml(block.label)}</span>
+      <strong>${escapeHtml(block.value)}</strong>
+    </article>
+  `).join("");
+
+  // Checklist HFT+SMC (flags derivadas de campos reais)
+  const smcStructure = String(analysis?.smc?.structure ?? "").toLowerCase();
+  const smcLiquidity = String(analysis?.smc?.liquidity ?? "").toLowerCase();
+  const smcSweepRisk = String(analysis?.smc?.sweepRisk ?? "").toLowerCase();
+  const trend = String(analysis?.context?.trend ?? "").toLowerCase();
+  const fearGreedLabel = String(analysis?.fearGreed?.label ?? "").toLowerCase();
+
+  const sweepConfirmed = /varrid|sweep|execut/.test(smcLiquidity)
+    || /varrid|sweep/.test(smcSweepRisk);
+  const fvgAligned = /fvg|fair value gap|mitigad/.test(smcStructure)
+    || /fvg|mitigad/.test(smcLiquidity);
+  const trendAligned = (analysis?.signal?.tone === "buy" && trend === "alta")
+    || (analysis?.signal?.tone === "sell" && trend === "baixa");
+  const fearGreedOk = !/extreme/i.test(fearGreedLabel);
+  const volatilityOk = rangePct >= 0.5 && rangePct <= 15;
+
+  const checks = [
+    {
+      label: "Sweep de liquidez (PDL/PDH varridos)",
+      ok: sweepConfirmed,
+      hint: sweepConfirmed ? "Liquidez coletada" : "Aguardando varredura de extremos",
+    },
+    {
+      label: "Mitigacao de FVG (Fair Value Gap)",
+      ok: fvgAligned,
+      hint: fvgAligned ? "FVG alinhado a direcao" : "Sem FVG relevante na janela",
+    },
+    {
+      label: "Tendencia e sinal alinhados",
+      ok: trendAligned,
+      hint: trendAligned ? "Tendencia maior confirma o sinal" : "Sinal contratendencia: maior risco",
+    },
+    {
+      label: "Fear & Greed fora de extremo",
+      ok: fearGreedOk,
+      hint: fearGreedOk ? "Regime psicologico neutro" : "Mercado em extremo: risco de reversao",
+    },
+    {
+      label: "Volatilidade operacional saudavel",
+      ok: volatilityOk,
+      hint: volatilityOk ? `Range ${rangePct.toFixed(2)}% saudavel` : "Volatilidade fora do envelope seguro",
+    },
+  ];
+
+  institutionalChecklistElement.innerHTML = checks.map((check) => `
+    <li class="institutional-check" data-ok="${check.ok ? "true" : "false"}">
+      <span class="institutional-check__icon" aria-hidden="true">${check.ok ? "✓" : "✕"}</span>
+      <span class="institutional-check__label">${escapeHtml(check.label)}</span>
+      <span class="institutional-check__hint">${escapeHtml(check.hint)}</span>
+    </li>
+  `).join("");
+
+  if (institutionalSummaryElement instanceof HTMLElement) {
+    institutionalSummaryElement.dataset.tone = analysis.signal.tone;
+  }
 }
 
 function setChartStatus(message, mode = "") {
