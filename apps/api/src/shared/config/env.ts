@@ -40,6 +40,8 @@ const environmentSchema = z
     PUBLIC_RATE_LIMIT_ENABLED: booleanFromString.default("true"),
     PUBLIC_RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().min(10).max(10000).default(240),
     PUBLIC_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).max(600000).default(60000),
+    SECURITY_HEADERS_ENABLED: booleanFromString.default("true"),
+    SECURITY_HEADERS_HSTS_MAX_AGE_SECONDS: z.coerce.number().int().min(0).max(63072000).default(31536000),
     SCHEDULER_ENABLED: booleanFromString.default("true"),
     SCHEDULER_ECONOMY_MODE: booleanFromString.default("false"),
     SCHEDULER_JITTER_MAX_PERCENT: z.coerce.number().int().min(0).max(100).default(20),

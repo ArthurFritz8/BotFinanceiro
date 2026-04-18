@@ -26,6 +26,7 @@ import { env } from "../shared/config/env.js";
 import { httpErrorHandler } from "../shared/errors/http-error-handler.js";
 import { logger } from "../shared/logger/logger.js";
 import { registerPublicRateLimit } from "./plugins/public-rate-limit-plugin.js";
+import { registerSecurityHeaders } from "./plugins/security-headers-plugin.js";
 
 function normalizeOrigin(value: string): string {
   const trimmedValue = value.trim();
@@ -70,6 +71,11 @@ export function buildApp() {
   }
 
   app.setErrorHandler(httpErrorHandler);
+
+  registerSecurityHeaders(app, {
+    enabled: env.SECURITY_HEADERS_ENABLED,
+    hstsMaxAgeSeconds: env.SECURITY_HEADERS_HSTS_MAX_AGE_SECONDS,
+  });
 
   registerPublicRateLimit(app, {
     enabled: env.PUBLIC_RATE_LIMIT_ENABLED,
