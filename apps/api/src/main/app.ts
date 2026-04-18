@@ -22,6 +22,14 @@ import { registerOptionsRoutes } from "../modules/options/interface/options-rout
 import { registerPortfoliosRoutes } from "../modules/portfolios/interface/portfolios-routes.js";
 import { registerSystemRoutes } from "../modules/system/interface/system-routes.js";
 import { registerWallStreetRoutes } from "../modules/wall_street/interface/wall-street-routes.js";
+import { NotificationService } from "../modules/notifications/application/notification-service.js";
+import { InMemoryPushSubscriptionStore } from "../modules/notifications/infrastructure/in-memory-push-subscription-store.js";
+import { WebPushSender } from "../modules/notifications/infrastructure/web-push-sender.js";
+import { NotificationsController } from "../modules/notifications/interface/notifications-controller.js";
+import {
+  registerNotificationsInternalRoutes,
+  registerNotificationsPublicRoutes,
+} from "../modules/notifications/interface/notifications-routes.js";
 import { env } from "../shared/config/env.js";
 import { httpErrorHandler } from "../shared/errors/http-error-handler.js";
 import { logger } from "../shared/logger/logger.js";
@@ -101,6 +109,25 @@ export function buildApp() {
   });
 
   registerSystemRoutes(app);
+  const notificationsStore = new InMemoryPushSubscriptionStore();
+  const notificationsSender =
+    env.PUSH_NOTIFICATIONS_ENABLED &&
+    env.VAPID_PUBLIC_KEY.length > 0 &&
+    env.VAPID_PRIVATE_KEY.length > 0
+      ? new WebPushSender({
+          vapidPublicKey: env.VAPID_PUBLIC_KEY,
+          vapidPrivateKey: env.VAPID_PRIVATE_KEY,
+          vapidSubject: env.VAPID_SUBJECT,
+        })
+      : null;
+  const notificationsService = new NotificationService({
+    enabled: env.PUSH_NOTIFICATIONS_ENABLED,
+    sender: notificationsSender,
+    store: notificationsStore,
+    vapidPublicKey: env.VAPID_PUBLIC_KEY,
+  });
+  const notificationsController = new NotificationsController(notificationsService);
+  registerNotificationsInternalRoutes(app, notificationsController);
   void app.register(
     (instance, _, done) => {
       registerAirdropsRoutes(instance);
@@ -123,6 +150,7 @@ export function buildApp() {
       registerOptionsRoutes(instance);
       registerPortfoliosRoutes(instance);
       registerWallStreetRoutes(instance);
+      registerNotificationsPublicRoutes(instance, notificationsController);
       done();
     },
     { prefix: "/v1" },
