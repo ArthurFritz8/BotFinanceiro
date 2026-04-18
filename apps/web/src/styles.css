@@ -4045,6 +4045,44 @@ body.sidebar-collapsed .app-shell {
   border-color: #aa9870;
 }
 
+.push-toggle-btn {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #c8bdab;
+  border-radius: 10px;
+  color: #425363;
+  cursor: pointer;
+  display: inline-flex;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  gap: 0.32rem;
+  padding: 0.34rem 0.58rem;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.push-toggle-btn:hover {
+  border-color: #aa9870;
+}
+
+.push-toggle-btn[data-state="subscribed"] {
+  background: #e8f6f3;
+  border-color: #0e8f7e;
+  color: #0e6c5f;
+}
+
+.push-toggle-btn[data-state="denied"] {
+  background: #fde8e8;
+  border-color: #d65656;
+  color: #8a3434;
+  cursor: not-allowed;
+}
+
+.push-toggle-btn__icon {
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
 .status-pill {
   background: #fef3d6;
   border: 1px solid #e8cc74;

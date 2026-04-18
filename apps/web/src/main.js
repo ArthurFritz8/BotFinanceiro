@@ -12,6 +12,7 @@ import { parseStreamPayload } from "./shared/parse-stream-payload.js";
 import { scheduleRender } from "./shared/schedule-render.js";
 import { filterOutOtc, getAssetFilterSnapshot } from "./shared/asset-filters.js";
 import { setLiveStatus, getLiveStatusSnapshot, LIVE_STATUS } from "./shared/live-status-indicator.js";
+import { initPushNotifications } from "./shared/push-notifications.js";
 import "./styles.css";
 
 const chatForm = document.querySelector("#chat-form");
@@ -16580,6 +16581,7 @@ setupMarketNavigator();
 setupChartLab();
 setupAirdropRadarPanel();
 setupMemecoinRadarPanel();
+initPushNotifications();
 void (async () => {
   await initializeAuth();
 })();

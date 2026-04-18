@@ -42,7 +42,10 @@ export default defineConfig({
       devOptions: {
         enabled: true,
       },
-      includeAssets: ["pwa-icon.svg", "pwa-maskable.svg"],
+      includeAssets: ["pwa-icon.svg", "pwa-maskable.svg", "push-handler.js"],
+      workbox: {
+        importScripts: ["push-handler.js"],
+      },
       manifest: {
         background_color: "#f7f5ee",
         description: "Copiloto financeiro com IA para leitura de mercado em tempo real.",
