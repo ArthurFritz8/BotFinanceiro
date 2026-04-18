@@ -3,6 +3,7 @@ import { z } from "zod";
 import { env } from "../../shared/config/env.js";
 import { AppError } from "../../shared/errors/app-error.js";
 import { retryWithExponentialBackoff } from "../../shared/resilience/retry-with-backoff.js";
+import { findBrokerPair } from "./asset-catalog.js";
 
 export const supportedRangeSchema = z.enum(["24h", "7d", "30d", "90d", "1y"]);
 
@@ -110,6 +111,9 @@ export function mapRangeToKlineConfig(range: SupportedRange): { interval: string
   };
 }
 
+// Mapeamento legado preservado para compatibilidade com aliases historicos
+// (ex.: "polygon", "matic-network", "bnb"). Para o catalogo canonico, ver
+// `asset-catalog.ts` — quando ambos respondem, o canonico tem prioridade.
 const assetIdToBinanceSymbol = new Map<string, string>([
   ["aave", "AAVEUSDT"],
   ["avalanche-2", "AVAXUSDT"],
@@ -130,7 +134,16 @@ const assetIdToBinanceSymbol = new Map<string, string>([
 ]);
 
 export function resolveBinanceSymbol(assetId: string): string {
-  return assetIdToBinanceSymbol.get(assetId) ?? `${assetId.replace(/[^a-z0-9]/g, "").toUpperCase()}USDT`;
+  const fromCatalog = findBrokerPair(assetId, "binance");
+
+  if (fromCatalog) {
+    return fromCatalog;
+  }
+
+  return (
+    assetIdToBinanceSymbol.get(assetId)
+    ?? `${assetId.replace(/[^a-z0-9]/g, "").toUpperCase()}USDT`
+  );
 }
 
 export interface BinanceChartPoint {

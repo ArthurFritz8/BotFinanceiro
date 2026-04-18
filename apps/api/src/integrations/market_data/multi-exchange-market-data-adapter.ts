@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { AppError } from "../../shared/errors/app-error.js";
 import { retryWithExponentialBackoff } from "../../shared/resilience/retry-with-backoff.js";
+import { findBrokerPair } from "./asset-catalog.js";
 
 const exchangeBrokerSchema = z.enum(["bybit", "coinbase", "kraken", "okx"]);
 const chartRangeSchema = z.enum(["24h", "7d", "30d", "90d", "1y"]);
@@ -19,13 +20,6 @@ const marketChartInputSchema = z.object({
 
 export type ExchangeBroker = z.infer<typeof exchangeBrokerSchema>;
 export type ExchangeChartRange = z.infer<typeof chartRangeSchema>;
-
-interface ExchangePairConfig {
-  bybit: string;
-  coinbase: string;
-  kraken: string;
-  okx: string;
-}
 
 interface ExchangeRangeConfig {
   bybit: {
@@ -45,23 +39,6 @@ interface ExchangeRangeConfig {
     limit: number;
   };
 }
-
-const assetPairMap = new Map<string, ExchangePairConfig>([
-  ["aave", { bybit: "AAVEUSDT", coinbase: "AAVE-USD", kraken: "AAVEUSD", okx: "AAVE-USDT" }],
-  ["avalanche-2", { bybit: "AVAXUSDT", coinbase: "AVAX-USD", kraken: "AVAXUSD", okx: "AVAX-USDT" }],
-  ["binancecoin", { bybit: "BNBUSDT", coinbase: "BNB-USD", kraken: "BNBUSD", okx: "BNB-USDT" }],
-  ["bitcoin", { bybit: "BTCUSDT", coinbase: "BTC-USD", kraken: "XBTUSD", okx: "BTC-USDT" }],
-  ["cardano", { bybit: "ADAUSDT", coinbase: "ADA-USD", kraken: "ADAUSD", okx: "ADA-USDT" }],
-  ["chainlink", { bybit: "LINKUSDT", coinbase: "LINK-USD", kraken: "LINKUSD", okx: "LINK-USDT" }],
-  ["dogecoin", { bybit: "DOGEUSDT", coinbase: "DOGE-USD", kraken: "DOGEUSD", okx: "DOGE-USDT" }],
-  ["ethereum", { bybit: "ETHUSDT", coinbase: "ETH-USD", kraken: "ETHUSD", okx: "ETH-USDT" }],
-  ["litecoin", { bybit: "LTCUSDT", coinbase: "LTC-USD", kraken: "LTCUSD", okx: "LTC-USDT" }],
-  ["polkadot", { bybit: "DOTUSDT", coinbase: "DOT-USD", kraken: "DOTUSD", okx: "DOT-USDT" }],
-  ["solana", { bybit: "SOLUSDT", coinbase: "SOL-USD", kraken: "SOLUSD", okx: "SOL-USDT" }],
-  ["tron", { bybit: "TRXUSDT", coinbase: "TRX-USD", kraken: "TRXUSD", okx: "TRX-USDT" }],
-  ["uniswap", { bybit: "UNIUSDT", coinbase: "UNI-USD", kraken: "UNIUSD", okx: "UNI-USDT" }],
-  ["xrp", { bybit: "XRPUSDT", coinbase: "XRP-USD", kraken: "XRPUSD", okx: "XRP-USDT" }],
-]);
 
 const EXCHANGE_TIMEOUT_MS = 7000;
 
@@ -99,7 +76,7 @@ function normalizeBaseSymbol(assetId: string): string {
 }
 
 function resolvePair(assetId: string, broker: ExchangeBroker): string {
-  const mapped = assetPairMap.get(assetId)?.[broker];
+  const mapped = findBrokerPair(assetId, broker);
 
   if (mapped) {
     return mapped;
