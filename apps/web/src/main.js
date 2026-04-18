@@ -10949,6 +10949,8 @@ const manualMarketAnalysisCounter = createCounter();
 const MANUAL_ANALYSIS_MIN_LOADING_MS = 220;
 const MANUAL_ANALYSIS_INVALID_FEEDBACK_MS = 360;
 
+let pendingFreshFetchScope = false;
+
 if (typeof window !== "undefined") {
   window.__botfinanceiroDebug = window.__botfinanceiroDebug ?? {};
   window.__botfinanceiroDebug.manualMarketAnalysisSnapshot = () =>
@@ -11039,6 +11041,9 @@ async function runManualMarketAnalysis(options = {}) {
 
   let outcome = "ok";
 
+  pendingFreshFetchScope = true;
+  manualMarketAnalysisCounter.increment("fresh-fetch");
+
   try {
     await syncIntelligenceDeskForCurrentContext({
       reason: `manual-cta:${options.source ?? "click"}`,
@@ -11054,6 +11059,7 @@ async function runManualMarketAnalysis(options = {}) {
       setChartStatus("Falha ao rodar analise institucional.", "error");
     }
   } finally {
+    pendingFreshFetchScope = false;
     const now =
       typeof performance !== "undefined" && typeof performance.now === "function"
         ? performance.now()
@@ -13012,7 +13018,7 @@ function hasIntervalFallbackReason(message) {
     || normalizedMessage.includes("fallback automatico para");
 }
 
-async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "binance", resolution = null) {
+async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "binance", resolution = null, options = {}) {
   return runMarketRequestWithRetry(async () => {
     const normalizedExchange = normalizeRequestedBroker(exchange);
     const normalizedMode = mode === "live" ? "live" : "delayed";
@@ -13025,6 +13031,10 @@ async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "bina
 
     if (typeof resolution === "string" && resolution.length > 0) {
       params.set("resolution", resolution);
+    }
+
+    if ((options && options.fresh === true) || pendingFreshFetchScope === true) {
+      params.set("fresh", "true");
     }
 
     const response = await fetch(buildApiUrl(`/v1/crypto/strategy-chart?${params.toString()}`), {

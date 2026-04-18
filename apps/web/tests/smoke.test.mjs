@@ -390,3 +390,12 @@ test("main.js wire CTA ANALISAR MERCADO ao Intelligence Desk com loading real e 
   assert.match(source, /void runManualMarketAnalysis\(\{ source: "keyboard" \}\)/);
   assert.match(source, /import \{ createCounter \} from "@botfinanceiro\/shared-utils"/);
 });
+
+test("CTA Analisar Mercado dispara fetch fresh bypassando cache do live-chart", async () => {
+  const source = await readWebFile("src/main.js");
+  assert.match(source, /let pendingFreshFetchScope = false;/);
+  assert.match(source, /pendingFreshFetchScope = true;/);
+  assert.match(source, /pendingFreshFetchScope = false;/);
+  assert.match(source, /params\.set\("fresh", "true"\)/);
+  assert.match(source, /manualMarketAnalysisCounter\.increment\("fresh-fetch"\)/);
+});
