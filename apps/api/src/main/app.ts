@@ -27,6 +27,7 @@ import { httpErrorHandler } from "../shared/errors/http-error-handler.js";
 import { logger } from "../shared/logger/logger.js";
 import { registerPublicRateLimit } from "./plugins/public-rate-limit-plugin.js";
 import { registerSecurityHeaders } from "./plugins/security-headers-plugin.js";
+import { registerPrometheusMetrics } from "./plugins/prometheus-metrics-plugin.js";
 
 function normalizeOrigin(value: string): string {
   const trimmedValue = value.trim();
@@ -81,6 +82,10 @@ export function buildApp() {
     enabled: env.PUBLIC_RATE_LIMIT_ENABLED,
     maxRequests: env.PUBLIC_RATE_LIMIT_MAX_REQUESTS,
     windowMs: env.PUBLIC_RATE_LIMIT_WINDOW_MS,
+  });
+
+  registerPrometheusMetrics(app, {
+    enabled: env.METRICS_ENABLED,
   });
 
   app.addHook("onResponse", (request, reply) => {
