@@ -104,6 +104,7 @@ Politica de retencao:
 18. ADR 046: `docs/ADR/ADR-046-catalogo-unificado-30-assets-multi-broker.md`
 19. ADR 047: `docs/ADR/ADR-047-expansao-catalogo-60-ativos-chart-lab-cta.md`
 20. ADR 048: `docs/ADR/ADR-048-intelligence-desk-360-institutional-summary.md`
+21. ADR 049: `docs/ADR/ADR-049-ghost-tracker-persistence-confluence-badge-tooltips.md`
 
 ## Relatorio completo desta entrega
 
