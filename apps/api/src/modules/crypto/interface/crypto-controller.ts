@@ -84,6 +84,10 @@ const chartQuerySchema = z.object({
 const liveChartQuerySchema = z.object({
   assetId: z.string().trim().min(1).default("bitcoin"),
   exchange: liveChartExchangeSchema.default("binance"),
+  fresh: z
+    .union([z.literal("true"), z.literal("false"), z.literal("1"), z.literal("0"), z.boolean()])
+    .optional()
+    .transform((value) => value === true || value === "true" || value === "1"),
   range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("24h"),
   resolution: chartResolutionSchema.optional(),
 });
@@ -91,6 +95,10 @@ const liveChartQuerySchema = z.object({
 const strategyChartQuerySchema = z.object({
   assetId: z.string().trim().min(1).default("bitcoin"),
   exchange: liveChartExchangeSchema.default("binance"),
+  fresh: z
+    .union([z.literal("true"), z.literal("false"), z.literal("1"), z.literal("0"), z.boolean()])
+    .optional()
+    .transform((value) => value === true || value === "true" || value === "1"),
   mode: z.enum(["delayed", "live"]).default("delayed"),
   range: z.enum(["24h", "7d", "30d", "90d", "1y"]).default("7d"),
   resolution: chartResolutionSchema.optional(),
@@ -194,6 +202,7 @@ export async function getLiveChart(request: FastifyRequest, reply: FastifyReply)
   const chart = await cryptoChartService.getLiveChart({
     assetId: parsedQuery.assetId,
     broker: parsedQuery.exchange,
+    bypassCache: parsedQuery.fresh,
     range: parsedQuery.range,
     resolution: parsedQuery.resolution,
   });
@@ -208,6 +217,7 @@ export async function getCryptoStrategyChart(request: FastifyRequest, reply: Fas
     const chart = await cryptoChartService.getLiveChart({
       assetId: parsedQuery.assetId,
       broker: parsedQuery.exchange,
+      bypassCache: parsedQuery.fresh,
       range: parsedQuery.range,
       resolution: parsedQuery.resolution,
     });

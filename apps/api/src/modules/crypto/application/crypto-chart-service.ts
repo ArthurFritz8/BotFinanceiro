@@ -2080,6 +2080,7 @@ export class CryptoChartService {
     range: CryptoChartRange;
     resolution?: CryptoChartResolution;
     broker?: LiveChartRequestedBroker;
+    bypassCache?: boolean;
   }): Promise<CryptoChartResponse> {
     const requestedBroker = normalizeRequestedLiveBroker(input.broker ?? "binance");
     const preferredBroker = resolvePreferredLiveBroker(requestedBroker);
@@ -2099,6 +2100,21 @@ export class CryptoChartService {
       normalizedInput.resolution,
       normalizedInput.requestedBroker,
     );
+
+    if (input.bypassCache === true) {
+      try {
+        return await this.refreshLiveChart(normalizedInput);
+      } catch (refreshError) {
+        const cachedPayload = memoryCache.get<CachedChartPayload>(cacheKey);
+
+        if (cachedPayload.state !== "miss") {
+          return toResponse(cachedPayload.value, "stale", true);
+        }
+
+        throw refreshError;
+      }
+    }
+
     const cachedPayload = memoryCache.get<CachedChartPayload>(cacheKey);
 
     if (cachedPayload.state === "fresh") {

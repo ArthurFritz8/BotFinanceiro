@@ -1923,3 +1923,85 @@ void it("GET /v1/crypto/news-intelligence valida limite maximo", async () => {
   assert.equal(body.error.code, "VALIDATION_ERROR");
   assert.equal(body.error.message, "Invalid payload");
 });
+
+void it("GET /v1/crypto/live-chart?fresh=true bypassa cache fresco e refaz refresh no provider", async () => {
+  let klineCalls = 0;
+  let tickerCalls = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (requestUrl.includes("api.binance.com/api/v3/klines") && requestUrl.includes("symbol=BTCUSDT")) {
+      klineCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify([
+            [1712000000000, "65000", "65140", "64920", "65080", "1100"],
+            [1712000300000, "65080", "65190", "65010", "65120", "980"],
+            [1712000600000, "65120", "65230", "65080", "65190", "1030"],
+            [1712000900000, "65190", "65310", "65150", "65240", "1190"],
+            [1712001200000, "65240", "65380", "65200", "65310", "1240"],
+          ]),
+          {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    if (requestUrl.includes("api.binance.com/api/v3/ticker/24hr") && requestUrl.includes("symbol=BTCUSDT")) {
+      tickerCalls += 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            lastPrice: "65312.45",
+            priceChangePercent: "1.73",
+            symbol: "BTCUSDT",
+            volume: "65234.11",
+          }),
+          {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          },
+        ),
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+  }) as typeof fetch;
+
+  const warmupResponse = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=binance",
+  });
+
+  assert.equal(warmupResponse.statusCode, 200);
+  assert.equal(klineCalls, 1);
+  assert.equal(tickerCalls, 1);
+
+  const cachedResponse = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=binance",
+  });
+
+  assert.equal(cachedResponse.statusCode, 200);
+  const cachedBody = cachedResponse.json<{ data: { cache: { state: string } } }>();
+  assert.equal(cachedBody.data.cache.state, "fresh");
+  assert.equal(klineCalls, 1);
+  assert.equal(tickerCalls, 1);
+
+  const freshResponse = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=binance&fresh=true",
+  });
+
+  assert.equal(freshResponse.statusCode, 200);
+  const freshBody = freshResponse.json<{ data: { cache: { state: string; stale: boolean } } }>();
+  assert.equal(freshBody.data.cache.state, "refreshed");
+  assert.equal(freshBody.data.cache.stale, false);
+  assert.equal(klineCalls, 2);
+  assert.equal(tickerCalls, 2);
+});
