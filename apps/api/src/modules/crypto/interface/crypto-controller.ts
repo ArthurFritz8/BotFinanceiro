@@ -4,6 +4,7 @@ import { z } from "zod";
 import { env } from "../../../shared/config/env.js";
 import { buildSuccessResponse } from "../../../shared/http/api-response.js";
 import { openSsePipe } from "../../../shared/http/sse-pipe.js";
+import { ASSET_CATALOG } from "../../../integrations/market_data/asset-catalog.js";
 import { intelligenceSyncTelemetryStore } from "../../../shared/observability/intelligence-sync-telemetry-store.js";
 import {
   CryptoChartService,
@@ -183,6 +184,30 @@ export async function getSpotPriceBatch(request: FastifyRequest, reply: FastifyR
   const spotPriceBatch = await cryptoSpotPriceService.getSpotPriceBatch(parsedQuery);
 
   void reply.send(buildSuccessResponse(request.id, spotPriceBatch));
+}
+
+export function getAssetCatalog(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const assets = ASSET_CATALOG.map((entry) => {
+    const supportedBrokers = (Object.keys(entry.brokerPairs) as Array<keyof typeof entry.brokerPairs>)
+      .filter((broker) => entry.brokerPairs[broker] !== null);
+
+    return {
+      brokerPairs: entry.brokerPairs,
+      id: entry.id,
+      name: entry.name,
+      rank: entry.rank,
+      supportedBrokers,
+      symbol: entry.symbol,
+    };
+  });
+
+  void reply.send(
+    buildSuccessResponse(request.id, {
+      assets,
+      total: assets.length,
+    }),
+  );
+  return Promise.resolve();
 }
 
 export async function getChart(request: FastifyRequest, reply: FastifyReply): Promise<void> {

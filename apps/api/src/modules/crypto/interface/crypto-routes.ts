@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 
 import {
+  getAssetCatalog,
   getChart,
   getCryptoStrategyChart,
   getLiveChart,
@@ -14,6 +15,7 @@ import {
 } from "./crypto-controller.js";
 
 export function registerCryptoRoutes(app: FastifyInstance): void {
+  app.get("/crypto/asset-catalog", getAssetCatalog);
   app.get("/crypto/chart", getChart);
   app.get("/crypto/strategy-chart", getCryptoStrategyChart);
   app.get("/crypto/live-chart", getLiveChart);

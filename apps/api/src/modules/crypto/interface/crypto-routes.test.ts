@@ -2089,3 +2089,64 @@ void it("GET /v1/crypto/live-chart com exchange=coinbase usa /stats para preench
     "changePercent24h deveria ser numero quando /stats fornece open",
   );
 });
+
+void it("GET /v1/crypto/asset-catalog retorna catalogo unificado com 30 ativos e brokerPairs por exchange", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/crypto/asset-catalog",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<{
+    data: {
+      assets: Array<{
+        brokerPairs: {
+          binance: string | null;
+          bybit: string | null;
+          coinbase: string | null;
+          kraken: string | null;
+          okx: string | null;
+        };
+        id: string;
+        name: string;
+        rank: number;
+        supportedBrokers: string[];
+        symbol: string;
+      }>;
+      total: number;
+    };
+    status: "success";
+  }>();
+
+  assert.equal(body.status, "success");
+  assert.ok(body.data.total >= 30, "catalogo deve expor pelo menos 30 ativos");
+  assert.equal(body.data.assets.length, body.data.total);
+
+  const ids = body.data.assets.map((entry) => entry.id);
+  for (const required of ["bitcoin", "ethereum", "solana", "litecoin", "tron", "polkadot", "polygon-pos"]) {
+    assert.ok(ids.includes(required), `catalogo deve conter ${required}`);
+  }
+
+  const ranksAreSorted = body.data.assets.every((entry, index) => {
+    if (index === 0) {
+      return true;
+    }
+    const previous = body.data.assets[index - 1];
+    return previous !== undefined && previous.rank <= entry.rank;
+  });
+  assert.ok(ranksAreSorted, "catalogo deve estar ordenado por rank ascendente");
+
+  const bitcoin = body.data.assets.find((entry) => entry.id === "bitcoin");
+  assert.ok(bitcoin, "bitcoin deve estar presente");
+  assert.equal(bitcoin.brokerPairs.binance, "BTCUSDT");
+  assert.equal(bitcoin.brokerPairs.kraken, "XBTUSD");
+  assert.ok(bitcoin.supportedBrokers.length >= 4, "bitcoin deve ser suportado em pelo menos 4 corretoras");
+
+  const bnb = body.data.assets.find((entry) => entry.id === "binancecoin");
+  assert.ok(bnb, "binancecoin deve estar presente");
+  assert.equal(bnb.brokerPairs.coinbase, null, "BNB nao tem par na coinbase");
+  assert.equal(bnb.brokerPairs.kraken, null, "BNB nao tem par na kraken");
+  assert.equal(bnb.brokerPairs.binance, "BNBUSDT");
+});
+
