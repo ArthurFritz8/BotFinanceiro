@@ -13,6 +13,7 @@ import { scheduleRender } from "./shared/schedule-render.js";
 import { filterOutOtc, getAssetFilterSnapshot } from "./shared/asset-filters.js";
 import { setLiveStatus, getLiveStatusSnapshot, LIVE_STATUS } from "./shared/live-status-indicator.js";
 import { initPushNotifications } from "./shared/push-notifications.js";
+import { initPaperTradingPanel } from "./shared/paper-trading-panel.js";
 import "./styles.css";
 
 const chatForm = document.querySelector("#chat-form");
@@ -47,6 +48,7 @@ const layoutGridSection = document.querySelector(".layout-grid");
 const intelligenceStageSection = document.querySelector(".intelligence-stage");
 const memecoinsStageSection = document.querySelector(".memecoins-stage");
 const airdropsStageSection = document.querySelector(".airdrops-stage");
+const paperTradingPanelSection = document.querySelector("#paper-trading-panel");
 const chartControlsForm = document.querySelector("#chart-controls");
 const chartAssetSelect = document.querySelector("#chart-asset");
 const chartModeSelect = document.querySelector("#chart-mode");
@@ -219,12 +221,14 @@ const APP_ROUTE_CHART_LAB = "chart-lab";
 const APP_ROUTE_MERCADOS = "mercados";
 const APP_ROUTE_MEMECOINS = "memecoins";
 const APP_ROUTE_AIRDROPS = "airdrops";
+const APP_ROUTE_PAPER = "paper";
 const APP_ROUTES = new Set([
   APP_ROUTE_CHAT,
   APP_ROUTE_CHART_LAB,
   APP_ROUTE_MERCADOS,
   APP_ROUTE_MEMECOINS,
   APP_ROUTE_AIRDROPS,
+  APP_ROUTE_PAPER,
 ]);
 const APP_ROUTE_LABELS = {
   [APP_ROUTE_CHAT]: "Chat",
@@ -232,6 +236,7 @@ const APP_ROUTE_LABELS = {
   [APP_ROUTE_MERCADOS]: "Mercados",
   [APP_ROUTE_MEMECOINS]: "Memecoins",
   [APP_ROUTE_AIRDROPS]: "Airdrops",
+  [APP_ROUTE_PAPER]: "Paper Trading",
 };
 const APP_ROUTE_SHORTCUTS = {
   Digit7: APP_ROUTE_CHAT,
@@ -2517,6 +2522,10 @@ function resolveRouteFromLocation() {
     return APP_ROUTE_AIRDROPS;
   }
 
+  if (pathname.endsWith(`/${APP_ROUTE_PAPER}`) || hash === "#/paper") {
+    return APP_ROUTE_PAPER;
+  }
+
   return APP_ROUTE_CHAT;
 }
 
@@ -2559,6 +2568,7 @@ function setRouteVisibility(route) {
   const showAnalysisPanel = route === APP_ROUTE_CHART_LAB;
   const showMemecoins = route === APP_ROUTE_MEMECOINS;
   const showAirdrops = route === APP_ROUTE_AIRDROPS;
+  const showPaperTrading = route === APP_ROUTE_PAPER;
 
   if (chartDeskSection instanceof HTMLElement) {
     chartDeskSection.classList.toggle("route-hidden", !showChartDesk);
@@ -2586,6 +2596,10 @@ function setRouteVisibility(route) {
 
   if (airdropsStageSection instanceof HTMLElement) {
     airdropsStageSection.classList.toggle("route-hidden", !showAirdrops);
+  }
+
+  if (paperTradingPanelSection instanceof HTMLElement) {
+    paperTradingPanelSection.classList.toggle("route-hidden", !showPaperTrading);
   }
 
   if (workspaceStageSection instanceof HTMLElement) {
@@ -16582,6 +16596,7 @@ setupChartLab();
 setupAirdropRadarPanel();
 setupMemecoinRadarPanel();
 initPushNotifications();
+initPaperTradingPanel();
 void (async () => {
   await initializeAuth();
 })();

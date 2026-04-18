@@ -30,6 +30,13 @@ import {
   registerNotificationsInternalRoutes,
   registerNotificationsPublicRoutes,
 } from "../modules/notifications/interface/notifications-routes.js";
+import { PaperTradingService } from "../modules/paper_trading/application/paper-trading-service.js";
+import { JsonlTradeStore } from "../modules/paper_trading/infrastructure/jsonl-trade-store.js";
+import { PaperTradingController } from "../modules/paper_trading/interface/paper-trading-controller.js";
+import {
+  registerPaperTradingInternalRoutes,
+  registerPaperTradingPublicRoutes,
+} from "../modules/paper_trading/interface/paper-trading-routes.js";
 import { env } from "../shared/config/env.js";
 import { httpErrorHandler } from "../shared/errors/http-error-handler.js";
 import { logger } from "../shared/logger/logger.js";
@@ -128,6 +135,14 @@ export function buildApp() {
   });
   const notificationsController = new NotificationsController(notificationsService);
   registerNotificationsInternalRoutes(app, notificationsController);
+
+  const paperTradingStore = new JsonlTradeStore(env.PAPER_TRADING_DATA_FILE);
+  const paperTradingService = new PaperTradingService({ store: paperTradingStore });
+  const paperTradingController = new PaperTradingController(paperTradingService);
+  if (env.PAPER_TRADING_ENABLED) {
+    registerPaperTradingInternalRoutes(app, paperTradingController);
+  }
+
   void app.register(
     (instance, _, done) => {
       registerAirdropsRoutes(instance);
@@ -151,6 +166,9 @@ export function buildApp() {
       registerPortfoliosRoutes(instance);
       registerWallStreetRoutes(instance);
       registerNotificationsPublicRoutes(instance, notificationsController);
+      if (env.PAPER_TRADING_ENABLED) {
+        registerPaperTradingPublicRoutes(instance, paperTradingController);
+      }
       done();
     },
     { prefix: "/v1" },

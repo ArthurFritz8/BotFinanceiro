@@ -121,6 +121,21 @@
             </span>
             <span class="sidebar-nav-label">Airdrops</span>
           </button>
+          <button
+            type="button"
+            class="sidebar-nav-button"
+            data-route="paper"
+            data-label="Paper"
+            title="Paper Trading"
+          >
+            <span class="sidebar-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 3v18h18" />
+                <path d="m7 14 3-4 4 3 5-7" />
+              </svg>
+            </span>
+            <span class="sidebar-nav-label">Paper</span>
+          </button>
         </nav>
       </aside>
 
@@ -997,6 +1012,20 @@
           <div id="airdrop-summary" class="airdrop-summary">Carregando radar...</div>
           <div id="airdrop-list" class="airdrop-list"></div>
         </section>
+      </section>
+
+      <section id="paper-trading-panel" class="paper-trading reveal reveal-delay-2 route-hidden">
+        <div class="paper-trading__header">
+          <p class="eyebrow">Paper Trading · Zero custo</p>
+          <h3>Performance simulada com sinais de confluência</h3>
+          <p class="paper-trading__subtitle">
+            Cada sinal forte (confluência ≥ 4) pode abrir uma entrada virtual. O tracker segue o preço ao vivo
+            e marca cada trade como WIN, LOSS ou ABERTO. Histórico persistente local (JSONL) — auditável e
+            recuperável.
+          </p>
+        </div>
+        <div class="paper-trading__stats" aria-live="polite">Carregando estatísticas...</div>
+        <div class="paper-trading__trades" aria-live="polite"></div>
       </section>
     </main>
 

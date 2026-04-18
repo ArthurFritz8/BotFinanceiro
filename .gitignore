@@ -34,3 +34,6 @@ out*.txt
 test_*_output.txt
 test_output.txt
 tests*.tap
+
+# Paper Trading local data (Wave 15)
+apps/api/data/*.jsonl

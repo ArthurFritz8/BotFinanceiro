@@ -110,6 +110,7 @@ Politica de retencao:
 24. ADR 052: `docs/ADR/ADR-052-ci-matrix-node-20-22-lts.md`
 25. ADR 053: `docs/ADR/ADR-053-metrics-prometheus-endpoint.md`
 26. ADR 054: `docs/ADR/ADR-054-web-push-notifications-zero-cost.md`
+27. ADR 055: `docs/ADR/ADR-055-paper-trading-pnl-persistente-zero-cost.md`
 
 ## Relatorio completo desta entrega
 
