@@ -6086,7 +6086,7 @@ function renderMarketNavigatorFeed(items, view, emptyStateMessage = "") {
     openButton.className = "market-open-button";
     openButton.dataset.action = "open-chart";
     openButton.dataset.index = String(index);
-    openButton.textContent = "Abrir no chart";
+    openButton.textContent = "Abrir no Chart Lab";
 
     if (!resolveChartTargetFromMarketItem(item)) {
       openButton.disabled = true;
