@@ -114,6 +114,7 @@ Politica de retencao:
 28. ADR 056: `docs/ADR/ADR-056-auto-paper-trading-bridge.md`
 29. ADR 057: `docs/ADR/ADR-057-backtesting-engine-zero-cost.md`
 30. ADR 058: `docs/ADR/ADR-058-backtesting-publico-comissao-slippage-ui.md`
+31. ADR 059: `docs/ADR/ADR-059-smc-confluence-estrategia-backtest.md`
 
 ## Relatorio completo desta entrega
 

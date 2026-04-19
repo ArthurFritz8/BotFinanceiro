@@ -11,6 +11,7 @@ const RUN_ASSET_ENDPOINT = "/v1/backtesting/run-asset";
 const STRATEGIES = [
   { id: "ema_crossover", label: "EMA Crossover (trend-following)" },
   { id: "rsi_mean_reversion", label: "RSI Mean Reversion (counter-trend)" },
+  { id: "smc_confluence", label: "SMC Confluence (BOS + swing stop)" },
 ];
 
 const BROKERS = ["bybit", "coinbase", "kraken", "okx"];

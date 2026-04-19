@@ -10,11 +10,13 @@ import {
   type Candle,
   emaCrossoverParamsSchema,
   rsiMeanReversionParamsSchema,
+  smcConfluenceParamsSchema,
   type StrategySignal,
 } from "../domain/backtest-types.js";
 import {
   emaCrossoverStrategy,
   rsiMeanReversionStrategy,
+  smcConfluenceStrategy,
 } from "../domain/strategies.js";
 
 interface OpenSimTrade {
@@ -110,8 +112,12 @@ export class BacktestEngine {
       const params = emaCrossoverParamsSchema.parse(request.emaParams ?? {});
       return emaCrossoverStrategy(candles, index, params);
     }
-    const params = rsiMeanReversionParamsSchema.parse(request.rsiParams ?? {});
-    return rsiMeanReversionStrategy(candles, index, params);
+    if (request.strategy === "rsi_mean_reversion") {
+      const params = rsiMeanReversionParamsSchema.parse(request.rsiParams ?? {});
+      return rsiMeanReversionStrategy(candles, index, params);
+    }
+    const params = smcConfluenceParamsSchema.parse(request.smcParams ?? {});
+    return smcConfluenceStrategy(candles, index, params);
   }
 
   private tryCloseTrade(

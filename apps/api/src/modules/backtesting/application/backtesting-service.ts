@@ -6,6 +6,7 @@ import {
   type Candle,
   emaCrossoverParamsSchema,
   rsiMeanReversionParamsSchema,
+  smcConfluenceParamsSchema,
   strategyKindSchema,
 } from "../domain/backtest-types.js";
 import type { BacktestEngine } from "./backtest-engine.js";
@@ -17,6 +18,7 @@ export const backtestRunAssetRequestSchema = z.object({
   strategy: strategyKindSchema,
   emaParams: emaCrossoverParamsSchema.partial().optional(),
   rsiParams: rsiMeanReversionParamsSchema.partial().optional(),
+  smcParams: smcConfluenceParamsSchema.partial().optional(),
   cooldownCandles: z.number().int().min(0).max(500).default(1),
   commissionPercent: z.number().min(0).max(5).default(0),
   slippagePercent: z.number().min(0).max(5).default(0),
@@ -67,6 +69,7 @@ export class BacktestingService {
       strategy: request.strategy,
       emaParams: request.emaParams,
       rsiParams: request.rsiParams,
+      smcParams: request.smcParams,
       cooldownCandles: request.cooldownCandles,
       commissionPercent: request.commissionPercent,
       slippagePercent: request.slippagePercent,

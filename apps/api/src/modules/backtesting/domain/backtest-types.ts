@@ -27,7 +27,11 @@ export const candleSchema = z
 
 export type Candle = z.infer<typeof candleSchema>;
 
-export const strategyKindSchema = z.enum(["ema_crossover", "rsi_mean_reversion"]);
+export const strategyKindSchema = z.enum([
+  "ema_crossover",
+  "rsi_mean_reversion",
+  "smc_confluence",
+]);
 export type StrategyKind = z.infer<typeof strategyKindSchema>;
 
 export const emaCrossoverParamsSchema = z.object({
@@ -50,6 +54,23 @@ export const rsiMeanReversionParamsSchema = z.object({
 export type RsiMeanReversionParams = z.infer<typeof rsiMeanReversionParamsSchema>;
 
 /**
+ * Parametros da estrategia SMC Confluence (Wave 19 / ADR-059). Stop e
+ * derivado do swing oposto (com buffer); target derivado por R:R.
+ */
+export const smcConfluenceParamsSchema = z.object({
+  /** Janela simetrica para detectar swings (default 2). */
+  lookAround: z.number().int().min(1).max(10).default(2),
+  /** Score minimo (0..100) para aceitar o sinal. */
+  minScore: z.number().min(0).max(100).default(70),
+  /** Buffer % aplicado ao stop alem do swing oposto (default 0.2%). */
+  stopBufferPercent: z.number().min(0).max(10).default(0.2),
+  /** Risk:Reward ratio do target (default 2.0 = 2R). */
+  riskRewardRatio: z.number().positive().max(20).default(2),
+});
+
+export type SmcConfluenceParams = z.infer<typeof smcConfluenceParamsSchema>;
+
+/**
  * Sinal emitido por uma estrategia em um candle especifico. `null` = sem
  * acao (estrategia espera). Stop e target sao sempre derivados do entry
  * pelo proprio sinal (estrategia decide o R:R).
@@ -69,6 +90,7 @@ export const backtestRunRequestSchema = z.object({
   strategy: strategyKindSchema,
   emaParams: emaCrossoverParamsSchema.optional(),
   rsiParams: rsiMeanReversionParamsSchema.optional(),
+  smcParams: smcConfluenceParamsSchema.optional(),
   /**
    * Permite sobrescrever a janela de cooldown entre trades (em candles).
    * Default: 1 (estrategia nao pode reentrar no proximo candle apos saida).

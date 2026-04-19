@@ -2,8 +2,10 @@ import type {
   Candle,
   EmaCrossoverParams,
   RsiMeanReversionParams,
+  SmcConfluenceParams,
   StrategySignal,
 } from "./backtest-types.js";
+import { computeSmcScore, computeStructureSnapshot } from "./smc-analyzer.js";
 
 /**
  * Estrategias puras: dado o array de candles e o indice atual, retornam um
@@ -157,6 +159,59 @@ export function rsiMeanReversionStrategy(
       entryPrice,
       stopPrice: entryPrice * (1 + params.stopLossPercent / 100),
       targetPrice: entryPrice * (1 - params.takeProfitPercent / 100),
+    };
+  }
+  return null;
+}
+
+/**
+ * SMC Confluence Strategy (Wave 19 / ADR-059): emite signal quando o
+ * candle do indice atual dispara um BOS (Break of Structure) bullish ou
+ * bearish e o score de confluencia local atinge `minScore`.
+ *
+ * Stop = swing oposto (bullish: lastSwingLow; bearish: lastSwingHigh) com
+ * `stopBufferPercent` extra. Target derivado por R:R configuravel
+ * (`riskRewardRatio`). Se nao houver swing oposto valido, descarta o
+ * sinal (sem stop natural -> sem trade).
+ */
+export function smcConfluenceStrategy(
+  candles: ReadonlyArray<Candle>,
+  index: number,
+  params: SmcConfluenceParams,
+): StrategySignal | null {
+  if (index < params.lookAround * 2 + 1) {
+    return null;
+  }
+  const snapshot = computeStructureSnapshot(candles, index, params.lookAround);
+  if (snapshot.bias === "neutral") return null;
+  const close = candles[index]!.close;
+  const score = computeSmcScore(snapshot, close);
+  if (score < params.minScore) return null;
+
+  const buffer = params.stopBufferPercent / 100;
+  if (snapshot.bias === "bullish" && snapshot.lastSwingLow) {
+    const rawStop = snapshot.lastSwingLow.price * (1 - buffer);
+    if (rawStop >= close) return null; // stop invalido (acima do entry)
+    const risk = close - rawStop;
+    const targetPrice = close + risk * params.riskRewardRatio;
+    return {
+      side: "long",
+      entryPrice: close,
+      stopPrice: rawStop,
+      targetPrice,
+    };
+  }
+  if (snapshot.bias === "bearish" && snapshot.lastSwingHigh) {
+    const rawStop = snapshot.lastSwingHigh.price * (1 + buffer);
+    if (rawStop <= close) return null;
+    const risk = rawStop - close;
+    const targetPrice = close - risk * params.riskRewardRatio;
+    if (targetPrice <= 0) return null;
+    return {
+      side: "short",
+      entryPrice: close,
+      stopPrice: rawStop,
+      targetPrice,
     };
   }
   return null;
