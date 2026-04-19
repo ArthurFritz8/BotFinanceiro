@@ -41,6 +41,9 @@ import {
 } from "../modules/paper_trading/interface/paper-trading-routes.js";
 import { AutoPaperTradingJobRunner } from "../jobs/auto-paper-trading-job-runner.js";
 import { MultiExchangeMarketDataAdapter } from "../integrations/market_data/multi-exchange-market-data-adapter.js";
+import { BacktestEngine } from "../modules/backtesting/application/backtest-engine.js";
+import { BacktestingController } from "../modules/backtesting/interface/backtesting-controller.js";
+import { registerBacktestingInternalRoutes } from "../modules/backtesting/interface/backtesting-routes.js";
 import { env } from "../shared/config/env.js";
 import { httpErrorHandler } from "../shared/errors/http-error-handler.js";
 import { logger } from "../shared/logger/logger.js";
@@ -184,6 +187,12 @@ export function buildApp() {
       autoPaperTradingJobRunner.stop();
       done();
     });
+  }
+
+  if (env.BACKTESTING_ENABLED) {
+    const backtestEngine = new BacktestEngine();
+    const backtestingController = new BacktestingController(backtestEngine);
+    registerBacktestingInternalRoutes(app, backtestingController);
   }
 
   void app.register(

@@ -53,6 +53,7 @@ const environmentSchema = z
     AUTO_PAPER_TRADING_INTERVAL_SECONDS: z.coerce.number().int().min(10).max(3600).default(60),
     AUTO_PAPER_TRADING_MIN_TIER: z.enum(["high", "medium"]).default("high"),
     AUTO_PAPER_TRADING_BROKER: z.enum(["bybit", "coinbase", "kraken", "okx"]).default("bybit"),
+    BACKTESTING_ENABLED: booleanFromString.default("true"),
     SCHEDULER_ENABLED: booleanFromString.default("true"),
     SCHEDULER_ECONOMY_MODE: booleanFromString.default("false"),
     SCHEDULER_JITTER_MAX_PERCENT: z.coerce.number().int().min(0).max(100).default(20),
