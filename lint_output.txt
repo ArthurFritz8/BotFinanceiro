@@ -1,0 +1,4 @@
+
+> botfinanceiro@0.1.0 lint
+> eslint apps/api/src --ext .ts --max-warnings=0
+

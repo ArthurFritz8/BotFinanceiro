@@ -1,0 +1,1743 @@
+
+> @botfinanceiro/api@0.1.0 test
+> node scripts/run-tests.mjs
+
+TAP version 13
+# Subtest: Dex adapter infere contrato pelas venues e retorna holderDistribution estruturado do bundle Dex
+ok 1 - Dex adapter infere contrato pelas venues e retorna holderDistribution estruturado do bundle Dex
+  ---
+  duration_ms: 45.5664
+  type: 'test'
+  ...
+# Subtest: Dex adapter usa chain das venues no fallback BirdEye em vez de assumir Base
+ok 2 - Dex adapter usa chain das venues no fallback BirdEye em vez de assumir Base
+  ---
+  duration_ms: 3.9015
+  type: 'test'
+  ...
+# Subtest: Dex adapter aceita contractAddress sem query e executa busca por contrato
+ok 3 - Dex adapter aceita contractAddress sem query e executa busca por contrato
+  ---
+  duration_ms: 936.3926
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:41.384Z","enabled":true,"maxRequests":2,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# Subtest: public rate-limit returns 429 after exceeding window quota and sets standard headers
+ok 4 - public rate-limit returns 429 after exceeding window quota and sets standard headers
+  ---
+  duration_ms: 663.2479
+  type: 'test'
+  ...
+# Subtest: public rate-limit skips /internal/* routes (already gated by token + IP whitelist)
+ok 5 - public rate-limit skips /internal/* routes (already gated by token + IP whitelist)
+  ---
+  duration_ms: 8.2893
+  type: 'test'
+  ...
+# Subtest: public rate-limit skips OPTIONS pre-flight requests
+ok 6 - public rate-limit skips OPTIONS pre-flight requests
+  ---
+  duration_ms: 9.9055
+  type: 'test'
+  ...
+# Subtest: public rate-limit no-op when disabled via env
+ok 7 - public rate-limit no-op when disabled via env
+  ---
+  duration_ms: 5.7394
+  type: 'test'
+  ...
+# {"level":40,"time":"2026-04-18T20:02:41.424Z","count":3,"ip":"127.0.0.1","retryAfterSec":60,"route":"/v1/ping","msg":"public_rate_limit_exceeded"}
+# {"level":30,"time":"2026-04-18T20:02:41.428Z","enabled":true,"maxRequests":1,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:41.438Z","enabled":true,"maxRequests":1,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":40,"time":"2026-04-18T20:02:41.444Z","count":2,"ip":"127.0.0.1","retryAfterSec":60,"route":"/v1/ping","msg":"public_rate_limit_exceeded"}
+# {"level":30,"time":"2026-04-18T20:02:41.446Z","enabled":false,"msg":"public_rate_limit_disabled"}
+# {"level":30,"time":"2026-04-18T20:02:41.307Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: security headers: aplica todos os cabecalhos restritivos em respostas 200
+ok 8 - security headers: aplica todos os cabecalhos restritivos em respostas 200
+  ---
+  duration_ms: 708.0081
+  type: 'test'
+  ...
+# Subtest: security headers: aplica cabecalhos tambem em respostas de erro 5xx
+ok 9 - security headers: aplica cabecalhos tambem em respostas de erro 5xx
+  ---
+  duration_ms: 13.6199
+  type: 'test'
+  ...
+# Subtest: security headers: HSTS so eh emitido sob HTTPS (via x-forwarded-proto)
+ok 10 - security headers: HSTS so eh emitido sob HTTPS (via x-forwarded-proto)
+  ---
+  duration_ms: 5.6766
+  type: 'test'
+  ...
+# Subtest: security headers: HSTS desligado quando max-age=0 mesmo sob HTTPS
+ok 11 - security headers: HSTS desligado quando max-age=0 mesmo sob HTTPS
+  ---
+  duration_ms: 5.7983
+  type: 'test'
+  ...
+# Subtest: security headers: no-op quando desabilitado via env flag
+ok 12 - security headers: no-op quando desabilitado via env flag
+  ---
+  duration_ms: 7.2273
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:41.363Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:41.371Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:41.377Z","enabled":true,"hstsMaxAgeSeconds":0,"msg":"security_headers_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:41.382Z","enabled":false,"msg":"security_headers_disabled"}
+# {"level":30,"time":"2026-04-18T20:02:41.811Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: GET /v1/airdrops/opportunities retorna radar agregado multi-fonte
+ok 13 - GET /v1/airdrops/opportunities retorna radar agregado multi-fonte
+  ---
+  duration_ms: 62.9113
+  type: 'test'
+  ...
+# Subtest: GET /v1/airdrops/opportunities mantem resposta em sucesso parcial
+ok 14 - GET /v1/airdrops/opportunities mantem resposta em sucesso parcial
+  ---
+  duration_ms: 14.2677
+  type: 'test'
+  ...
+# Subtest: GET /v1/airdrops/opportunities aplica filtros avancados e ordenacao recente
+ok 15 - GET /v1/airdrops/opportunities aplica filtros avancados e ordenacao recente
+  ---
+  duration_ms: 6.4388
+  type: 'test'
+  ...
+# Subtest: GET /v1/airdrops/opportunities retorna 400 para source invalida
+ok 16 - GET /v1/airdrops/opportunities retorna 400 para source invalida
+  ---
+  duration_ms: 2.6436
+  type: 'test'
+  ...
+# Subtest: GET /v1/airdrops/opportunities retorna 400 para query invalida
+ok 17 - GET /v1/airdrops/opportunities retorna 400 para query invalida
+  ---
+  duration_ms: 2.944
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:41.812Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:41.955Z","method":"GET","responseTimeMs":36.10289999842644,"route":"/v1/airdrops/opportunities?limit=6&minScore=20&query=base","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:41.960Z","endpoint":"https://airdrops.io","err":{"type":"AppError","message":"Airdrop source request failed","stack":"AppError: Airdrop source request failed\\n    at AirdropIntelligenceService.requestText (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\airdrops\\\\application\\\\airdrop-intelligence-service.ts:1370:13)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\\n    at async <anonymous> (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\airdrops\\\\application\\\\airdrop-intelligence-service.ts:944:27)\\n    at async AirdropIntelligenceService.collectSource (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\airdrops\\\\application\\\\airdrop-intelligence-service.ts:1270:30)","code":"AIRDROPS_SOURCE_UNAVAILABLE","details":{"cause":{},"url":"https://airdrops.io"},"statusCode":503,"name":"AppError"},"source":"airdrops_io","msg":"Airdrop source collection failed"}
+# {"level":30,"time":"2026-04-18T20:02:41.971Z","method":"GET","responseTimeMs":12.404899999499321,"route":"/v1/airdrops/opportunities?limit=5&minScore=15","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:41.978Z","method":"GET","responseTimeMs":4.88960000872612,"route":"/v1/airdrops/opportunities?limit=5&minScore=20&chain=zksync&confidence=high&sources=airdrop_alert,airdrops_io&sortBy=recent","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:41.980Z","issues":[{"received":"fonte_invalida","code":"invalid_enum_value","options":["airdrop_alert","airdrops_io","coingecko_trending","defillama","drops_tab","earnifi"],"path":["sources",1],"message":"Invalid enum value. Expected 'airdrop_alert' | 'airdrops_io' | 'coingecko_trending' | 'defillama' | 'drops_tab' | 'earnifi', received 'fonte_invalida'"}],"method":"GET","route":"/v1/airdrops/opportunities?sources=airdrops_io,fonte_invalida","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:41.981Z","method":"GET","responseTimeMs":1.4845000058412552,"route":"/v1/airdrops/opportunities?sources=airdrops_io,fonte_invalida","statusCode":400,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:41.983Z","issues":[{"code":"too_big","maximum":40,"type":"number","inclusive":true,"exact":false,"message":"Number must be less than or equal to 40","path":["limit"]}],"method":"GET","route":"/v1/airdrops/opportunities?limit=120","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:41.984Z","method":"GET","responseTimeMs":1.180999994277954,"route":"/v1/airdrops/opportunities?limit=120","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:41.845Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: GET /v1/b3/snapshot retorna cotacao para simbolo valido
+ok 18 - GET /v1/b3/snapshot retorna cotacao para simbolo valido
+  ---
+  duration_ms: 81.0571
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:41.846Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:42.024Z","method":"GET","responseTimeMs":32.91669999063015,"route":"/v1/b3/snapshot?symbol=petr4","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:42.889Z","method":"GET","responseTimeMs":862.0283000022173,"route":"/v1/b3/snapshot/batch?symbols=PETR4,VALE3","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/b3/snapshot/batch retorna sucesso parcial
+ok 19 - GET /v1/b3/snapshot/batch retorna sucesso parcial
+  ---
+  duration_ms: 863.1201
+  type: 'test'
+  ...
+# Subtest: GET /v1/b3/market-overview retorna preset com limite
+ok 20 - GET /v1/b3/market-overview retorna preset com limite
+  ---
+  duration_ms: 2.6284
+  type: 'test'
+  ...
+# Subtest: GET /v1/b3/snapshot retorna 400 para simbolo invalido
+ok 21 - GET /v1/b3/snapshot retorna 400 para simbolo invalido
+  ---
+  duration_ms: 1.5398
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:42.892Z","method":"GET","responseTimeMs":1.4874999970197678,"route":"/v1/b3/market-overview?preset=blue_chips&limit=2","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:42.893Z","issues":[{"code":"custom","message":"symbol must contain between 4 and 24 characters","path":["symbol"]}],"method":"GET","route":"/v1/b3/snapshot?symbol=***","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:42.894Z","method":"GET","responseTimeMs":0.8548000007867813,"route":"/v1/b3/snapshot?symbol=***","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:41.951Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:41.952Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:43.277Z","count":2,"enabled":true,"mode":"postgres","msg":"Binary options ghost audit store initialized"}
+# {"level":30,"time":"2026-04-18T20:02:43.466Z","method":"GET","responseTimeMs":29.569399997591972,"route":"/v1/binary-options/strategy-chart?assetId=bitcoin&mode=delayed&range=24h&resolution=1S","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/binary-options/strategy-chart suporta resolucao em segundos
+ok 22 - GET /v1/binary-options/strategy-chart suporta resolucao em segundos
+  ---
+  duration_ms: 1431.4383
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:43.613Z","method":"GET","responseTimeMs":3.6266999989748,"route":"/v1/binary-options/strategy-chart?assetId=bitcoin&mode=live&range=24h&resolution=10T&exchange=bybit","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/binary-options/strategy-chart suporta resolucao por ticks
+ok 23 - GET /v1/binary-options/strategy-chart suporta resolucao por ticks
+  ---
+  duration_ms: 145.3792
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:44.326Z","method":"POST","responseTimeMs":570.9203000068665,"route":"/v1/binary-options/ghost-audit/settlements","statusCode":202,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.892Z","method":"POST","responseTimeMs":565.5773999989033,"route":"/v1/binary-options/ghost-audit/settlements","statusCode":202,"msg":"Request completed"}
+# Subtest: POST /v1/binary-options/ghost-audit/settlements registra liquidacao e retorna dedupe
+not ok 24 - POST /v1/binary-options/ghost-audit/settlements registra liquidacao e retorna dedupe
+  ---
+  duration_ms: 1281.5099
+  type: 'test'
+  location: 'C:\\Users\\dougl\\OneDrive\\Área de Trabalho\\BotFinanceiro\\apps\\api\\src\\modules\\binary_options\\interface\\binary-options-routes.test.ts:1:5205'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    false !== true
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (C:\Users\dougl\OneDrive\Área de Trabalho\BotFinanceiro\apps\api\src\modules\binary_options\interface\binary-options-routes.test.ts:300:10)
+    process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# {"level":30,"time":"2026-04-18T20:02:45.600Z","method":"POST","responseTimeMs":563.021899998188,"route":"/v1/binary-options/ghost-audit/settlements","statusCode":202,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:46.164Z","method":"POST","responseTimeMs":563.1669000089169,"route":"/v1/binary-options/ghost-audit/settlements","statusCode":202,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:47.106Z","method":"GET","responseTimeMs":941.7079000025988,"route":"/v1/binary-options/ghost-audit/history?assetId=bitcoin&operationalMode=binary_options&limit=20&offset=0","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:47.954Z","method":"GET","responseTimeMs":847.1938000023365,"route":"/v1/binary-options/ghost-audit/history?assetId=bitcoin&operationalMode=spot_margin&limit=20&offset=0","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/binary-options/ghost-audit/history filtra por operationalMode
+ok 25 - GET /v1/binary-options/ghost-audit/history filtra por operationalMode
+  ---
+  duration_ms: 3059.4969
+  type: 'test'
+  ...
+# {"level":40,"time":"2026-04-18T20:02:48.099Z","code":"INTERNAL_AUTH_MISSING_TOKEN","method":"GET","route":"/v1/binary-options/ghost-audit/history?limit=5","msg":"Missing internal route token"}
+# Subtest: GET /v1/binary-options/ghost-audit/history retorna 401 sem token interno
+ok 26 - GET /v1/binary-options/ghost-audit/history retorna 401 sem token interno
+  ---
+  duration_ms: 145.8248
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:48.100Z","method":"GET","responseTimeMs":1.6398999989032745,"route":"/v1/binary-options/ghost-audit/history?limit=5","statusCode":401,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:48.244Z","issues":[{"code":"too_small","minimum":5,"type":"number","inclusive":true,"exact":false,"message":"Number must be greater than or equal to 5","path":["expirySeconds"]},{"code":"too_small","minimum":8,"type":"string","inclusive":true,"exact":false,"message":"String must contain at least 8 character(s)","path":["sessionId"]},{"code":"too_small","minimum":6,"type":"string","inclusive":true,"exact":false,"message":"String must contain at least 6 character(s)","path":["signalId"]}],"method":"POST","route":"/v1/binary-options/ghost-audit/settlements","msg":"Validation error"}
+# Subtest: POST /v1/binary-options/ghost-audit/settlements retorna 400 para payload invalido
+ok 27 - POST /v1/binary-options/ghost-audit/settlements retorna 400 para payload invalido
+  ---
+  duration_ms: 144.2602
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:48.245Z","method":"POST","responseTimeMs":1.7198999971151352,"route":"/v1/binary-options/ghost-audit/settlements","statusCode":400,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:48.386Z","issues":[{"code":"too_small","minimum":500,"type":"number","inclusive":true,"exact":false,"message":"Number must be greater than or equal to 500","path":["intervalMs"]}],# {"level":30,"time":"2026-04-18T20:02:37.363Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: GET /v1/brokers/catalog retorna status de conectores
+ok 29 - GET /v1/brokers/catalog retorna status de conectores
+  ---
+  duration_ms: 32.6527
+  type: 'test'
+  ...
+# Subtest: GET /v1/brokers/live-quote retorna cotacao nativa para OKX
+ok 30 - GET /v1/brokers/live-quote retorna cotacao nativa para OKX
+  ---
+  duration_ms: 37.1527
+  type: 'test'
+  ...
+# Subtest: GET /v1/brokers/l# {"level":30,"time":"2026-04-18T20:02:41.860Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: GET /v1/brokers/catalog retorna status de conectores
+ok 29 - GET /v1/brokers/catalog retorna status de conectores
+  ---
+  duration_ms: 35.8635
+  type: 'test'
+  ...
+# Subtest: GET /v1/brokers/live-quote retorna cotacao nativa para OKX
+ok 30 - GET /v1/brokers/live-quote retorna cotacao nativa para OKX
+  ---
+  duration_ms: 29.9921
+  type: 'test'
+  ...
+# Subtest: GET /v1/brokers/live-quote retorna cotacao live da Binance
+ok 31 - GET /v1/brokers/live-quote retorna cotacao live da Binance
+  ---
+  duration_ms: 3.7749
+  type: 'test'
+  ...
+# Subtest: GET /v1/brokers/live-quote retorna placeholder para IQ Option
+ok 32 - GET /v1/brokers/live-quote retorna placeholder para IQ Option
+  ---
+  duration_ms: 1.965
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:41.862Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:41.972Z","method":"GET","responseTimeMs":7.396999999880791,"route":"/v1/brokers/catalog","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:42.004Z","method":"GET","responseTimeMs":27.818800002336502,"route":"/v1/brokers/live-quote?broker=okx&assetId=ethereum","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:42.009Z","method":"GET","responseTimeMs":2.2485000044107437,"route":"/v1/brokers/live-quote?broker=binance&assetId=bitcoin","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:42.011Z","method":"GET","responseTimeMs":0.6405999958515167,"route":"/v1/brokers/live-quote?broker=iqoption&assetId=bitcoin","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:42.578Z","code":"BINANCE_UNAVAILABLE","details":{"cause":{},"retryable":true},"method":"GET","route":"/v1/brokers/live-quote?broker=binance&assetId=bitcoin","msg":"Binance request failed"}
+# Subtest: GET /v1/brokers/live-quote retorna erro quando Binance esta indisponivel
+ok 33 - GET /v1/brokers/live-quote retorna erro quando Binance esta indisponivel
+  ---
+  duration_ms: 567.2026
+  type: 'test'
+  ...
+# Subtest: GET /v1/brokers/live-quote valida broker invalido
+ok 34 - GET /v1/brokers/live-quote valida broker invalido
+  ---
+  duration_ms: 2.8902
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:42.579Z","method":"GET","responseTimeMs":566.0050999969244,"route":"/v1/brokers/live-quote?broker=binance&assetId=bitcoin","statusCode":503,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:42.581Z","issues":[{"received":"bitstamp","code":"invalid_enum_value","options":["binance","bybit","coinbase","kraken","okx","iqoption"],"path":["broker"],"message":"Invalid enum value. Expected 'binance' | 'bybit' | 'coinbase' | 'kraken' | 'okx' | 'iqoption', received 'bitstamp'"}],"method":"GET","route":"/v1/brokers/live-quote?broker=bitstamp&assetId=bitcoin","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:42.581Z","method":"GET","responseTimeMs":1.9525000005960464,"route":"/v1/brokers/live-quote?broker=bitstamp&assetId=bitcoin","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:43.169Z","method":"GET","responseTimeMs":586.6347000002861,"route":"/v1/brokers/live-quote/batch?broker=binance&assetIds=bitcoin,ethereum","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/brokers/live-quote/batch retorna sucesso parcial por ativo
+ok 35 - GET /v1/brokers/live-quote/batch retorna sucesso parcial por ativo
+  ---
+  duration_ms: 587.653
+  type: 'test'
+  ...
+# Subtest: GET /v1/brokers/live-quote/batch valida assetIds obrigatorio
+ok 36 - GET /v1/brokers/live-quote/batch valida assetIds obrigatorio
+  ---
+  duration_ms: 1.2535
+  type: 'test'
+  ...
+# {"level":40,"time":"2026-04-18T20:02:43.170Z","issues":[{"code":"invalid_type","expected":"string","received":"undefined","path":["assetIds"],"message":"Required"}],"method":"GET","route":"/v1/brokers/live-quote/batch?broker=binance","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:43.171Z","method":"GET","responseTimeMs":0.4169999957084656,"route":"/v1/brokers/live-quote/batch?broker=binance","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:41.905Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: GET /v1/commodities/snapshot retorna cotacao para simbolo valido
+ok 37 - GET /v1/commodities/snapshot retorna cotacao para simbolo valido
+  ---
+  duration_ms: 70.0118
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:41.906Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:42.045Z","method":"GET","responseTimeMs":43.057099997997284,"route":"/v1/commodities/snapshot?symbol=GC%3DF","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:42.904Z","method":"GET","responseTimeMs":852.25,"route":"/v1/commodities/snapshot/batch?symbols=GC%3DF,CL%3DF","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/commodities/snapshot/batch retorna sucesso parcial
+ok 38 - GET /v1/commodities/snapshot/batch retorna sucesso parcial
+  ---
+  duration_ms: 853.4609
+  type: 'test'
+  ...
+# Subtest: GET /v1/commodities/market-overview retorna preset com limite
+ok 39 - GET /v1/commodities/market-overview retorna preset com limite
+  ---
+  duration_ms: 3.3472
+  type: 'test'
+  ...
+# Subtest: GET /v1/commodities/snapshot retorna 400 para simbolo invalido
+ok 40 - GET /v1/commodities/snapshot retorna 400 para simbolo invalido
+  ---
+  duration_ms: 2.4664
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:42.908Z","method":"GET","responseTimeMs":2.1862000077962875,"route":"/v1/commodities/market-overview?preset=metals&limit=2","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:42.910Z","issues":[{"code":"custom","message":"symbol must contain between 2 and 32 characters","path":["symbol"]}],"method":"GET","route":"/v1/commodities/snapshot?symbol=*","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:42.910Z","method":"GET","responseTimeMs":1.5549999922513962,"route":"/v1/commodities/snapshot?symbol=*","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:42.354Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: POST /v1/copilot/chat retorna erro quando OpenRouter nao esta configurado
+ok 41 - POST /v1/copilot/chat retorna erro quando OpenRouter nao esta configurado
+  ---
+  duration_ms: 40.2126
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:42.355Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":40,"time":"2026-04-18T20:02:42.466Z","code":"OPENROUTER_NOT_CONFIGURED","method":"POST","route":"/v1/copilot/chat","msg":"OpenRouter API key is not configured"}
+# {"level":30,"time":"2026-04-18T20:02:42.469Z","method":"POST","responseTimeMs":14.528799995779991,"route":"/v1/copilot/chat","statusCode":503,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:45.419Z","enabled":true,"mode":"postgres","msg":"Copilot chat audit store initialized"}
+# {"level":30,"time":"2026-04-18T20:02:45.842Z","method":"POST","responseTimeMs":3369.9880999922752,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat retorna resposta da IA quando OpenRouter esta configurado
+ok 42 - POST /v1/copilot/chat retorna resposta da IA quando OpenRouter esta configurado
+  ---
+  duration_ms: 3371.4879
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:46.811Z","method":"POST","responseTimeMs":968.2866000086069,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:47.808Z","method":"POST","responseTimeMs":995.9518000036478,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat envia historico recente no payload do OpenRouter
+ok 43 - POST /v1/copilot/chat envia historico recente no payload do OpenRouter
+  ---
+  duration_ms: 1965.8922
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:48.239Z","method":"POST","responseTimeMs":429.76129999756813,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat aplica fallback geral para pergunta nao financeira
+ok 44 - POST /v1/copilot/chat aplica fallback geral para pergunta nao financeira
+  ---
+  duration_ms: 431.1295
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:48.669Z","method":"POST","responseTimeMs":427.7712000012398,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat substitui resposta com vazamento de raciocinio interno
+ok 45 - POST /v1/copilot/chat substitui resposta com vazamento de raciocinio interno
+  ---
+  duration_ms: 429.4427
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:49.096Z","method":"POST","responseTimeMs":425.93389999866486,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat substitui resposta em ingles quando a pergunta esta em portugues
+ok 46 - POST /v1/copilot/chat substitui resposta em ingles quando a pergunta esta em portugues
+  ---
+  duration_ms: 427.0226
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:49.099Z","service":"forex","type":"cache","hit":false,"pairs":["USDBRL"],"msg":"Forex cache miss"}
+# {"level":30,"time":"2026-04-18T20:02:49.538Z","method":"POST","responseTimeMs":440.708599999547,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat aplica fallback FX para dolar sem tool de cambio
+ok 47 - POST /v1/copilot/chat aplica fallback FX para dolar sem tool de cambio
+  ---
+  duration_ms: 441.6126
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:49.966Z","method":"POST","responseTimeMs":426.5423000007868,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat aplica fallback local para resumo de mercado quando IA recusa
+ok 48 - POST /v1/copilot/chat aplica fallback local para resumo de mercado quando IA recusa
+  ---
+  duration_ms: 427.9876
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:50.397Z","method":"POST","responseTimeMs":429.74220000207424,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat aplica fallback local para plano de monitoramento
+ok 49 - POST /v1/copilot/chat aplica fallback local para plano de monitoramento
+  ---
+  duration_ms: 430.9087
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:51.679Z","method":"POST","responseTimeMs":1280.3276000022888,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat aplica fallback local para analise de risco de curto prazo
+ok 50 - POST /v1/copilot/chat aplica fallback local para analise de risco de curto prazo
+  ---
+  duration_ms: 1281.6504
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:52.104Z","method":"POST","responseTimeMs":424.57530000805855,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat aplica fallback local para analise de grafico
+ok 51 - POST /v1/copilot/chat aplica fallback local para analise de grafico
+  ---
+  duration_ms: 425.1265
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:52.528Z","method":"POST","responseTimeMs":423.66329999268055,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat aplica fallback de grafico live respeitando broker da mensagem
+ok 52 - POST /v1/copilot/chat aplica fallback de grafico live respeitando broker da mensagem
+  ---
+  duration_ms: 424.2642
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:52.954Z","method":"POST","responseTimeMs":424.59529998898506,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat aplica fallback local para radar de airdrops
+ok 53 - POST /v1/copilot/chat aplica fallback local para radar de airdrops
+  ---
+  duration_ms: 425.2666
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:53.376Z","method":"POST","responseTimeMs":421.94529999792576,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat nao usa template de cotacao quando pedido e analise de airdrop em Solana
+ok 54 - POST /v1/copilot/chat nao usa template de cotacao quando pedido e analise de airdrop em Solana
+  ---
+  duration_ms: 422.6263
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:53.801Z","method":"POST","responseTimeMs":423.74889999628067,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat executa tool de insights de grafico
+ok 55 - POST /v1/copilot/chat executa tool de insights de grafico
+  ---
+  duration_ms: 424.812
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:54.225Z","method":"POST","responseTimeMs":423.4333000034094,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat aplica fallback quando probabilidades bull/bear nao somam 100
+ok 56 - POST /v1/copilot/chat aplica fallback quando probabilidades bull/bear nao somam 100
+  ---
+  duration_ms: 424.1003
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:54.649Z","method":"POST","responseTimeMs":422.832000002265,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat aplica fallback quando relacao risco/retorno fica abaixo de 1.5
+ok 57 - POST /v1/copilot/chat aplica fallback quando relacao risco/retorno fica abaixo de 1.5
+  ---
+  duration_ms: 423.398
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:55.073Z","method":"POST","responseTimeMs":423.7602999955416,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat aplica fallback live para pergunta de comprar/vender
+ok 58 - POST /v1/copilot/chat aplica fallback live para pergunta de comprar/vender
+  ---
+  duration_ms: 424.4338
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:55.496Z","method":"POST","responseTimeMs":422.5942000001669,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat aplica fallback de corretora para IQ Option
+ok 59 - POST /v1/copilot/chat aplica fallback de corretora para IQ Option
+  ---
+  duration_ms: 423.1123
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:56.804Z","method":"POST","responseTimeMs":1306.8880999982357,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat prioriza DexScreener para responder onde comprar token
+ok 60 - POST /v1/copilot/chat prioriza DexScreener para responder onde comprar token
+  ---
+  duration_ms: 1307.4867
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:57.229Z","method":"POST","responseTimeMs":424.1972000002861,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat aplica fallback de where-to-buy e bloqueia cotacao alucinada de ativo nao relacionado
+ok 61 - POST /v1/copilot/chat aplica fallback de where-to-buy e bloqueia cotacao alucinada de ativo nao relacionado
+  ---
+  duration_ms: 424.7454
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:57.651Z","method":"POST","responseTimeMs":421.72910000383854,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat usa busca web global quando DexScreener nao encontra listing
+ok 62 - POST /v1/copilot/chat usa busca web global quando DexScreener nao encontra listing
+  ---
+  duration_ms: 422.385
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:58.936Z","method":"POST","responseTimeMs":1284.0727999955416,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat recupera contrato na web e reconsulta DexScreener automaticamente
+ok 63 - POST /v1/copilot/chat recupera contrato na web e reconsulta DexScreener automaticamente
+  ---
+  duration_ms: 1284.6392
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:59.896Z","method":"POST","responseTimeMs":959.6385000050068,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:03:00.855Z","method":"POST","responseTimeMs":958.5590000003576,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat usa link enviado no historico para recuperar contrato e evitar web extra
+ok 64 - POST /v1/copilot/chat usa link enviado no historico para recuperar contrato e evitar web extra
+  ---
+  duration_ms: 1919.0347
+  type: 'test'
+  ...
+# {"level":40,"time":"2026-04-18T20:03:01.703Z","assetHint":"bmfour","err":{"type":"AppError","message":"Web search provider request failed","stack":"AppError: Web search provider request failed\\n    at DexScreenerSearchAdapter.requestDexScreenerOnce (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\search\\\\dexscreener-search-adapter.ts:1407:13)\\n    at async retryWithExponentialBackoff (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\shared\\\\resilience\\\\retry-with-backoff.ts:29:14)\\n    at async DexScreenerSearchAdapter.searchTokenListings (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\search\\\\dexscreener-search-adapter.ts:487:21)\\n    at async CopilotChatService.buildDexScreenerWhereToBuyFallback (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:4775:34)\\n    at async CopilotChatService.buildWebWhereToBuyFallback (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:4818:35)\\n    at async CopilotChatService.buildBrokerIntegrationFallback (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:4619:16)\\n    at async CopilotChatService.applyIntentFallback (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:3913:32)\\n    at async CopilotChatService.chat (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:3528:36)\\n    at async Object.postCopilotChat (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\interface\\\\copilot-controller.ts:51:16)","code":"WEB_SEARCH_UNAVAILABLE","details":{"cause":{},"provider":"dexscreener","query":"bmfour"},"statusCode":503,"name":"AppError"},"msg":"DexScreener where-to-buy fallback failed, continuing with global web search"}
+# {"level":30,"time":"2026-04-18T20:03:02.134Z","method":"POST","responseTimeMs":1277.9218000024557,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat evita resposta passiva com busca global para onde comprar
+ok 65 - POST /v1/copilot/chat evita resposta passiva com busca global para onde comprar
+  ---
+  duration_ms: 1278.606
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:03:02.556Z","method":"POST","responseTimeMs":422.1199000030756,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat executa tool de busca web global
+ok 66 - POST /v1/copilot/chat executa tool de busca web global
+  ---
+  duration_ms: 422.7086
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:03:02.980Z","method":"POST","responseTimeMs":422.555600002408,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat prioriza Tavily quando configurado e ordena fontes por confianca
+ok 67 - POST /v1/copilot/chat prioriza Tavily quando configurado e ordena fontes por confianca
+  ---
+  duration_ms: 423.1775
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:03:03.402Z","method":"POST","responseTimeMs":421.8337000012398,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat aplica matriz contextual e prioriza fontes de equities sobre cripto
+ok 68 - POST /v1/copilot/chat aplica matriz contextual e prioriza fontes de equities sobre cripto
+  ---
+  duration_ms: 422.8258
+  type: 'test'
+  ...
+# {"level":40,"time":"2026-04-18T20:03:04.288Z","assetHint":"bmfour","err":{"type":"AppError","message":"Web search provider request failed","stack":"AppError: Web search provider request failed\\n    at DexScreenerSearchAdapter.requestDexScreenerOnce (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\search\\\\dexscreener-search-adapter.ts:1407:13)\\n    at async retryWithExponentialBackoff (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\shared\\\\resilience\\\\retry-with-backoff.ts:29:14)\\n    at async DexScreenerSearchAdapter.searchTokenListings (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\search\\\\dexscreener-search-adapter.ts:487:21)\\n    at async CopilotChatService.buildDexScreenerWhereToBuyFallback (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:4775:34)\\n    at async CopilotChatService.buildWebWhereToBuyFallback (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:4818:35)\\n    at async CopilotChatService.buildBrokerIntegrationFallback (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:4619:16)\\n    at async CopilotChatService.applyIntentFallback (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:3913:32)\\n    at async CopilotChatService.chat (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:3528:36)\\n    at async Object.postCopilotChat (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\interface\\\\copilot-controller.ts:51:16)","code":"WEB_SEARCH_UNAVAILABLE","details":{"cause":{},"provider":"dexscreener","query":"bmfour"},"statusCode":503,"name":"AppError"},"msg":"DexScreener where-to-buy fallback failed, continuing with global web search"}
+# {"level":30,"time":"2026-04-18T20:03:05.018Z","method":"POST","responseTimeMs":1614.6543999910355,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat usa Serper como segunda opcao quando Tavily falha
+ok 69 - POST /v1/copilot/chat usa Serper como segunda opcao quando Tavily falha
+  ---
+  duration_ms: 1615.1501
+  type: 'test'
+  ...
+# {"level":40,"time":"2026-04-18T20:03:05.889Z","assetHint":"bmfour","err":{"type":"AppError","message":"Web search provider request failed","stack":"AppError: Web search provider request failed\\n    at DexScreenerSearchAdapter.requestDexScreenerOnce (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\search\\\\dexscreener-search-adapter.ts:1407:13)\\n    at async retryWithExponentialBackoff (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\shared\\\\resilience\\\\retry-with-backoff.ts:29:14)\\n    at async DexScreenerSearchAdapter.searchTokenListings (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\search\\\\dexscreener-search-adapter.ts:487:21)\\n    at async CopilotChatService.buildDexScreenerWhereToBuyFallback (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:4775:34)\\n    at async CopilotChatService.buildWebWhereToBuyFallback (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:4818:35)\\n    at async CopilotChatService.buildBrokerIntegrationFallback (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:4619:16)\\n    at async CopilotChatService.applyIntentFallback (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:3913:32)\\n    at async CopilotChatService.chat (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:3528:36)\\n    at async Object.postCopilotChat (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\interface\\\\copilot-controller.ts:51:16)","code":"WEB_SEARCH_UNAVAILABLE","details":{"cause":{},"provider":"dexscreener","query":"bmfour"},"statusCode":503,"name":"AppError"},"msg":"DexScreener where-to-buy fallback failed, continuing with global web search"}
+# {"level":30,"time":"2026-04-18T20:03:06.839Z","method":"POST","responseTimeMs":1820.3483999967575,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat usa SerpAPI como terceira opcao quando Tavily e Serper falham
+ok 70 - POST /v1/copilot/chat usa SerpAPI como terceira opcao quando Tavily e Serper falham
+  ---
+  duration_ms: 1820.8901
+  type: 'test'
+  ...
+# {"level":40,"time":"2026-04-18T20:03:07.714Z","assetHint":"bmfour","err":{"type":"AppError","message":"Web search provider request failed","stack":"AppError: Web search provider request failed\\n    at DexScreenerSearchAdapter.requestDexScreenerOnce (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\search\\\\dexscreener-search-adapter.ts:1407:13)\\n    at async retryWithExponentialBackoff (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\shared\\\\resilience\\\\retry-with-backoff.ts:29:14)\\n    at async DexScreenerSearchAdapter.searchTokenListings (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\search\\\\dexscreener-search-adapter.ts:487:21)\\n    at async CopilotChatService.buildDexScreenerWhereToBuyFallback (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:4775:34)\\n    at async CopilotChatService.buildWebWhereToBuyFallback (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:4818:35)\\n    at async CopilotChatService.buildBrokerIntegrationFallback (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:4619:16)\\n    at async CopilotChatService.applyIntentFallback (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:3913:32)\\n    at async CopilotChatService.chat (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\application\\\\copilot-chat-service.ts:3528:36)\\n    at async Object.postCopilotChat (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\copilot\\\\interface\\\\copilot-controller.ts:51:16)","code":"WEB_SEARCH_UNAVAILABLE","details":{"cause":{},"provider":"dexscreener","query":"bmfour"},"statusCode":503,"name":"AppError"},"msg":"DexScreener where-to-buy fallback failed, continuing with global web search"}
+# {"level":30,"time":"2026-04-18T20:03:08.397Z","method":"POST","responseTimeMs":1557.9986000061035,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat faz fallback para Serper quando Tavily falha
+ok 71 - POST /v1/copilot/chat faz fallback para Serper quando Tavily falha
+  ---
+  duration_ms: 1558.5796
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:03:08.819Z","method":"POST","responseTimeMs":421.2221000045538,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat executa tool de cotacao por corretora
+ok 72 - POST /v1/copilot/chat executa tool de cotacao por corretora
+  ---
+  duration_ms: 421.9643
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:03:10.117Z","method":"POST","responseTimeMs":1297.3067000061274,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat executa snapshot financeiro global com tool calling
+ok 73 - POST /v1/copilot/chat executa snapshot financeiro global com tool calling
+  ---
+  duration_ms: 1298.3159
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:03:10.542Z","method":"POST","responseTimeMs":423.4812000095844,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat executa fluxo de tool calling read-only
+ok 74 - POST /v1/copilot/chat executa fluxo de tool calling read-only
+  ---
+  duration_ms: 424.7369
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:03:10.967Z","method":"POST","responseTimeMs":423.15290001034737,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/copilot/chat executa comparativo multi-ativos com tool calling
+ok 75 - POST /v1/copilot/chat executa comparativo multi-ativos com tool calling
+  ---
+  duration_ms: 424.7796
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:03:11.927Z","method":"POST","responseTimeMs":958.4933000057936,"route":"/v1/copilot/chat","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:03:12.464Z","method":"GET","responseTimeMs":536.6140999943018,"route":"/v1/copilot/history?sessionId=sessao_history_1776542590968&limit=20","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/copilot/history retorna mensagens da# {"level":40,"time":"2026-04-18T20:03:08.223Z","issues":[{"code":"too_small","minimum":8,"type":"string","inclusive":true,"exact":false,"message":"String must contain at least 8 character(s)","path":["sessionId"]}],"method":"GET","route":"/v1/copilot/history?sessionId=abc","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:03:08.223Z","method":"GET","responseTimeMs":0.421999990940094,"route":"/v1/copilot/history?sessionId=abc","statusCode":400,"msg":"Request completed"}
+# {"level":40,"time":# {"level":40,"time":"2026-04-18T20:03:12.465Z","issues":[{"code":"too_small","minimum":8,"type":"string","inclusive":true,"exact":false,"message":"String must contain at least 8 character(s)","path":["sessionId"]}],"method":"GET","route":"/v1/copilot/history?sessionId=abc","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:03:12.465Z","method":"GET","responseTimeMs":0.43639999628067017,"route":"/v1/copilot/history?sessionId=abc","statusCode":400,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:03:12.466Z","issues":[{"code":"too_small","minimum":1,"type":"string","inclusive":true,"exact":false,"message":"String must contain at least 1 character(s)","path":["message"]}],"method":"POST","route":"/v1/copilot/chat","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:03:12.466Z","method":"POST","responseTimeMs":0.5746999979019165,"route":"/v1/copilot/chat","statusCode":400,"msg":"Request completed"}
+# Subtest: getLiveStreamSnapshot usa stale cache para broker nao-binance quando refresh falha
+ok 79 - getLiveStreamSnapshot usa stale cache para broker nao-binance quando refresh falha
+  ---
+  duration_ms: 3596.4681
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:42.353Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: POST /v1/crypto/intelligence-sync/telemetry registra evento de sincronizacao
+ok 80 - POST /v1/crypto/intelligence-sync/telemetry registra evento de sincronizacao
+  ---
+  duration_ms: 60.7324
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:42.354Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:42.488Z","method":"POST","responseTimeMs":14.29610000550747,"route":"/v1/crypto/intelligence-sync/telemetry","statusCode":202,"msg":"Request completed"}
+# Subtest: POST /v1/crypto/intelligence-sync/telemetry retorna 400 para payload invalido
+ok 81 - POST /v1/crypto/intelligence-sync/telemetry retorna 400 para payload invalido
+  ---
+  duration_ms: 4.125
+  type: 'test'
+  ...
+# Subtest: GET /v1/crypto/spot-price usa fallback CoinCap quando CoinGecko falha
+ok 82 - GET /v1/crypto/spot-price usa fallback CoinCap quando CoinGecko falha
+  ---
+  duration_ms: 43.4112
+  type: 'test'
+  ...
+# Subtest: GET /v1/crypto/spot-price resolve alias pi-network via CoinCap
+ok 83 - GET /v1/crypto/spot-price resolve alias pi-network via CoinCap
+  ---
+  duration_ms: 3.1831
+  type: 'test'
+  ...
+# Subtest: GET /v1/crypto/chart retorna pontos e insights tecnicos
+ok 84 - GET /v1/crypto/chart retorna pontos e insights tecnicos
+  ---
+  duration_ms: 6.841
+  type: 'test'
+  ...
+# {"level":40,"time":"2026-04-18T20:02:42.492Z","issues":[{"code":"too_small","minimum":0,"type":"number","inclusive":true,"exact":false,"message":"Number must be greater than or equal to 0","path":["latencyMs"]},{"code":"too_small","minimum":2,"type":"string","inclusive":true,"exact":false,"message":"String must contain at least 2 character(s)","path":["reason"]},{"code":"too_small","minimum":8,"type":"string","inclusive":true,"exact":false,"message":"String must contain at least 8 character(s)","path":["sessionId"]}],"method":"POST","route":"/v1/crypto/intelligence-sync/telemetry","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:42.493Z","method":"POST","responseTimeMs":3.135900005698204,"route":"/v1/crypto/intelligence-sync/telemetry","statusCode":400,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:42.530Z","assetId":"bitcoin","currency":"usd","err":{"type":"AppError","message":"CoinGecko returned a non-success status","stack":"AppError: CoinGecko returned a non-success status\\n    at CoinGeckoSpotPriceAdapter.requestSpotPrice (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\market_data\\\\coingecko-spot-price-adapter.ts:184:13)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)","code":"COINGECKO_BAD_STATUS","details":{"assetId":"bitcoin","currency":"usd","responseStatus":404,"retryable":false},"statusCode":502,"name":"AppError"},"msg":"CoinGecko failed, attempting CoinCap fallback"}
+# {"level":30,"time":"2026-04-18T20:02:42.536Z","method":"GET","responseTimeMs":41.862399995326996,"route":"/v1/crypto/spot-price?assetId=bitcoin&currency=usd","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:42.538Z","assetId":"pi-network","currency":"usd","err":{"type":"AppError","message":"CoinGecko returned a non-success status","stack":"AppError: CoinGecko returned a non-success status\\n    at CoinGeckoSpotPriceAdapter.requestSpotPrice (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\market_data\\\\coingecko-spot-price-adapter.ts:184:13)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)","code":"COINGECKO_BAD_STATUS","details":{"assetId":"pi-network","currency":"usd","responseStatus":404,"retryable":false},"statusCode":502,"name":"AppError"},"msg":"CoinGecko failed, attempting CoinCap fallback"}
+# {"level":30,"time":"2026-04-18T20:02:42.539Z","method":"GET","responseTimeMs":1.898399993777275,"route":"/v1/crypto/spot-price?assetId=pi-network&currency=usd","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:42.546Z","method":"GET","responseTimeMs":5.181199997663498,"route":"/v1/crypto/chart?assetId=bitcoin&currency=usd&range=7d","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:43.388Z","method":"GET","responseTimeMs":840.6293999999762,"route":"/v1/crypto/chart?assetId=bitcoin&currency=usd&range=24h","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/crypto/chart usa fallback Binance quando CoinGecko falha
+ok 85 - GET /v1/crypto/chart usa fallback Binance quando CoinGecko falha
+  ---
+  duration_ms: 841.5224
+  type: 'test'
+  ...
+# Subtest: GET /v1/crypto/strategy-chart usa pipeline delayed por padrao
+ok 86 - GET /v1/crypto/strategy-chart usa pipeline delayed por padrao
+  ---
+  duration_ms: 2.9139
+  type: 'test'
+  ...
+# Subtest: GET /v1/crypto/strategy-chart usa pipeline live quando mode=live
+ok 87 - GET /v1/crypto/strategy-chart usa pipeline live quando mode=live
+  ---
+  duration_ms: 4.5255
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:43.391Z","method":"GET","responseTimeMs":1.6915999948978424,"route":"/v1/crypto/strategy-chart?assetId=bitcoin&currency=usd&range=24h","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:43.396Z","method":"GET","responseTimeMs":3.4635000079870224,"route":"/v1/crypto/strategy-chart?assetId=bitcoin&range=24h&mode=live&exchange=binance","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.026Z","method":"GET","responseTimeMs":629.0021000057459,"route":"/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=binance","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/crypto/live-chart aplica failover para Bybit quando Binance falha
+ok 88 - GET /v1/crypto/live-chart aplica failover para Bybit quando Binance falha
+  ---
+  duration_ms: 630.6221
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:44.676Z","method":"GET","responseTimeMs":647.6511999964714,"route":"/v1/crypto/live-chart?assetId=bitcoin&range=90d&exchange=coinbase","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/crypto/live-chart degrada para outro broker quando Coinbase falha em range longo
+ok 89 - GET /v1/crypto/live-chart degrada para outro broker quando Coinbase falha em range longo
+  ---
+  duration_ms: 648.9555
+  type: 'test'
+  ...
+# Subtest: GET /v1/crypto/live-chart aceita exchange=auto e prioriza broker mais saudavel
+ok 90 - GET /v1/crypto/live-chart aceita exchange=auto e prioriza broker mais saudavel
+  ---
+  duration_ms: 1.6339
+  type: 'test'
+  ...
+# Subtest: GET /v1/crypto/live-chart retorna snapshot ao vivo com Binance
+ok 91 - GET /v1/crypto/live-chart retorna snapshot ao vivo com Binance
+  ---
+  duration_ms: 2.2475
+  type: 'test'
+  ...
+# Subtest: GET /v1/crypto/live-chart retorna snapshot ao vivo com OKX quando exchange=okx
+ok 92 - GET /v1/crypto/live-chart retorna snapshot ao vivo com OKX quando exchange=okx
+  ---
+  duration_ms: 2.036
+  type: 'test'
+  ...
+# Subtest: GET /v1/crypto/live-chart isola cache por exchange em trocas rapidas
+ok 93 - GET /v1/crypto/live-chart isola cache por exchange em trocas rapidas
+  ---
+  duration_ms: 3.0741
+  type: 'test'
+  ...
+# Subtest: GET /v1/crypto/live-chart valida exchange invalida
+ok 94 - GET /v1/crypto/live-chart valida exchange invalida
+  ---
+  duration_ms: 1.2184
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:44.677Z","method":"GET","responseTimeMs":0.9752999991178513,"route":"/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=auto","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.679Z","method":"GET","responseTimeMs":1.2232000082731247,"route":"/v1/crypto/live-chart?assetId=bitcoin&range=24h","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.682Z","method":"GET","responseTimeMs":1.4742000102996826,"route":"/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=okx","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.683Z","method":"GET","responseTimeMs":0.8473000079393387,"route":"/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=binance","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.684Z","method":"GET","responseTimeMs":0.841499999165535,"route":"/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=okx","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.685Z","method":"GET","responseTimeMs":0.288100004196167,"route":"/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=binance","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.686Z","issues":[{"received":"deribit","code":"invalid_enum_value","options":["auto","binance","bybit","coinbase","kraken","okx"],"path":["exchange"],"message":"Invalid enum value. Expected 'auto' | 'binance' | 'bybit' | 'coinbase' | 'kraken' | 'okx', received 'deribit'"}],"method":"GET","route":"/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=deribit","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:44.686Z","method":"GET","responseTimeMs":0.7269999980926514,"route":"/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=deribit","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:48.413Z","method":"GET","responseTimeMs":3726.6856999993324,"route":"/v1/crypto/live-chart?assetId=bitcoin&range=24h","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/crypto/live-chart usa cache stale quando refresh live falha
+ok 95 - GET /v1/crypto/live-chart usa cache stale quando refresh live falha
+  ---
+  duration_ms: 3727.3368
+  type: 'test'
+  ...
+# Subtest: GET /v1/crypto/chart nao usa fallback Binance para moeda nao-USD
+ok 96 - GET /v1/crypto/chart nao usa fallback Binance para moeda nao-USD
+  ---
+  duration_ms: 1.7531
+  type: 'test'
+  ...
+# Subtest: GET /v1/crypto/spot-price/batch retorna sucesso parcial por ativo
+ok 97 - GET /v1/crypto/spot-price/batch retorna sucesso parcial por ativo
+  ---
+  duration_ms: 2.8868
+  type: 'test'
+  ...
+# Subtest: GET /v1/crypto/market-overview retorna resumo agregado do mercado
+ok 98 - GET /v1/crypto/market-overview retorna resumo agregado do mercado
+  ---
+  duration_ms: 2.7595
+  type: 'test'
+  ...
+# Subtest: GET /v1/crypto/market-overview valida limite maximo
+ok 99 - GET /v1/crypto/market-overview valida limite maximo
+  ---
+  duration_ms: 1.911
+  type: 'test'
+  ...
+# Subtest: GET /v1/crypto/news-intelligence agrega fontes RSS com sucesso parcial
+ok 100 - GET /v1/crypto/news-intelligence agrega fontes RSS com sucesso parcial
+  ---
+  duration_ms: 5.2874
+  type: 'test'
+  ...
+# Subtest: GET /v1/crypto/news-intelligence valida limite maximo
+ok 101 - GET /v1/crypto/news-intelligence valida limite maximo
+  ---
+  duration_ms: 1.0807
+  type: 'test'
+  ...
+# Subtest: GET /v1/crypto/live-chart?fresh=true bypassa cache fresco e refaz refresh no provider
+ok 102 - GET /v1/crypto/live-chart?fresh=true bypassa cache fresco e refaz refresh no provider
+  ---
+  duration_ms: 4.9374
+  type: 'test'
+  ...
+# Subtest: GET /v1/crypto/live-chart com exchange=coinbase usa /stats para preencher changePercent24h
+ok 103 - GET /v1/crypto/live-chart com exchange=coinbase usa /stats para preencher changePercent24h
+  ---
+  duration_ms: 2.3226
+  type: 'test'
+  ...
+# Subtest: GET /v1/crypto/asset-catalog retorna catalogo unificado com 30 ativos e brokerPairs por exchange
+ok 104 - GET /v1/crypto/asset-catalog retorna catalogo unificado com 30 ativos e brokerPairs por exchange
+  ---
+  duration_ms: 1.7297
+  type: 'test'
+  ...
+# {"level":40,"time":"2026-04-18T20:02:48.415Z","code":"COINGECKO_BAD_STATUS","details":{"assetId":"bitcoin","responseBody":"{\\"error\\":\\"asset not found\\"}","responseStatus":404,"retryable":false},"method":"GET","route":"/v1/crypto/chart?assetId=bitcoin&currency=brl&range=24h","msg":"CoinGecko returned a non-success status"}
+# {"level":30,"time":"2026-04-18T20:02:48.415Z","method":"GET","responseTimeMs":0.8860999941825867,"route":"/v1/crypto/chart?assetId=bitcoin&currency=brl&range=24h","statusCode":502,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:48.418Z","method":"GET","responseTimeMs":2.0847000032663345,"route":"/v1/crypto/spot-price/batch?assetIds=bitcoin,inexistente&currency=brl","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:48.419Z","service":"crypto","type":"cache","hit":false,"limit":5,"msg":"Crypto cache miss"}
+# {"level":30,"time":"2026-04-18T20:02:48.421Z","method":"GET","responseTimeMs":1.839599996805191,"route":"/v1/crypto/market-overview?limit=5","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:48.422Z","issues":[{"code":"too_big","maximum":25,"type":"number","inclusive":true,"exact":false,"message":"Number must be less than or equal to 25","path":["limit"]}],"method":"GET","route":"/v1/crypto/market-overview?limit=40","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:48.423Z","method":"GET","responseTimeMs":0.7587999999523163,"route":"/v1/crypto/market-overview?limit=40","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:48.428Z","method":"GET","responseTimeMs":4.295800000429153,"route":"/v1/crypto/news-intelligence?assetId=bitcoin&limit=5","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:48.429Z","issues":[{"code":"too_big","maximum":20,"type":"number","inclusive":true,"exact":false,"message":"Number must be less than or equal to 20","path":["limit"]}],"method":"GET","route":"/v1/crypto/news-intelligence?limit=40","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:48.430Z","method":"GET","responseTimeMs":0.4170999974012375,"route":"/v1/crypto/news-intelligence?limit=40","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:48.432Z","method":"GET","responseTimeMs":1.5650999993085861,"route":"/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=binance","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:48.433Z","method":"GET","responseTimeMs":0.3246999979019165,"route":"/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=binance","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:48.434Z","method":"GET","responseTimeMs":1.6534000039100647,"route":"/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=binance&fresh=true","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:48.437Z","method":"GET","responseTimeMs":1.5426999926567078,"route":"/v1/crypto/live-chart?assetId=bitcoin&range=24h&exchange=coinbase","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:48.438Z","method":"GET","responseTimeMs":0.6228999942541122,"route":"/v1/crypto/asset-catalog","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:42.298Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: GET /v1/defi/spot-rate retorna cotacao para ativo valido
+ok 105 - GET /v1/defi/spot-rate retorna cotacao para ativo valido
+  ---
+  duration_ms: 56.9168
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:42.299Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:42.425Z","method":"GET","responseTimeMs":30.258799999952316,"route":"/v1/defi/spot-rate?assetId=aave","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.115Z","method":"GET","responseTimeMs":1687.6741999983788,"route":"/v1/defi/spot-rate/batch?assetIds=aave,inexistente","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/defi/spot-rate/batch retorna sucesso parcial
+ok 106 - GET /v1/defi/spot-rate/batch retorna sucesso parcial
+  ---
+  duration_ms: 1688.6581
+  type: 'test'
+  ...
+# Subtest: GET /v1/defi/market-overview retorna preset com limite
+ok 107 - GET /v1/defi/market-overview retorna preset com limite
+  ---
+  duration_ms: 4.7938
+  type: 'test'
+  ...
+# Subtest: GET /v1/defi/spot-rate retorna 400 para assetId invalido
+ok 108 - GET /v1/defi/spot-rate retorna 400 para assetId invalido
+  ---
+  duration_ms: 2.6933
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:44.120Z","method":"GET","responseTimeMs":3.3006000071763992,"route":"/v1/defi/market-overview?preset=blue_chips&limit=3","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.122Z","issues":[{"code":"custom","message":"assetId must contain between 2 and 40 characters","path":["assetId"]}],"method":"GET","route":"/v1/defi/spot-rate?assetId=*","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:44.123Z","method":"GET","responseTimeMs":1.3467999994754791,"route":"/v1/defi/spot-rate?assetId=*","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:42.369Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: GET /v1/equities/snapshot retorna cotacao para simbolo valido
+ok 109 - GET /v1/equities/snapshot retorna cotacao para simbolo valido
+  ---
+  duration_ms: 51.7054
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:42.370Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:42.467Z","service":"equities","type":"cache","hit":false,"symbols":["AAPL"],"msg":"Equities cache miss"}
+# {"level":30,"time":"2026-04-18T20:02:42.494Z","method":"GET","responseTimeMs":29.1925999969244,"route":"/v1/equities/snapshot?symbol=aapl","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:42.498Z","service":"equities","type":"cache","hit":false,"symbols":["AAPL","MSFT"],"msg":"Equities cache miss"}
+# {"level":30,"time":"2026-04-18T20:02:43.356Z","method":"GET","responseTimeMs":859.1844999939203,"route":"/v1/equities/snapshot/batch?symbols=AAPL,MSFT","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/equities/snapshot/batch retorna sucesso parcial
+ok 110 - GET /v1/equities/snapshot/batch retorna sucesso parcial
+  ---
+  duration_ms: 860.1726
+  type: 'test'
+  ...
+# Subtest: GET /v1/equities/market-overview retorna preset com limite
+ok 111 - GET /v1/equities/market-overview retorna preset com limite
+  ---
+  duration_ms: 2.2388
+  type: 'test'
+  ...
+# Subtest: GET /v1/equities/snapshot retorna 400 para simbolo invalido
+ok 112 - GET /v1/equities/snapshot retorna 400 para simbolo invalido
+  ---
+  duration_ms: 1.8124
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:43.358Z","service":"equities","type":"cache","hit":true,"symbols":["AAPL","MSFT"],"msg":"Equities cache hit"}
+# {"level":30,"time":"2026-04-18T20:02:43.359Z","method":"GET","responseTimeMs":0.875900000333786,"route":"/v1/equities/market-overview?preset=us_mega_caps&limit=2","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:43.360Z","issues":[{"code":"too_small","minimum":1,"type":"string","inclusive":true,"exact":false,"message":"String must contain at least 1 character(s)","path":["symbol"]}],"method":"GET","route":"/v1/equities/snapshot?symbol=","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:43.361Z","method":"GET","responseTimeMs":0.9391000121831894,"route":"/v1/equities/snapshot?symbol=","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:42.203Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: GET /v1/etfs/snapshot retorna cotacao para simbolo valido
+ok 113 - GET /v1/etfs/snapshot retorna cotacao para simbolo valido
+  ---
+  duration_ms: 62.1801
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:42.204Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:42.348Z","method":"GET","responseTimeMs":30.134800001978874,"route":"/v1/etfs/snapshot?symbol=spy","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:43.200Z","method":"GET","responseTimeMs":848.4370999932289,"route":"/v1/etfs/snapshot/batch?symbols=SPY,QQQ","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/etfs/snapshot/batch retorna sucesso parcial
+ok 114 - GET /v1/etfs/snapshot/batch retorna sucesso parcial
+  ---
+  duration_ms: 849.5191
+  type: 'test'
+  ...
+# Subtest: GET /v1/etfs/market-overview retorna preset com limite
+ok 115 - GET /v1/etfs/market-overview retorna preset com limite
+  ---
+  duration_ms: 2.9258
+  type: 'test'
+  ...
+# Subtest: GET /v1/etfs/snapshot retorna 400 para simbolo invalido
+ok 116 - GET /v1/etfs/snapshot retorna 400 para simbolo invalido
+  ---
+  duration_ms: 2.1463
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:43.203Z","method":"GET","responseTimeMs":1.6027999967336655,"route":"/v1/etfs/market-overview?preset=broad_market&limit=2","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:43.204Z","issues":[{"code":"custom","message":"symbol must contain between 1 and 32 characters","path":["symbol"]}],"method":"GET","route":"/v1/etfs/snapshot?symbol=*","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:43.205Z","method":"GET","responseTimeMs":1.0983999967575073,"route":"/v1/etfs/snapshot?symbol=*","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:42.374Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: GET /v1/fiis/snapshot retorna cotacao para simbolo valido
+ok 117 - GET /v1/fiis/snapshot retorna cotacao para simbolo valido
+  ---
+  duration_ms: 56.9925
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:42.375Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:42.498Z","method":"GET","responseTimeMs":28.343700006604195,"route":"/v1/fiis/snapshot?symbol=hglg11","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:43.340Z","method":"GET","responseTimeMs":838.2489999979734,"route":"/v1/fiis/snapshot/batch?symbols=HGLG11,KNRI11","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/fiis/snapshot/batch retorna sucesso parcial
+ok 118 - GET /v1/fiis/snapshot/batch retorna sucesso parcial
+  ---
+  duration_ms: 839.4711
+  type: 'test'
+  ...
+# Subtest: GET /v1/fiis/market-overview retorna preset com limite
+ok 119 - GET /v1/fiis/market-overview retorna preset com limite
+  ---
+  duration_ms: 3.0692
+  type: 'test'
+  ...
+# Subtest: GET /v1/fiis/snapshot retorna 400 para simbolo invalido
+ok 120 - GET /v1/fiis/snapshot retorna 400 para simbolo invalido
+  ---
+  duration_ms: 1.7021
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:43.343Z","method":"GET","responseTimeMs":1.7250000089406967,"route":"/v1/fiis/market-overview?preset=high_liquidity&limit=2","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:43.345Z","issues":[{"code":"custom","message":"symbol must contain between 6 and 16 characters","path":["symbol"]}],"method":"GET","route":"/v1/fiis/snapshot?symbol=***","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:43.345Z","method":"GET","responseTimeMs":0.8940999954938889,"route":"/v1/fiis/snapshot?symbol=***","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:42.886Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: GET /v1/fixed-income/snapshot retorna leitura para simbolo valido
+ok 121 - GET /v1/fixed-income/snapshot retorna leitura para simbolo valido
+  ---
+  duration_ms: 35.7648
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:42.886Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:42.970Z","method":"GET","responseTimeMs":17.682199999690056,"route":"/v1/fixed-income/snapshot?symbol=%5ETNX","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:43.773Z","method":"GET","responseTimeMs":800.5082999914885,"route":"/v1/fixed-income/snapshot/batch?symbols=%5ETNX,%5EFVX","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/fixed-income/snapshot/batch retorna sucesso parcial
+ok 122 - GET /v1/fixed-income/snapshot/batch retorna sucesso parcial
+  ---
+  duration_ms: 801.5545
+  type: 'test'
+  ...
+# Subtest: GET /v1/fixed-income/market-overview retorna preset com limite
+ok 123 - GET /v1/fixed-income/market-overview retorna preset com limite
+  ---
+  duration_ms: 2.9891
+  type: 'test'
+  ...
+# Subtest: GET /v1/fixed-income/snapshot retorna 400 para simbolo invalido
+ok 124 - GET /v1/fixed-income/snapshot retorna 400 para simbolo invalido
+  ---
+  duration_ms: 1.8439
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:43.776Z","method":"GET","responseTimeMs":1.6773000061511993,"route":"/v1/fixed-income/market-overview?preset=us_curve&limit=2","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:43.777Z","issues":[{"code":"too_small","minimum":1,"type":"string","inclusive":true,"exact":false,"message":"String must contain at least 1 character(s)","path":["symbol"]}],"method":"GET","route":"/v1/fixed-income/snapshot?symbol=","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:43.778Z","method":"GET","responseTimeMs":1.0370999872684479,"route":"/v1/fixed-income/snapshot?symbol=","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:42.981Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: GET /v1/forex/spot-rate retorna cotacao para par valido
+ok 125 - GET /v1/forex/spot-rate retorna cotacao para par valido
+  ---
+  duration_ms: 35.3313
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:42.982Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:43.054Z","service":"forex","type":"cache","hit":false,"pairs":["EURUSD"],"msg":"Forex cache miss"}
+# {"level":30,"time":"2026-04-18T20:02:43.070Z","method":"GET","responseTimeMs":16.54899999499321,"route":"/v1/forex/spot-rate?pair=eurusd","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:43.072Z","service":"forex","type":"cache","hit":false,"pairs":["EURUSD","USDCHF"],"msg":"Forex cache miss"}
+# {"level":30,"time":"2026-04-18T20:02:43.913Z","method":"GET","responseTimeMs":841.2261999994516,"route":"/v1/forex/spot-rate/batch?pairs=EURUSD,USDCHF","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/forex/spot-rate/batch retorna sucesso parcial
+ok 126 - GET /v1/forex/spot-rate/batch retorna sucesso parcial
+  ---
+  duration_ms: 842.0838
+  type: 'test'
+  ...
+# Subtest: GET /v1/forex/market-overview retorna preset com limite
+ok 127 - GET /v1/forex/market-overview retorna preset com limite
+  ---
+  duration_ms: 2.7951
+  type: 'test'
+  ...
+# Subtest: GET /v1/forex/spot-rate retorna 400 para par invalido
+ok 128 - GET /v1/forex/spot-rate retorna 400 para par invalido
+  ---
+  duration_ms: 1.9372
+  type: 'test'
+  ...
+# Subtest: GET /v1/forex/strategy-chart retorna snapshot institucional com macro radar
+ok 129 - GET /v1/forex/strategy-chart retorna snapshot institucional com macro radar
+  ---
+  duration_ms: 4.9392
+  type: 'test'
+  ...
+# Subtest: GET /v1/forex/institutional-macro/snapshot suporta modo live
+ok 130 - GET /v1/forex/institutional-macro/snapshot suporta modo live
+  ---
+  duration_ms: 2.729
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:43.915Z","service":"forex","type":"cache","hit":false,"pairs":["USDBRL","USDMXN"],"msg":"Forex cache miss"}
+# {"level":30,"time":"2026-04-18T20:02:43.916Z","method":"GET","responseTimeMs":1.5301000028848648,"route":"/v1/forex/market-overview?preset=latam&limit=2","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:43.917Z","issues":[{"code":"custom","message":"pair must contain 6 alphabetic characters","path":["pair"]}],"method":"GET","route":"/v1/forex/spot-rate?pair=abc","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:43.918Z","method":"GET","responseTimeMs":1.1431999951601028,"route":"/v1/forex/spot-rate?pair=abc","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:43.923Z","method":"GET","responseTimeMs":3.382199987769127,"route":"/v1/forex/strategy-chart?symbol=EURUSD&range=7d&mode=delayed","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:43.925Z","method":"GET","responseTimeMs":1.4182000011205673,"route":"/v1/forex/institutional-macro/snapshot?symbol=XAUUSD&mode=live&range=24h","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:43.078Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: GET /v1/futures/snapshot retorna snapshot consolidado
+ok 131 - GET /v1/futures/snapshot retorna snapshot consolidado
+  ---
+  duration_ms: 30.2642
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:43.078Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:43.153Z","method":"GET","responseTimeMs":16.567800000309944,"route":"/v1/futures/snapshot?symbol=btc","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:43.807Z","err":{"type":"AppError","message":"Binance futures returned a non-success status","stack":"AppError: Binance futures returned a non-success status\\n    at BinanceFuturesMarketDataAdapter.requestJson (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\market_data\\\\binance-futures-market-data-adapter.ts:685:13)\\n    at async retryWithExponentialBackoff (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\shared\\\\resilience\\\\retry-with-backoff.ts:29:14)\\n    at async BinanceFuturesMarketDataAdapter.loadPremiumIndexSafe (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\market_data\\\\binance-futures-market-data-adapter.ts:415:23)\\n    at async Promise.all (index 1)\\n    at async BinanceFuturesMarketDataAdapter.getContractSnapshot (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\market_data\\\\binance-futures-market-data-adapter.ts:255:57)\\n    at async FuturesMarketService.getSnapshot (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\futures\\\\application\\\\futures-market-service.ts:136:24)\\n    at async Object.getFuturesSnapshot (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\futures\\\\interface\\\\futures-controller.ts:55:20)","code":"BINANCE_FUTURES_BAD_STATUS","details":{"path":"/fapi/v1/premiumIndex?symbol=SOLUSDT","responseBody":"service unavailable","responseStatus":503,"retryable":true},"statusCode":503,"name":"AppError"},"symbol":"SOLUSDT","msg":"Binance futures premium index unavailable; setting derivatives fields to null"}
+# {"level":40,"time":"2026-04-18T20:02:43.836Z","err":{"type":"AppError","message":"Binance futures returned a non-success status","stack":"AppError: Binance futures returned a non-success status\\n    at BinanceFuturesMarketDataAdapter.requestJson (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\market_data\\\\binance-futures-market-data-adapter.ts:685:13)\\n    at async retryWithExponentialBackoff (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\shared\\\\resilience\\\\retry-with-backoff.ts:29:14)\\n    at async BinanceFuturesMarketDataAdapter.loadOpenInterestSafe (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\market_data\\\\binance-futures-market-data-adapter.ts:456:23)\\n    at async Promise.all (index 2)\\n    at async BinanceFuturesMarketDataAdapter.getContractSnapshot (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\market_data\\\\binance-futures-market-data-adapter.ts:255:57)\\n    at async FuturesMarketService.getSnapshot (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\futures\\\\application\\\\futures-market-service.ts:136:24)\\n    at async Object.getFuturesSnapshot (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\futures\\\\interface\\\\futures-controller.ts:55:20)","code":"BINANCE_FUTURES_BAD_STATUS","details":{"path":"/fapi/v1/openInterest?symbol=SOLUSDT","responseBody":"service unavailable","responseStatus":503,"retryable":true},"statusCode":503,"name":"AppError"},"symbol":"SOLUSDT","msg":"Binance futures open interest unavailable; setting derivatives fields to null"}
+# Subtest: GET /v1/futures/snapshot degrada derivativos para null quando endpoints oscilam
+ok 132 - GET /v1/futures/snapshot degrada derivativos para null quando endpoints oscilam
+  ---
+  duration_ms: 682.5457
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:43.838Z","method":"GET","responseTimeMs":681.8106000125408,"route":"/v1/futures/snapshot?symbol=sol","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.488Z","err":{"type":"AppError","message":"Binance futures returned a non-success status","stack":"AppError: Binance futures returned a non-success status\\n    at BinanceFuturesMarketDataAdapter.requestJson (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\market_data\\\\binance-futures-market-data-adapter.ts:685:13)\\n    at async retryWithExponentialBackoff (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\shared\\\\resilience\\\\retry-with-backoff.ts:29:14)\\n    at async BinanceFuturesMarketDataAdapter.loadPremiumIndexSafe (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\market_data\\\\binance-futures-market-data-adapter.ts:415:23)\\n    at async Promise.all (index 1)\\n    at async BinanceFuturesMarketDataAdapter.getContractSnapshot (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\market_data\\\\binance-futures-market-data-adapter.ts:255:57)\\n    at async FuturesMarketService.getSnapshot (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\futures\\\\application\\\\futures-market-service.ts:136:24)\\n    at async <anonymous> (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\futures\\\\application\\\\futures-market-service.ts:165:28)\\n    at async Promise.all (index 1)\\n    at async FuturesMarketService.getSnapshotBatch (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\futures\\\\application\\\\futures-market-service.ts:162:23)\\n    at async Object.getFuturesSnapshotBatch (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\futures\\\\interface\\\\futures-controller.ts:64:17)","code":"BINANCE_FUTURES_BAD_STATUS","details":{"path":"/fapi/v1/premiumIndex?symbol=ETHUSDT","responseBody":"service unavailable","responseStatus":503,"retryable":true},"statusCode":503,"name":"AppError"},"symbol":"ETHUSDT","msg":"Binance futures premium index unavailable; setting derivatives fields to null"}
+# {"level":40,"time":"2026-04-18T20:02:44.504Z","err":{"type":"AppError","message":"Binance futures returned a non-success status","stack":"AppError: Binance futures returned a non-success status\\n    at BinanceFuturesMarketDataAdapter.requestJson (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\market_data\\\\binance-futures-market-data-adapter.ts:685:13)\\n    at async retryWithExponentialBackoff (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\shared\\\\resilience\\\\retry-with-backoff.ts:29:14)\\n    at async BinanceFuturesMarketDataAdapter.loadOpenInterestSafe (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\market_data\\\\binance-futures-market-data-adapter.ts:456:23)\\n    at async Promise.all (index 2)\\n    at async BinanceFuturesMarketDataAdapter.getContractSnapshot (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\integrations\\\\market_data\\\\binance-futures-market-data-adapter.ts:255:57)\\n    at async FuturesMarketService.getSnapshot (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\futures\\\\application\\\\futures-market-service.ts:136:24)\\n    at async <anonymous> (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\futures\\\\application\\\\futures-market-service.ts:165:28)\\n    at async Promise.all (index 1)\\n    at async FuturesMarketService.getSnapshotBatch (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\futures\\\\application\\\\futures-market-service.ts:162:23)\\n    at async Object.getFuturesSnapshotBatch (C:\\\\Users\\\\dougl\\\\OneDrive\\\\Área de Trabalho\\\\BotFinanceiro\\\\apps\\\\api\\\\src\\\\modules\\\\futures\\\\interface\\\\futures-controller.ts:64:17)","code":"BINANCE_FUTURES_BAD_STATUS","details":{"path":"/fapi/v1/openInterest?symbol=ETHUSDT","responseBody":"service unavailable","responseStatus":503,"retryable":true},"statusCode":503,"name":"AppError"},"symbol":"ETHUSDT","msg":"Binance futures open interest unavailable; setting derivatives fields to null"}
+# {"level":30,"time":"2026-04-18T20:02:44.566Z","method":"GET","responseTimeMs":727.1177999973297,"route":"/v1/futures/snapshot/batch?symbols=BTCUSDT,ETHUSDT","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/futures/snapshot/batch retorna sucesso parcial
+ok 133 - GET /v1/futures/snapshot/batch retorna sucesso parcial
+  ---
+  duration_ms: 728.1983
+  type: 'test'
+  ...
+# Subtest: GET /v1/futures/market-overview retorna preset com limite
+ok 134 - GET /v1/futures/market-overview retorna preset com limite
+  ---
+  duration_ms: 2.2459
+  type: 'test'
+  ...
+# Subtest: GET /v1/futures/snapshot retorna 400 para simbolo invalido
+ok 135 - GET /v1/futures/snapshot retorna 400 para simbolo invalido
+  ---
+  duration_ms: 1.6457
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:44.568Z","method":"GET","responseTimeMs":1.2666999995708466,"route":"/v1/futures/market-overview?preset=crypto_majors&limit=2","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.569Z","issues":[{"code":"custom","message":"symbol must contain between 6 and 20 characters","path":["symbol"]}],"method":"GET","route":"/v1/futures/snapshot?symbol=***","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:44.570Z","method":"GET","responseTimeMs":0.778999999165535,"route":"/v1/futures/snapshot?symbol=***","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:43.415Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: GET /v1/global-sectors/snapshot retorna cotacao setorial para simbolo valido
+ok 136 - GET /v1/global-sectors/snapshot retorna cotacao setorial para simbolo valido
+  ---
+  duration_ms: 50.3445
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:43.415Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:43.521Z","method":"GET","responseTimeMs":29.437899991869926,"route":"/v1/global-sectors/snapshot?symbol=xlk","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.332Z","method":"GET","responseTimeMs":808.7484999895096,"route":"/v1/global-sectors/snapshot/batch?symbols=XLF,XLE","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/global-sectors/snapshot/batch retorna sucesso parcial
+ok 137 - GET /v1/global-sectors/snapshot/batch retorna sucesso parcial
+  ---
+  duration_ms: 809.7182
+  type: 'test'
+  ...
+# Subtest: GET /v1/global-sectors/market-overview retorna preset com limite
+ok 138 - GET /v1/global-sectors/market-overview retorna preset com limite
+  ---
+  duration_ms: 3.572
+  type: 'test'
+  ...
+# Subtest: GET /v1/global-sectors/snapshot retorna 400 para simbolo invalido
+ok 139 - GET /v1/global-sectors/snapshot retorna 400 para simbolo invalido
+  ---
+  duration_ms: 2.0936
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:44.336Z","method":"GET","responseTimeMs":2.0844999998807907,"route":"/v1/global-sectors/market-overview?preset=us_sectors&limit=2","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.338Z","issues":[{"code":"custom","message":"symbol must contain between 1 and 32 characters","path":["symbol"]}],"method":"GET","route":"/v1/global-sectors/snapshot?symbol=*","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:44.338Z","method":"GET","responseTimeMs":1.1157000064849854,"route":"/v1/global-sectors/snapshot?symbol=*","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.112Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: GET /v1/macro-rates/snapshot retorna leitura para simbolo valido
+ok 140 - GET /v1/macro-rates/snapshot retorna leitura para simbolo valido
+  ---
+  duration_ms: 51.8814
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:44.112Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:44.244Z","method":"GET","responseTimeMs":29.383199989795685,"route":"/v1/macro-rates/snapshot?symbol=%5ETNX","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:45.094Z","method":"GET","responseTimeMs":847.3537999987602,"route":"/v1/macro-rates/snapshot/batch?symbols=%5ETNX,%5EFVX","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/macro-rates/snapshot/batch retorna sucesso parcial
+ok 141 - GET /v1/macro-rates/snapshot/batch retorna sucesso parcial
+  ---
+  duration_ms: 848.3833
+  type: 'test'
+  ...
+# Subtest: GET /v1/macro-rates/market-overview retorna preset com limite
+ok 142 - GET /v1/macro-rates/market-overview retorna preset com limite
+  ---
+  duration_ms: 2.1619
+  type: 'test'
+  ...
+# Subtest: GET /v1/macro-rates/snapshot retorna 400 para simbolo invalido
+ok 143 - GET /v1/macro-rates/snapshot retorna 400 para simbolo invalido
+  ---
+  duration_ms: 1.6824
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:45.096Z","method":"GET","responseTimeMs":1.225700005888939,"route":"/v1/macro-rates/market-overview?preset=usd_rates&limit=3","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:45.098Z","issues":[{"code":"custom","message":"symbol must contain between 1 and 32 characters","path":["symbol"]}],"method":"GET","route":"/v1/macro-rates/snapshot?symbol=*","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:45.098Z","method":"GET","responseTimeMs":1.0338000059127808,"route":"/v1/macro-rates/snapshot?symbol=*","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.128Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:44.129Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:47.871Z","method":"GET","responseTimeMs":3645.623300001025,"route":"/v1/meme-radar/notifications?refresh=true&limit=20","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/meme-radar/notifications retorna board com Solana e Base
+ok 144 - GET /v1/meme-radar/notifications retorna board com Solana e Base
+  ---
+  duration_ms: 3672.7285
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:50.338Z","method":"GET","responseTimeMs":2463.5831000059843,"route":"/v1/meme-radar/notifications?refresh=true&limit=10","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:50.779Z","method":"POST","responseTimeMs":439.5497999936342,"route":"/v1/meme-radar/notifications/base%3Abasepair44444444444444444444444444444444/pin","statusCode":200,"msg":"Request completed"}
+# Subtest: POST /v1/meme-radar/notifications/:id/pin fixa e lista em pinnedOnly
+ok 145 - POST /v1/meme-radar/notifications/:id/pin fixa e lista em pinnedOnly
+  ---
+  duration_ms: 2906.2688
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:50.780Z","method":"GET","responseTimeMs":0.5687000006437302,"route":"/v1/meme-radar/notifications?pinnedOnly=true&limit=5","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:52.350Z","method":"GET","responseTimeMs":1569.780799999833,"route":"/v1/meme-radar/notifications?refresh=true&limit=20","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/meme-radar/risk-audit retorna checklist institucional para ativo monitorado
+ok 146 - GET /v1/meme-radar/risk-audit retorna checklist institucional para ativo monitorado
+  ---
+  duration_ms: 1572.5199
+  type: 'test'
+  ...
+# Subtest: GET /v1/meme-radar/risk-audit retorna modo UNKNOWN quando ativo nao existe
+ok 147 - GET /v1/meme-radar/risk-audit retorna modo UNKNOWN quando ativo nao existe
+  ---
+  duration_ms: 1.184
+  type: 'test'
+  ...
+# Subtest: GET /v1/meme-radar/risk-audit retorna 400 para assetId invalido
+ok 148 - GET /v1/meme-radar/risk-audit retorna 400 para assetId invalido
+  ---
+  duration_ms: 1.5304
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:52.352Z","method":"GET","responseTimeMs":1.3853999972343445,"route":"/v1/meme-radar/risk-audit?assetId=SMFIVE","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:52.353Z","method":"GET","responseTimeMs":0.5513000041246414,"route":"/v1/meme-radar/risk-audit?assetId=UNKNOWN_TOKEN_777","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:52.355Z","issues":[{"code":"too_small","minimum":2,"type":"string","inclusive":true,"exact":false,"message":"String must contain at least 2 character(s)","path":["assetId"]}],"method":"GET","route":"/v1/meme-radar/risk-audit?assetId=a","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:52.355Z","method":"GET","responseTimeMs":0.683799996972084,"route":"/v1/meme-radar/risk-audit?assetId=a","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:53.915Z","method":"GET","responseTimeMs":1559.1425999999046,"route":"/v1/meme-radar/notifications?refresh=true&limit=20","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/meme-radar/risk-audit/by-contract retorna checklist para endereco monitorado
+ok 149 - GET /v1/meme-radar/risk-audit/by-contract retorna checklist para endereco monitorado
+  ---
+  duration_ms: 1561.3093
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:53.916Z","method":"GET","responseTimeMs":0.7029000073671341,"route":"/v1/meme-radar/risk-audit/by-contract?contractAddress=0x8888888888888888888888888888888888888888","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:54.074Z","method":"GET","responseTimeMs":156.96930000185966,"route":"/v1/meme-radar/risk-audit/by-contract?refresh=true&contractAddress=0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/meme-radar/risk-audit/by-contract resolve fallback live via DexScreener quando contrato nao esta no snapshot
+ok 150 - GET /v1/meme-radar/risk-audit/by-contract resolve fallback live via DexScreener quando contrato nao esta no snapshot
+  ---
+  duration_ms: 157.6474
+  type: 'test'
+  ...
+# Subtest: GET /v1/meme-radar/risk-audit/by-contract retorna modo UNKNOWN para endereco nao encontrado
+ok 151 - GET /v1/meme-radar/risk-audit/by-contract retorna modo UNKNOWN para endereco nao encontrado
+  ---
+  duration_ms: 1.0495
+  type: 'test'
+  ...
+# Subtest: GET /v1/meme-radar/risk-audit/by-contract retorna 400 para endereco invalido
+ok 152 - GET /v1/meme-radar/risk-audit/by-contract retorna 400 para endereco invalido
+  ---
+  duration_ms: 0.5841
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:54.075Z","method":"GET","responseTimeMs":0.5718000084161758,"route":"/v1/meme-radar/risk-audit/by-contract?contractAddress=0x9999999999999999999999999999999999999999","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:54.076Z","issues":[{"code":"too_small","minimum":8,"type":"string","inclusive":true,"exact":false,"message":"String must contain at least 8 character(s)","path":["contractAddress"]}],"method":"GET","route":"/v1/meme-radar/risk-audit/by-contract?contractAddress=0x123","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:54.076Z","method":"GET","responseTimeMs":0.23149999976158142,"route":"/v1/meme-radar/risk-audit/by-contract?contractAddress=0x123","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.473Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: GET /v1/options/snapshot retorna leitura de volatilidade para underlying valido
+ok 153 - GET /v1/options/snapshot retorna leitura de volatilidade para underlying valido
+  ---
+  duration_ms: 36.0719
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:44.474Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:44.555Z","method":"GET","responseTimeMs":22.067900002002716,"route":"/v1/options/snapshot?underlying=spy&daysToExpiry=30","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:45.438Z","method":"GET","responseTimeMs":880.8125,"route":"/v1/options/snapshot/batch?underlyings=SPY,QQQ&daysToExpiry=45","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/options/snapshot/batch retorna sucesso parcial
+ok 154 - GET /v1/options/snapshot/batch retorna sucesso parcial
+  ---
+  duration_ms: 881.5373
+  type: 'test'
+  ...
+# Subtest: GET /v1/options/market-overview retorna preset com limite
+ok 155 - GET /v1/options/market-overview retorna preset com limite
+  ---
+  duration_ms: 2.1674
+  type: 'test'
+  ...
+# Subtest: GET /v1/options/snapshot retorna 400 para underlying invalido
+ok 156 - GET /v1/options/snapshot retorna 400 para underlying invalido
+  ---
+  duration_ms: 1.3548
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:45.440Z","method":"GET","responseTimeMs":1.2169999927282333,"route":"/v1/options/market-overview?preset=us_indices&limit=2&daysToExpiry=30","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:45.441Z","issues":[{"code":"custom","message":"underlying must contain between 1 and 24 characters","path":["underlying"]}],"method":"GET","route":"/v1/options/snapshot?underlying=*&daysToExpiry=30","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:45.441Z","method":"GET","responseTimeMs":0.747299998998642,"route":"/v1/options/snapshot?underlying=*&daysToExpiry=30","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.508Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: GET /v1/portfolios/snapshot retorna diagnostico para preset valido
+ok 157 - GET /v1/portfolios/snapshot retorna diagnostico para preset valido
+  ---
+  duration_ms: 31.0833
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:44.509Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:44.580Z","method":"GET","responseTimeMs":17.758599996566772,"route":"/v1/portfolios/snapshot?preset=balanced","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:45.453Z","method":"GET","responseTimeMs":871.0063000023365,"route":"/v1/portfolios/snapshot?positions=SPY:60,QQQ:40","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/portfolios/snapshot aceita posicoes customizadas e retorna sucesso parcial
+ok 158 - GET /v1/portfolios/snapshot aceita posicoes customizadas e retorna sucesso parcial
+  ---
+  duration_ms: 871.6947
+  type: 'test'
+  ...
+# Subtest: GET /v1/portfolios/market-overview retorna overview por presets
+ok 159 - GET /v1/portfolios/market-overview retorna overview por presets
+  ---
+  duration_ms: 4.3877
+  type: 'test'
+  ...
+# Subtest: GET /v1/portfolios/snapshot retorna 400 para posicoes invalidas
+ok 160 - GET /v1/portfolios/snapshot retorna 400 para posicoes invalidas
+  ---
+  duration_ms: 1.599
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:45.457Z","method":"GET","responseTimeMs":3.189400002360344,"route":"/v1/portfolios/market-overview?presets=conservative,growth&limit=2","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:45.458Z","issues":[{"validation":"regex","code":"invalid_string","message":"Invalid","path":["positions",0]}],"method":"GET","route":"/v1/portfolios/snapshot?positions=SPY,QQQ:30","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:45.459Z","method":"GET","responseTimeMs":0.8164000064134598,"route":"/v1/portfolios/snapshot?positions=SPY,QQQ:30","statusCode":400,"msg":"Request completed"}
+# Subtest: SystemStatusService.getOperationalHealthHistoryAggregatedCsv
+    # Subtest: gera CSV agregado por dia com colunas e metricas esperadas
+    ok 1 - gera CSV agregado por dia com colunas e metricas esperadas
+      ---
+      duration_ms: 2.2296
+      type: 'test'
+      ...
+    # Subtest: aplica bucketLimit no CSV agregado por hora
+    ok 2 - aplica bucketLimit no CSV agregado por hora
+      ---
+      duration_ms: 0.6343
+      type: 'test'
+      ...
+    # Subtest: respeita filtro temporal e retorna apenas cabecalho quando nao ha buckets
+    ok 3 - respeita filtro temporal e retorna apenas cabecalho quando nao ha buckets
+      ---
+      duration_ms: 0.4498
+      type: 'test'
+      ...
+    1..3
+ok 161 - SystemStatusService.getOperationalHealthHistoryAggregatedCsv
+  ---
+  duration_ms: 4.6183
+  type: 'suite'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:44.652Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: GET /internal/health/operational/history retorna 401 sem token
+ok 162 - GET /internal/health/operational/history retorna 401 sem token
+  ---
+  duration_ms: 18.1921
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/streams/brokers retorna 401 sem token
+ok 163 - GET /internal/health/streams/brokers retorna 401 sem token
+  ---
+  duration_ms: 1.7245
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/streams/brokers retorna metricas do stream com token valido
+ok 164 - GET /internal/health/streams/brokers retorna metricas do stream com token valido
+  ---
+  duration_ms: 1.4183
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/streams/futures retorna estado do stream com token valido
+ok 165 - GET /internal/health/streams/futures retorna estado do stream com token valido
+  ---
+  duration_ms: 0.9728
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/market-navigator/modules retorna 401 sem token
+ok 166 - GET /internal/health/market-navigator/modules retorna 401 sem token
+  ---
+  duration_ms: 1.6012
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/market-navigator/modules retorna resumo por modulo com token valido
+ok 167 - GET /internal/health/market-navigator/modules retorna resumo por modulo com token valido
+  ---
+  duration_ms: 2.2725
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/streams/brokers.csv retorna 401 sem token
+ok 168 - GET /internal/health/streams/brokers.csv retorna 401 sem token
+  ---
+  duration_ms: 0.9259
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/streams/brokers.csv retorna CSV com token valido
+ok 169 - GET /internal/health/streams/brokers.csv retorna CSV com token valido
+  ---
+  duration_ms: 1.2973
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/live-chart/crypto retorna 401 sem token
+ok 170 - GET /internal/health/live-chart/crypto retorna 401 sem token
+  ---
+  duration_ms: 2.3678
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/live-chart/crypto retorna metricas agregadas por broker
+ok 171 - GET /internal/health/live-chart/crypto retorna metricas agregadas por broker
+  ---
+  duration_ms: 1.3884
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/intelligence-sync retorna 401 sem token
+ok 172 - GET /internal/health/intelligence-sync retorna 401 sem token
+  ---
+  duration_ms: 0.6297
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/intelligence-sync retorna telemetria agregada com token valido
+ok 173 - GET /internal/health/intelligence-sync retorna telemetria agregada com token valido
+  ---
+  duration_ms: 1.1186
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/live-chart/crypto/resilience retorna 401 sem token
+ok 174 - GET /internal/health/live-chart/crypto/resilience retorna 401 sem token
+  ---
+  duration_ms: 0.5383
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/live-chart/crypto/resilience retorna telemetria de auto-selecao e failover
+ok 175 - GET /internal/health/live-chart/crypto/resilience retorna telemetria de auto-selecao e failover
+  ---
+  duration_ms: 1.7748
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/live-chart/crypto.csv retorna 401 sem token
+ok 176 - GET /internal/health/live-chart/crypto.csv retorna 401 sem token
+  ---
+  duration_ms: 0.685
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/live-chart/crypto.csv retorna CSV com token valido
+ok 177 - GET /internal/health/live-chart/crypto.csv retorna CSV com token valido
+  ---
+  duration_ms: 1.2466
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/airdrops retorna 401 sem token
+ok 178 - GET /internal/health/airdrops retorna 401 sem token
+  ---
+  duration_ms: 0.5882
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/airdrops retorna metricas de fontes com token valido
+ok 179 - GET /internal/health/airdrops retorna metricas de fontes com token valido
+  ---
+  duration_ms: 0.9234
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/airdrops.csv retorna 401 sem token
+ok 180 - GET /internal/health/airdrops.csv retorna 401 sem token
+  ---
+  duration_ms: 0.5013
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/airdrops.csv retorna CSV com token valido
+ok 181 - GET /internal/health/airdrops.csv retorna CSV com token valido
+  ---
+  duration_ms: 1.0295
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/operational/history retorna payload esperado com token valido
+ok 182 - GET /internal/health/operational/history retorna payload esperado com token valido
+  ---
+  duration_ms: 1.8257
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/operational/history retorna 400 quando from e maior que to
+ok 183 - GET /internal/health/operational/history retorna 400 quando from e maior que to
+  ---
+  duration_ms: 0.9548
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/operational/history.csv retorna CSV esperado com token valido
+ok 184 - GET /internal/health/operational/history.csv retorna CSV esperado com token valido
+  ---
+  duration_ms: 0.84
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/operational/history.csv retorna 400 quando from e maior que to
+ok 185 - GET /internal/health/operational/history.csv retorna 400 quando from e maior que to
+  ---
+  duration_ms: 0.716
+  type: 'test'
+  ...
+# Subtest: DELETE /internal/health/operational/history retorna 401 sem token
+ok 186 - DELETE /internal/health/operational/history retorna 401 sem token
+  ---
+  duration_ms: 0.5592
+  type: 'test'
+  ...
+# Subtest: DELETE /internal/health/operational/history retorna 400 sem confirm=true
+ok 187 - DELETE /internal/health/operational/history retorna 400 sem confirm=true
+  ---
+  duration_ms: 0.8695
+  type: 'test'
+  ...
+# Subtest: DELETE /internal/health/operational/history retorna sucesso com confirm=true
+ok 188 - DELETE /internal/health/operational/history retorna sucesso com confirm=true
+  ---
+  duration_ms: 0.9666
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/operational/history/aggregate.csv retorna 401 sem token
+ok 189 - GET /internal/health/operational/history/aggregate.csv retorna 401 sem token
+  ---
+  duration_ms: 0.7705
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/operational/history/aggregate.csv retorna CSV com token valido
+ok 190 - GET /internal/health/operational/history/aggregate.csv retorna CSV com token valido
+  ---
+  duration_ms: 1.1602
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/operational/history/aggregate.csv retorna 401 com token invalido
+ok 191 - GET /internal/health/operational/history/aggregate.csv retorna 401 com token invalido
+  ---
+  duration_ms: 0.6078
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/operational/history/aggregate retorna 401 sem token
+ok 192 - GET /internal/health/operational/history/aggregate retorna 401 sem token
+  ---
+  duration_ms: 0.5779
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/operational/history/aggregate retorna payload agregado com token valido
+ok 193 - GET /internal/health/operational/history/aggregate retorna payload agregado com token valido
+  ---
+  duration_ms: 0.6492
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/operational/history/aggregate retorna 401 com token invalido
+ok 194 - GET /internal/health/operational/history/aggregate retorna 401 com token invalido
+  ---
+  duration_ms: 0.5682
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/operational/history/aggregate retorna 400 quando from e maior que to
+ok 195 - GET /internal/health/operational/history/aggregate retorna 400 quando from e maior que to
+  ---
+  duration_ms: 0.8155
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/operational/history/aggregate.csv retorna 400 quando from e maior que to
+ok 196 - GET /internal/health/operational/history/aggregate.csv retorna 400 quando from e maior que to
+  ---
+  duration_ms: 0.7668
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/operational/history/aggregate retorna 400 para granularity invalida
+ok 197 - GET /internal/health/operational/history/aggregate retorna 400 para granularity invalida
+  ---
+  duration_ms: 0.797
+  type: 'test'
+  ...
+# Subtest: GET /internal/health/operational/history/aggregate retorna 400 para bucketLimit fora do intervalo
+ok 198 - GET /internal/health/operational/history/aggregate retorna 400 para bucketLimit fora do intervalo
+  ---
+  duration_ms: 0.7243
+  type: 'test'
+  ...
+# Subtest: GET /internal/copilot/audit/history retorna 401 sem token
+ok 199 - GET /internal/copilot/audit/history retorna 401 sem token
+  ---
+  duration_ms: 0.459
+  type: 'test'
+  ...
+# Subtest: GET /internal/copilot/audit/history retorna payload com filtro de tool
+ok 200 - GET /internal/copilot/audit/history retorna payload com filtro de tool
+  ---
+  duration_ms: 0.7724
+  type: 'test'
+  ...
+# Subtest: DELETE /internal/copilot/audit/history retorna 400 sem confirm=true
+ok 201 - DELETE /internal/copilot/audit/history retorna 400 sem confirm=true
+  ---
+  duration_ms: 1.4436
+  type: 'test'
+  ...
+# Subtest: DELETE /internal/copilot/audit/history retorna sucesso com confirm=true
+ok 202 - DELETE /internal/copilot/audit/history retorna sucesso com confirm=true
+  ---
+  duration_ms: 0.5994
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:44.653Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":40,"time":"2026-04-18T20:02:44.707Z","code":"INTERNAL_AUTH_MISSING_TOKEN","method":"GET","route":"/internal/health/operational/history?limit=2","msg":"Missing internal route token"}
+# {"level":30,"time":"2026-04-18T20:02:44.709Z","method":"GET","responseTimeMs":3.1516999900341034,"route":"/internal/health/operational/history?limit=2","statusCode":401,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.711Z","code":"INTERNAL_AUTH_MISSING_TOKEN","method":"GET","route":"/internal/health/streams/brokers","msg":"Missing internal route token"}
+# {"level":30,"time":"2026-04-18T20:02:44.712Z","method":"GET","responseTimeMs":0.5373000055551529,"route":"/internal/health/streams/brokers","statusCode":401,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.714Z","method":"GET","responseTimeMs":0.4487999975681305,"route":"/internal/health/streams/brokers","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.715Z","method":"GET","responseTimeMs":0.3552999943494797,"route":"/internal/health/streams/futures","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.716Z","code":"INTERNAL_AUTH_MISSING_TOKEN","method":"GET","route":"/internal/health/market-navigator/modules","msg":"Missing internal route token"}
+# {"level":30,"time":"2026-04-18T20:02:44.716Z","method":"GET","responseTimeMs":0.5141000002622604,"route":"/internal/health/market-navigator/modules","statusCode":401,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.718Z","method":"GET","responseTimeMs":1.1596999913454056,"route":"/internal/health/market-navigator/modules","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.719Z","code":"INTERNAL_AUTH_MISSING_TOKEN","method":"GET","route":"/internal/health/streams/brokers.csv","msg":"Missing internal route token"}
+# {"level":30,"time":"2026-04-18T20:02:44.720Z","method":"GET","responseTimeMs":0.20679999887943268,"route":"/internal/health/streams/brokers.csv","statusCode":401,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.721Z","method":"GET","responseTimeMs":0.482000008225441,"route":"/internal/health/streams/brokers.csv","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.722Z","code":"INTERNAL_AUTH_MISSING_TOKEN","method":"GET","route":"/internal/health/live-chart/crypto","msg":"Missing internal route token"}
+# {"level":30,"time":"2026-04-18T20:02:44.723Z","method":"GET","responseTimeMs":0.7641000002622604,"route":"/internal/health/live-chart/crypto","statusCode":401,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.725Z","method":"GET","responseTimeMs":0.4984999895095825,"route":"/internal/health/live-chart/crypto","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.725Z","code":"INTERNAL_AUTH_MISSING_TOKEN","method":"GET","route":"/internal/health/intelligence-sync","msg":"Missing internal route token"}
+# {"level":30,"time":"2026-04-18T20:02:44.726Z","method":"GET","responseTimeMs":0.18619999289512634,"route":"/internal/health/intelligence-sync","statusCode":401,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.727Z","method":"GET","responseTimeMs":0.19870001077651978,"route":"/internal/health/intelligence-sync","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.727Z","code":"INTERNAL_AUTH_MISSING_TOKEN","method":"GET","route":"/internal/health/live-chart/crypto/resilience","msg":"Missing internal route token"}
+# {"level":30,"time":"2026-04-18T20:02:44.727Z","method":"GET","responseTimeMs":0.19030000269412994,"route":"/internal/health/live-chart/crypto/resilience","statusCode":401,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.729Z","method":"GET","responseTimeMs":0.9882999956607819,"route":"/internal/health/live-chart/crypto/resilience?requestedBroker=auto","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.730Z","code":"INTERNAL_AUTH_MISSING_TOKEN","method":"GET","route":"/internal/health/live-chart/crypto.csv","msg":"Missing internal route token"}
+# {"level":30,"time":"2026-04-18T20:02:44.730Z","method":"GET","responseTimeMs":0.16519999504089355,"route":"/internal/health/live-chart/crypto.csv","statusCode":401,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.731Z","method":"GET","responseTimeMs":0.4456000030040741,"route":"/internal/health/live-chart/crypto.csv","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.732Z","code":"INTERNAL_AUTH_MISSING_TOKEN","method":"GET","route":"/internal/health/airdrops","msg":"Missing internal route token"}
+# {"level":30,"time":"2026-04-18T20:02:44.732Z","method":"GET","responseTimeMs":0.15330000221729279,"route":"/internal/health/airdrops","statusCode":401,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.733Z","method":"GET","responseTimeMs":0.39579999446868896,"route":"/internal/health/airdrops","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.733Z","code":"INTERNAL_AUTH_MISSING_TOKEN","method":"GET","route":"/internal/health/airdrops.csv","msg":"Missing internal route token"}
+# {"level":30,"time":"2026-04-18T20:02:44.733Z","method":"GET","responseTimeMs":0.15300001204013824,"route":"/internal/health/airdrops.csv","statusCode":401,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.734Z","method":"GET","responseTimeMs":0.4499000012874603,"route":"/internal/health/airdrops.csv","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.736Z","method":"GET","responseTimeMs":1.1890000104904175,"route":"/internal/health/operational/history?limit=2","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.737Z","issues":[{"code":"custom","message":"from must be less than or equal to to","path":["from"]}],"method":"GET","route":"/internal/health/operational/history?from=2026-04-01T01:00:00.000Z&to=2026-04-01T00:00:00.000Z","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:44.737Z","method":"GET","responseTimeMs":0.4723000079393387,"route":"/internal/health/operational/history?from=2026-04-01T01:00:00.000Z&to=2026-04-01T00:00:00.000Z","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.738Z","method":"GET","responseTimeMs":0.3627000004053116,"route":"/internal/health/operational/history.csv?limit=2","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.739Z","issues":[{"code":"custom","message":"from must be less than or equal to to","path":["from"]}],"method":"GET","route":"/internal/health/operational/history.csv?from=2026-04-01T01:00:00.000Z&to=2026-04-01T00:00:00.000Z","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:44.739Z","method":"GET","responseTimeMs":0.3025999963283539,"route":"/internal/health/operational/history.csv?from=2026-04-01T01:00:00.000Z&to=2026-04-01T00:00:00.000Z","statusCode":400,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.739Z","code":"INTERNAL_AUTH_MISSING_TOKEN","method":"DELETE","route":"/internal/health/operational/history?confirm=true","msg":"Missing internal route token"}
+# {"level":30,"time":"2026-04-18T20:02:44.739Z","method":"DELETE","responseTimeMs":0.19120000302791595,"route":"/internal/health/operational/history?confirm=true","statusCode":401,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.740Z","issues":[{"code":"invalid_type","expected":"string","received":"undefined","path":["confirm"],"message":"Required"}],"method":"DELETE","route":"/internal/health/operational/history","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:44.740Z","method":"DELETE","responseTimeMs":0.3407000005245209,"route":"/internal/health/operational/history","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.741Z","method":"DELETE","responseTimeMs":0.40379999577999115,"route":"/internal/health/operational/history?confirm=true","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.742Z","code":"INTERNAL_AUTH_MISSING_TOKEN","method":"GET","route":"/internal/health/operational/history/aggregate.csv","msg":"Missing internal route token"}
+# {"level":30,"time":"2026-04-18T20:02:44.742Z","method":"GET","responseTimeMs":0.1818999946117401,"route":"/internal/health/operational/history/aggregate.csv","statusCode":401,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.743Z","method":"GET","responseTimeMs":0.6689999997615814,"route":"/internal/health/operational/history/aggregate.csv?granularity=day&bucketLimit=10","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.744Z","code":"INTERNAL_AUTH_INVALID_TOKEN","method":"GET","route":"/internal/health/operational/history/aggregate.csv","msg":"Invalid internal route token"}
+# {"level":30,"time":"2026-04-18T20:02:44.744Z","method":"GET","responseTimeMs":0.2102999985218048,"route":"/internal/health/operational/history/aggregate.csv","statusCode":401,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.744Z","code":"INTERNAL_AUTH_MISSING_TOKEN","method":"GET","route":"/internal/health/operational/history/aggregate","msg":"Missing internal route token"}
+# {"level":30,"time":"2026-04-18T20:02:44.745Z","method":"GET","responseTimeMs":0.13089999556541443,"route":"/internal/health/operational/history/aggregate","statusCode":401,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.745Z","method":"GET","responseTimeMs":0.218299999833107,"route":"/internal/health/operational/history/aggregate?granularity=day&bucketLimit=10","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.746Z","code":"INTERNAL_AUTH_INVALID_TOKEN","method":"GET","route":"/internal/health/operational/history/aggregate","msg":"Invalid internal route token"}
+# {"level":30,"time":"2026-04-18T20:02:44.746Z","method":"GET","responseTimeMs":0.12839999794960022,"route":"/internal/health/operational/history/aggregate","statusCode":401,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.746Z","issues":[{"code":"custom","message":"from must be less than or equal to to","path":["from"]}],"method":"GET","route":"/internal/health/operational/history/aggregate?from=2026-04-01T01:00:00.000Z&to=2026-04-01T00:00:00.000Z","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:44.746Z","method":"GET","responseTimeMs":0.21359999477863312,"route":"/internal/health/operational/history/aggregate?from=2026-04-01T01:00:00.000Z&to=2026-04-01T00:00:00.000Z","statusCode":400,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.747Z","issues":[{"code":"custom","message":"from must be less than or equal to to","path":["from"]}],"method":"GET","route":"/internal/health/operational/history/aggregate.csv?from=2026-04-01T01:00:00.000Z&to=2026-04-01T00:00:00.000Z","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:44.747Z","method":"GET","responseTimeMs":0.3140999972820282,"route":"/internal/health/operational/history/aggregate.csv?from=2026-04-01T01:00:00.000Z&to=2026-04-01T00:00:00.000Z","statusCode":400,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.748Z","issues":[{"received":"minute","code":"invalid_enum_value","options":["hour","day"],"path":["granularity"],"message":"Invalid enum value. Expected 'hour' | 'day', received 'minute'"}],"method":"GET","route":"/internal/health/operational/history/aggregate?granularity=minute","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:44.748Z","method":"GET","responseTimeMs":0.3684999942779541,"route":"/internal/health/operational/history/aggregate?granularity=minute","statusCode":400,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.749Z","issues":[{"code":"too_small","minimum":1,"type":"number","inclusive":true,"exact":false,"message":"Number must be greater than or equal to 1","path":["bucketLimit"]}],"method":"GET","route":"/internal/health/operational/history/aggregate?bucketLimit=0","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:44.749Z","method":"GET","responseTimeMs":0.33389998972415924,"route":"/internal/health/operational/history/aggregate?bucketLimit=0","statusCode":400,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.749Z","code":"INTERNAL_AUTH_MISSING_TOKEN","method":"GET","route":"/internal/copilot/audit/history?limit=2","msg":"Missing internal route token"}
+# {"level":30,"time":"2026-04-18T20:02:44.750Z","method":"GET","responseTimeMs":0.12399999797344208,"route":"/internal/copilot/audit/history?limit=2","statusCode":401,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.750Z","method":"GET","responseTimeMs":0.3668999969959259,"route":"/internal/copilot/audit/history?limit=5&offset=0&toolName=get_crypto_multi_spot_price","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:44.751Z","issues":[{"code":"invalid_type","expected":"string","received":"undefined","path":["confirm"],"message":"Required"}],"method":"DELETE","route":"/internal/copilot/audit/history","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:44.751Z","method":"DELETE","responseTimeMs":0.4050000011920929,"route":"/internal/copilot/audit/history","statusCode":400,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.752Z","method":"DELETE","responseTimeMs":0.18490000069141388,"route":"/internal/copilot/audit/history?confirm=true","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:44.955Z","enabled":true,"hstsMaxAgeSeconds":31536000,"msg":"security_headers_enabled"}
+# Subtest: GET /v1/wall-street/snapshot retorna cotacao para simbolo valido
+ok 203 - GET /v1/wall-street/snapshot retorna cotacao para simbolo valido
+  ---
+  duration_ms: 30.5283
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:44.956Z","enabled":true,"maxRequests":240,"windowMs":60000,"msg":"public_rate_limit_enabled"}
+# {"level":30,"time":"2026-04-18T20:02:45.023Z","method":"GET","responseTimeMs":16.667400002479553,"route":"/v1/wall-street/snapshot?symbol=spy","statusCode":200,"msg":"Request completed"}
+# {"level":30,"time":"2026-04-18T20:02:45.856Z","method":"GET","responseTimeMs":829.6178999990225,"route":"/v1/wall-street/snapshot/batch?symbols=SPY,QQQ","statusCode":200,"msg":"Request completed"}
+# Subtest: GET /v1/wall-street/snapshot/batch retorna sucesso parcial
+ok 204 - GET /v1/wall-street/snapshot/batch retorna sucesso parcial
+  ---
+  duration_ms: 830.5737
+  type: 'test'
+  ...
+# Subtest: GET /v1/wall-street/market-overview retorna preset com limite
+ok 205 - GET /v1/wall-street/market-overview retorna preset com limite
+  ---
+  duration_ms: 2.1643
+  type: 'test'
+  ...
+# Subtest: GET /v1/wall-street/snapshot retorna 400 para simbolo invalido
+ok 206 - GET /v1/wall-street/snapshot retorna 400 para simbolo invalido
+  ---
+  duration_ms: 1.7062
+  type: 'test'
+  ...
+# {"level":30,"time":"2026-04-18T20:02:45.858Z","method":"GET","responseTimeMs":1.2327000051736832,"route":"/v1/wall-street/market-overview?preset=indices&limit=2","statusCode":200,"msg":"Request completed"}
+# {"level":40,"time":"2026-04-18T20:02:45.859Z","issues":[{"code":"too_small","minimum":1,"type":"string","inclusive":true,"exact":false,"message":"String must contain at least 1 character(s)","path":["symbol"]}],"method":"GET","route":"/v1/wall-street/snapshot?symbol=","msg":"Validation error"}
+# {"level":30,"time":"2026-04-18T20:02:45.860Z","method":"GET","responseTimeMs":0.9342999905347824,"route":"/v1/wall-street/snapshot?symbol=","statusCode":400,"msg":"Request completed"}
+# Subtest: openSsePipe
+    # Subtest: rejeita origem nao permitida sem abrir pipe
+    ok 1 - rejeita origem nao permitida sem abrir pipe
+      ---
+      duration_ms: 2.3404
+      type: 'test'
+      ...
+    # Subtest: aceita origem conhecida, escreve meta e snapshot inicial
+    ok 2 - aceita origem conhecida, escreve meta e snapshot inicial
+      ---
+      duration_ms: 6.7237
+      type: 'test'
+      ...
+    # Subtest: encaminha falhas do pushSnapshot como stream-error e continua aberto
+    ok 3 - encaminha falhas do pushSnapshot como stream-error e continua aberto
+      ---
+      duration_ms: 1.9682
+      type: 'test'
+      ...
+    # Subtest: encerra pipe ao receber close no request
+    ok 4 - encerra pipe ao receber close no request
+      ---
+      duration_ms: 0.4863
+      type: 'test'
+      ...
+    1..4
+ok 207 - openSsePipe
+  ---
+  duration_ms: 13.2335
+  type: 'suite'
+  ...
+# Subtest: ProviderChain
+    # Subtest: retorna sucesso do primeiro provider e nao chama os seguintes
+    ok 1 - retorna sucesso do primeiro provider e nao chama os seguintes
+      ---
+      duration_ms: 1.5113
+      type: 'test'
+      ...
+    # Subtest: faz fallback quando provider primario lanca
+    ok 2 - faz fallback quando provider primario lanca
+      ---
+      duration_ms: 1.4804
+      type: 'test'
+      ...
+    # Subtest: retorna exhausted acumulando erros quando todos falham
+    ok 3 - retorna exhausted acumulando erros quando todos falham
+      ---
+      duration_ms: 0.3584
+      type: 'test'
+      ...
+    # Subtest: respeita circuit breaker aberto pulando o provider
+    ok 4 - respeita circuit breaker aberto pulando o provider
+      ---
+      duration_ms: 0.4509
+      type: 'test'
+      ...
+    # Subtest: interrompe cadeia quando shouldAbortChain devolve true
+    ok 5 - interrompe cadeia quando shouldAbortChain devolve true
+      ---
+      duration_ms: 0.361
+      type: 'test'
+      ...
+    1..5
+ok 208 - ProviderChain
+  ---
+  duration_ms: 6.0184
+  type: 'suite'
+  ...
+# Subtest: resolveInstitutionalZone
+    # Subtest: classifica preço próximo do suporte como discount
+    ok 1 - classifica preço próximo do suporte como discount
+      ---
+      duration_ms: 0.6655
+      type: 'test'
+      ...
+    # Subtest: classifica preço próximo da resistência como premium
+    ok 2 - classifica preço próximo da resistência como premium
+      ---
+      duration_ms: 0.1135
+      type: 'test'
+      ...
+    # Subtest: classifica preço em faixa central como equilibrium
+    ok 3 - classifica preço em faixa central como equilibrium
+      ---
+      duration_ms: 0.1314
+      type: 'test'
+      ...
+    # Subtest: trata suporte==resistência sem divisão por zero
+    ok 4 - trata suporte==resistência sem divisão por zero
+      ---
+      duration_ms: 0.1542
+      type: 'test'
+      ...
+    # Subtest: respeita limiares customizados
+    ok 5 - respeita limiares customizados
+      ---
+      duration_ms: 0.2236
+      type: 'test'
+      ...
+    1..5
+ok 209 - resolveInstitutionalZone
+  ---
+  duration_ms: 2.2444
+  type: 'suite'
+  ...
+# Subtest: resolveZonePosition
+    # Subtest: retorna 0 no suporte e 1 na resistência
+    ok 1 - retorna 0 no suporte e 1 na resistência
+      ---
+      duration_ms: 0.1565
+      type: 'test'
+      ...
+    # Subtest: faz clamp para valores fora do range
+    ok 2 - faz clamp para valores fora do range
+      ---
+      duration_ms: 0.1336
+      type: 'test'
+      ...
+    1..2
+ok 210 - resolveZonePosition
+  ---
+  duration_ms: 0.5777
+  type: 'suite'
+  ...
+1..210
+# tests 224
+# suites 5
+# pass 223
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 43056.8801
+npm error Lifecycle script `test` failed with error:
+npm error code 1
+npm error path C:\Users\dougl\OneDrive\Área de Trabalho\BotFinanceiro\apps\api
+npm error workspace @botfinanceiro/api@0.1.0
+npm error location C:\Users\dougl\OneDrive\Área de Trabalho\BotFinanceiro\apps\api
+npm error command failed
+npm error command C:\WINDOWS\system32\cmd.exe /d /s /c node scripts/run-tests.mjs

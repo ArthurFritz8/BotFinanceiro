@@ -136,4 +136,89 @@ void describe("BacktestingService", () => {
       assert.ok(b.pnlPercent < a.pnlPercent);
     }
   });
+
+  void it("compareForAsset busca chart UMA vez e roda N estrategias (Wave 20)", async () => {
+    const closes: number[] = [];
+    for (let i = 0; i < 25; i += 1) closes.push(100);
+    for (let i = 0; i < 35; i += 1) closes.push(100 + (i + 1) * 1.5);
+    const chart = buildChart(closes);
+
+    let fetchCount = 0;
+    const countingAdapter = {
+      getMarketChart: async (input: {
+        assetId: string;
+        broker: string;
+        range: string;
+      }): Promise<MultiExchangeMarketChart> => {
+        fetchCount += 1;
+        return Promise.resolve({
+          ...chart,
+          assetId: input.assetId,
+          broker: input.broker as MultiExchangeMarketChart["broker"],
+          range: input.range as MultiExchangeMarketChart["range"],
+        });
+      },
+    } as unknown as MultiExchangeMarketDataAdapter;
+
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: countingAdapter,
+    });
+
+    const result = await service.compareForAsset({
+      asset: "bitcoin",
+      strategies: [
+        { strategy: "ema_crossover" },
+        { strategy: "rsi_mean_reversion" },
+        { strategy: "smc_confluence" },
+      ],
+    });
+
+    assert.equal(fetchCount, 1, "deve buscar chart apenas UMA vez");
+    assert.equal(result.results.length, 3);
+    assert.equal(result.results[0]!.strategy, "ema_crossover");
+    assert.equal(result.results[1]!.strategy, "rsi_mean_reversion");
+    assert.equal(result.results[2]!.strategy, "smc_confluence");
+    assert.equal(result.candleCount, 60);
+    assert.equal(result.asset, "bitcoin");
+  });
+
+  void it("compareForAsset rejeita strategies vazio", async () => {
+    const adapter = buildFakeAdapter(buildChart([100, 100]));
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+    });
+    await assert.rejects(() =>
+      service.compareForAsset({ asset: "bitcoin", strategies: [] }),
+    );
+  });
+
+  void it("compareForAsset propaga commission/slippage para todas as estrategias", async () => {
+    const closes: number[] = [];
+    for (let i = 0; i < 25; i += 1) closes.push(100);
+    for (let i = 0; i < 35; i += 1) closes.push(100 + (i + 1) * 1.5);
+    const adapter = buildFakeAdapter(buildChart(closes));
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+    });
+
+    const baseline = await service.compareForAsset({
+      asset: "bitcoin",
+      strategies: [{ strategy: "ema_crossover" }],
+    });
+    const withFees = await service.compareForAsset({
+      asset: "bitcoin",
+      strategies: [{ strategy: "ema_crossover" }],
+      commissionPercent: 0.5,
+    });
+
+    const a = baseline.results[0]!;
+    const b = withFees.results[0]!;
+    assert.equal(a.trades.length, b.trades.length);
+    if (a.trades.length > 0) {
+      assert.ok(b.trades[0]!.pnlPercent < a.trades[0]!.pnlPercent);
+    }
+  });
 });

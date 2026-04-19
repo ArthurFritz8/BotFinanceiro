@@ -22,4 +22,12 @@ export class BacktestingController {
     const result = await this.service.runForAsset(request.body);
     void reply.send(buildSuccessResponse(request.id, result));
   };
+
+  public compareBacktestForAsset = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<void> => {
+    const result = await this.service.compareForAsset(request.body);
+    void reply.send(buildSuccessResponse(request.id, result));
+  };
 }

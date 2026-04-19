@@ -7,6 +7,7 @@
  */
 
 const RUN_ASSET_ENDPOINT = "/v1/backtesting/run-asset";
+const COMPARE_ASSET_ENDPOINT = "/v1/backtesting/compare-asset";
 
 const STRATEGIES = [
   { id: "ema_crossover", label: "EMA Crossover (trend-following)" },
@@ -60,6 +61,12 @@ function buildForm() {
           <select name="strategy">
             ${STRATEGIES.map((s) => `<option value="${s.id}">${s.label}</option>`).join("")}
           </select>
+        </label>
+      </div>
+      <div class="backtesting__row">
+        <label class="backtesting__compare-toggle">
+          <input type="checkbox" name="compareMode" />
+          Modo comparacao (rodar todas as estrategias e comparar)
         </label>
       </div>
       <div class="backtesting__row">
@@ -175,6 +182,87 @@ async function executeRun(payload, resultElement) {
   }
 }
 
+function renderCompare(payload) {
+  const winners = {
+    pnl: { strategy: null, value: -Infinity },
+    winrate: { strategy: null, value: -Infinity },
+    profitFactor: { strategy: null, value: -Infinity },
+    drawdown: { strategy: null, value: Infinity },
+  };
+  for (const r of payload.results) {
+    if (r.stats.totalPnlPercent > winners.pnl.value) {
+      winners.pnl = { strategy: r.strategy, value: r.stats.totalPnlPercent };
+    }
+    if (r.stats.winRatePercent > winners.winrate.value) {
+      winners.winrate = { strategy: r.strategy, value: r.stats.winRatePercent };
+    }
+    if (Number.isFinite(r.stats.profitFactor) && r.stats.profitFactor > winners.profitFactor.value) {
+      winners.profitFactor = { strategy: r.strategy, value: r.stats.profitFactor };
+    }
+    if (r.stats.maxDrawdownPercent < winners.drawdown.value) {
+      winners.drawdown = { strategy: r.strategy, value: r.stats.maxDrawdownPercent };
+    }
+  }
+
+  const cell = (strategy, value, kind, formatted) => {
+    const isWinner = winners[kind].strategy === strategy;
+    const cls = isWinner ? "backtesting__cell--winner" : "";
+    return `<td class="${cls}">${formatted}</td>`;
+  };
+
+  const rows = payload.results
+    .map((r) => {
+      const s = r.stats;
+      return `<tr>
+        <td><strong>${r.strategy}</strong></td>
+        <td>${s.totalTrades}</td>
+        ${cell(r.strategy, s.winRatePercent, "winrate", `${fmtNum(s.winRatePercent, 1)}%`)}
+        ${cell(r.strategy, s.profitFactor, "profitFactor", fmtNum(s.profitFactor, 2))}
+        ${cell(r.strategy, s.totalPnlPercent, "pnl", fmtPct(s.totalPnlPercent))}
+        ${cell(r.strategy, -s.maxDrawdownPercent, "drawdown", fmtPct(-s.maxDrawdownPercent))}
+      </tr>`;
+    })
+    .join("");
+
+  return `
+    <div class="backtesting__result">
+      <div class="backtesting__header">
+        <strong>${payload.asset}</strong> · ${payload.broker} · ${payload.range} · ${payload.candleCount} candles
+        <span>${fmtDate(payload.firstTMs)} → ${fmtDate(payload.lastTMs)}</span>
+      </div>
+      <h4 class="backtesting__section-title">Comparacao de estrategias (vencedor por metrica destacado)</h4>
+      <table class="backtesting__table backtesting__table--compare">
+        <thead><tr>
+          <th>Estrategia</th><th>Trades</th><th>Win Rate</th><th>Profit Factor</th><th>PnL Total</th><th>Max DD</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function executeCompare(payload, resultElement) {
+  resultElement.innerHTML = renderLoading();
+  try {
+    const response = await fetch(COMPARE_ASSET_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const json = await response.json();
+    if (!json?.data) {
+      throw new Error("Resposta sem campo data");
+    }
+    resultElement.innerHTML = renderCompare(json.data);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    resultElement.innerHTML = renderError(msg);
+  }
+}
+
 export function initBacktestingPanel() {
   const root = document.querySelector("#backtesting-panel");
   if (!(root instanceof HTMLElement)) {
@@ -200,14 +288,26 @@ export function initBacktestingPanel() {
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const formData = new FormData(form);
-    const payload = {
+    const compareMode = formData.get("compareMode") === "on";
+    const base = {
       asset: String(formData.get("asset") ?? "").trim(),
       broker: String(formData.get("broker") ?? "bybit"),
       range: String(formData.get("range") ?? "30d"),
-      strategy: String(formData.get("strategy") ?? "ema_crossover"),
       cooldownCandles: Number(formData.get("cooldownCandles") ?? 1),
       commissionPercent: Number(formData.get("commissionPercent") ?? 0),
       slippagePercent: Number(formData.get("slippagePercent") ?? 0),
+    };
+    if (compareMode) {
+      const payload = {
+        ...base,
+        strategies: STRATEGIES.map((s) => ({ strategy: s.id })),
+      };
+      void executeCompare(payload, output);
+      return;
+    }
+    const payload = {
+      ...base,
+      strategy: String(formData.get("strategy") ?? "ema_crossover"),
     };
     void executeRun(payload, output);
   });

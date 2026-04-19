@@ -49,4 +49,5 @@ export function registerBacktestingPublicRoutes(
   controller: BacktestingController,
 ): void {
   app.post("/backtesting/run-asset", controller.runBacktestForAsset);
+  app.post("/backtesting/compare-asset", controller.compareBacktestForAsset);
 }
