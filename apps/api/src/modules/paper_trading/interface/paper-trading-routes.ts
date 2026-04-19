@@ -6,6 +6,7 @@ import type {
 } from "fastify";
 
 import { assertInternalRouteAuth } from "../../../shared/http/internal-route-auth.js";
+import type { AutoPaperTradingController } from "./auto-paper-trading-controller.js";
 import type { PaperTradingController } from "./paper-trading-controller.js";
 
 const internalRouteOptions = {
@@ -34,6 +35,7 @@ export function registerPaperTradingPublicRoutes(
 export function registerPaperTradingInternalRoutes(
   app: FastifyInstance,
   controller: PaperTradingController,
+  autoController?: AutoPaperTradingController,
 ): void {
   app.post(
     "/internal/paper-trading/trades",
@@ -45,4 +47,16 @@ export function registerPaperTradingInternalRoutes(
     internalRouteOptions,
     controller.evaluatePrice,
   );
+  if (autoController) {
+    app.post(
+      "/internal/paper-trading/auto-signal",
+      internalRouteOptions,
+      autoController.submitConfluenceSignal,
+    );
+    app.post(
+      "/internal/paper-trading/auto-evaluate",
+      internalRouteOptions,
+      autoController.triggerEvaluation,
+    );
+  }
 }

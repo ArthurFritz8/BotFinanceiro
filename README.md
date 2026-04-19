@@ -111,6 +111,7 @@ Politica de retencao:
 25. ADR 053: `docs/ADR/ADR-053-metrics-prometheus-endpoint.md`
 26. ADR 054: `docs/ADR/ADR-054-web-push-notifications-zero-cost.md`
 27. ADR 055: `docs/ADR/ADR-055-paper-trading-pnl-persistente-zero-cost.md`
+28. ADR 056: `docs/ADR/ADR-056-auto-paper-trading-bridge.md`
 
 ## Relatorio completo desta entrega
 

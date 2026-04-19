@@ -31,12 +31,16 @@ import {
   registerNotificationsPublicRoutes,
 } from "../modules/notifications/interface/notifications-routes.js";
 import { PaperTradingService } from "../modules/paper_trading/application/paper-trading-service.js";
+import { AutoPaperTradingBridge } from "../modules/paper_trading/application/auto-paper-trading-bridge.js";
 import { JsonlTradeStore } from "../modules/paper_trading/infrastructure/jsonl-trade-store.js";
 import { PaperTradingController } from "../modules/paper_trading/interface/paper-trading-controller.js";
+import { AutoPaperTradingController } from "../modules/paper_trading/interface/auto-paper-trading-controller.js";
 import {
   registerPaperTradingInternalRoutes,
   registerPaperTradingPublicRoutes,
 } from "../modules/paper_trading/interface/paper-trading-routes.js";
+import { AutoPaperTradingJobRunner } from "../jobs/auto-paper-trading-job-runner.js";
+import { MultiExchangeMarketDataAdapter } from "../integrations/market_data/multi-exchange-market-data-adapter.js";
 import { env } from "../shared/config/env.js";
 import { httpErrorHandler } from "../shared/errors/http-error-handler.js";
 import { logger } from "../shared/logger/logger.js";
@@ -139,8 +143,47 @@ export function buildApp() {
   const paperTradingStore = new JsonlTradeStore(env.PAPER_TRADING_DATA_FILE);
   const paperTradingService = new PaperTradingService({ store: paperTradingStore });
   const paperTradingController = new PaperTradingController(paperTradingService);
+
+  const autoPaperTradingBroker = env.AUTO_PAPER_TRADING_BROKER;
+  const multiExchangeAdapter = new MultiExchangeMarketDataAdapter();
+  const autoPaperTradingBridge = new AutoPaperTradingBridge({
+    paperTradingService,
+    notificationService: notificationsService,
+    minTier: env.AUTO_PAPER_TRADING_MIN_TIER,
+    priceProvider: async (assetId: string): Promise<number> => {
+      const snapshot = await multiExchangeAdapter.getTickerSnapshot({
+        assetId,
+        broker: autoPaperTradingBroker,
+      });
+      return snapshot.lastPrice;
+    },
+    logger: {
+      warn: (msg, ctx): void => {
+        app.log.warn({ ...ctx }, msg);
+      },
+    },
+  });
+  const autoPaperTradingController = new AutoPaperTradingController(
+    autoPaperTradingBridge,
+  );
+
   if (env.PAPER_TRADING_ENABLED) {
-    registerPaperTradingInternalRoutes(app, paperTradingController);
+    registerPaperTradingInternalRoutes(
+      app,
+      paperTradingController,
+      autoPaperTradingController,
+    );
+  }
+
+  if (env.PAPER_TRADING_ENABLED && env.AUTO_PAPER_TRADING_ENABLED) {
+    const autoPaperTradingJobRunner = new AutoPaperTradingJobRunner({
+      bridge: autoPaperTradingBridge,
+    });
+    autoPaperTradingJobRunner.start();
+    app.addHook("onClose", (_instance, done) => {
+      autoPaperTradingJobRunner.stop();
+      done();
+    });
   }
 
   void app.register(
