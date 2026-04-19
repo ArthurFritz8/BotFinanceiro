@@ -8,7 +8,12 @@ import {
   rsiMeanReversionParamsSchema,
   smcConfluenceParamsSchema,
   strategyKindSchema,
+  type StrategyKind,
 } from "../domain/backtest-types.js";
+import type {
+  BacktestHistoryEntry,
+  JsonlBacktestRunStore,
+} from "../infrastructure/jsonl-backtest-run-store.js";
 import type { BacktestEngine } from "./backtest-engine.js";
 
 export const backtestRunAssetRequestSchema = z.object({
@@ -69,6 +74,29 @@ export interface BacktestCompareAssetResult {
 interface BacktestingServiceOptions {
   readonly engine: BacktestEngine;
   readonly marketDataAdapter: MultiExchangeMarketDataAdapter;
+  /** Store opcional para persistir rodadas comparativas (Wave 21 / ADR-061). */
+  readonly historyStore?: JsonlBacktestRunStore;
+  /** Clock injetavel para tests (default Date.now). */
+  readonly clock?: () => number;
+}
+
+/**
+ * Agregado por (asset, strategy) sobre o historico de rodadas. Wave 21 /
+ * ADR-061. `roundsCount` = numero de rodadas em que essa combinacao
+ * apareceu; medias sao aritmeticas simples (cada rodada conta igual,
+ * independente do candleCount).
+ */
+export interface LeaderboardEntry {
+  readonly asset: string;
+  readonly strategy: StrategyKind;
+  readonly roundsCount: number;
+  readonly avgWinRatePercent: number;
+  readonly avgProfitFactor: number;
+  readonly avgPnlPercent: number;
+  readonly avgMaxDrawdownPercent: number;
+  readonly bestPnlPercent: number;
+  readonly worstPnlPercent: number;
+  readonly lastRanAtMs: number;
 }
 
 /**
@@ -80,10 +108,14 @@ interface BacktestingServiceOptions {
 export class BacktestingService {
   private readonly engine: BacktestEngine;
   private readonly marketDataAdapter: MultiExchangeMarketDataAdapter;
+  private readonly historyStore: JsonlBacktestRunStore | undefined;
+  private readonly clock: () => number;
 
   public constructor(options: BacktestingServiceOptions) {
     this.engine = options.engine;
     this.marketDataAdapter = options.marketDataAdapter;
+    this.historyStore = options.historyStore;
+    this.clock = options.clock ?? ((): number => Date.now());
   }
 
   public async runForAsset(rawRequest: unknown): Promise<BacktestRunResult> {
@@ -133,7 +165,7 @@ export class BacktestingService {
         slippagePercent: request.slippagePercent,
       }),
     );
-    return {
+    const compareResult: BacktestCompareAssetResult = {
       asset: request.asset,
       broker: request.broker,
       range: request.range,
@@ -142,6 +174,115 @@ export class BacktestingService {
       lastTMs: candles[candles.length - 1]!.tMs,
       results,
     };
+    this.persistHistory(request, compareResult);
+    return compareResult;
+  }
+
+  /**
+   * Lista o historico persistido de rodadas comparativas (mais recentes
+   * primeiro). Retorna array vazio se nao houver historyStore configurado.
+   */
+  public listHistory(limit?: number): readonly BacktestHistoryEntry[] {
+    if (this.historyStore === undefined) return [];
+    const all = this.historyStore.list();
+    if (limit === undefined || limit <= 0) return all;
+    return all.slice(0, limit);
+  }
+
+  /**
+   * Computa leaderboard agregado por (asset, strategy) sobre o historico.
+   * Ordenado por avgPnlPercent descendente. Retorna array vazio se nao
+   * houver historyStore configurado.
+   */
+  public computeLeaderboard(): readonly LeaderboardEntry[] {
+    if (this.historyStore === undefined) return [];
+    const buckets = new Map<
+      string,
+      {
+        asset: string;
+        strategy: StrategyKind;
+        winRates: number[];
+        profitFactors: number[];
+        pnls: number[];
+        drawdowns: number[];
+        lastRanAtMs: number;
+      }
+    >();
+    for (const entry of this.historyStore.list()) {
+      for (const result of entry.results) {
+        const key = `${entry.asset}::${result.strategy}`;
+        let bucket = buckets.get(key);
+        if (bucket === undefined) {
+          bucket = {
+            asset: entry.asset,
+            strategy: result.strategy,
+            winRates: [],
+            profitFactors: [],
+            pnls: [],
+            drawdowns: [],
+            lastRanAtMs: entry.ranAtMs,
+          };
+          buckets.set(key, bucket);
+        }
+        bucket.winRates.push(result.winRatePercent);
+        if (Number.isFinite(result.profitFactor)) {
+          bucket.profitFactors.push(result.profitFactor);
+        }
+        bucket.pnls.push(result.totalPnlPercent);
+        bucket.drawdowns.push(result.maxDrawdownPercent);
+        if (entry.ranAtMs > bucket.lastRanAtMs) {
+          bucket.lastRanAtMs = entry.ranAtMs;
+        }
+      }
+    }
+    const entries: LeaderboardEntry[] = [];
+    for (const bucket of buckets.values()) {
+      entries.push({
+        asset: bucket.asset,
+        strategy: bucket.strategy,
+        roundsCount: bucket.pnls.length,
+        avgWinRatePercent: avg(bucket.winRates),
+        avgProfitFactor:
+          bucket.profitFactors.length > 0 ? avg(bucket.profitFactors) : 0,
+        avgPnlPercent: avg(bucket.pnls),
+        avgMaxDrawdownPercent: avg(bucket.drawdowns),
+        bestPnlPercent: Math.max(...bucket.pnls),
+        worstPnlPercent: Math.min(...bucket.pnls),
+        lastRanAtMs: bucket.lastRanAtMs,
+      });
+    }
+    entries.sort((a, b) => b.avgPnlPercent - a.avgPnlPercent);
+    return entries;
+  }
+
+  private persistHistory(
+    request: BacktestCompareAssetRequest,
+    result: BacktestCompareAssetResult,
+  ): void {
+    if (this.historyStore === undefined) return;
+    const ranAtMs = this.clock();
+    const id = `${ranAtMs.toString(36)}-${request.asset}-${request.broker}-${request.range}`;
+    this.historyStore.append({
+      id,
+      ranAtMs,
+      asset: result.asset,
+      broker: result.broker,
+      range: result.range,
+      candleCount: result.candleCount,
+      cooldownCandles: request.cooldownCandles,
+      commissionPercent: request.commissionPercent,
+      slippagePercent: request.slippagePercent,
+      results: result.results.map((r) => ({
+        strategy: r.strategy,
+        totalTrades: r.stats.totalTrades,
+        winRatePercent: r.stats.winRatePercent,
+        profitFactor: Number.isFinite(r.stats.profitFactor)
+          ? r.stats.profitFactor
+          : 0,
+        totalPnlPercent: r.stats.totalPnlPercent,
+        maxDrawdownPercent: r.stats.maxDrawdownPercent,
+      })),
+    });
   }
 
   private async fetchCandles(
@@ -163,4 +304,11 @@ export class BacktestingService {
       ...(point.volume !== null ? { volume: point.volume } : {}),
     }));
   }
+}
+
+function avg(values: readonly number[]): number {
+  if (values.length === 0) return 0;
+  let sum = 0;
+  for (const value of values) sum += value;
+  return sum / values.length;
 }

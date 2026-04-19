@@ -8,6 +8,8 @@
 
 const RUN_ASSET_ENDPOINT = "/v1/backtesting/run-asset";
 const COMPARE_ASSET_ENDPOINT = "/v1/backtesting/compare-asset";
+const HISTORY_ENDPOINT = "/v1/backtesting/history";
+const LEADERBOARD_ENDPOINT = "/v1/backtesting/leaderboard";
 
 const STRATEGIES = [
   { id: "ema_crossover", label: "EMA Crossover (trend-following)" },
@@ -35,6 +37,15 @@ function fmtDate(ms) {
   if (typeof ms !== "number" || Number.isNaN(ms)) return "—";
   try {
     return new Date(ms).toLocaleDateString();
+  } catch {
+    return "—";
+  }
+}
+
+function fmtDateTime(ms) {
+  if (typeof ms !== "number" || Number.isNaN(ms)) return "—";
+  try {
+    return new Date(ms).toLocaleString();
   } catch {
     return "—";
   }
@@ -263,6 +274,79 @@ async function executeCompare(payload, resultElement) {
   }
 }
 
+function renderHistory(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return `<div class="backtesting__empty">Nenhuma rodada comparativa registrada ainda. Ative o modo comparacao e rode um backtest.</div>`;
+  }
+  const rows = items
+    .slice(0, 20)
+    .map((entry) => {
+      const summary = entry.results
+        .map((r) => `${r.strategy}: ${fmtPct(r.totalPnlPercent)}`)
+        .join(" · ");
+      return `<tr>
+        <td>${fmtDateTime(entry.ranAtMs)}</td>
+        <td><strong>${entry.asset}</strong></td>
+        <td>${entry.broker}</td>
+        <td>${entry.range}</td>
+        <td>${entry.candleCount}</td>
+        <td>${summary}</td>
+      </tr>`;
+    })
+    .join("");
+  return `<table class="backtesting__table"><thead><tr>
+      <th>Quando</th><th>Ativo</th><th>Broker</th><th>Range</th><th>Candles</th><th>PnL por estrategia</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderLeaderboard(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return `<div class="backtesting__empty">Leaderboard vazio. Rode comparacoes para alimentar.</div>`;
+  }
+  const rows = items
+    .slice(0, 30)
+    .map((entry, index) => {
+      const pnlColor = entry.avgPnlPercent >= 0 ? "#10b981" : "#ef4444";
+      return `<tr>
+        <td>${index + 1}</td>
+        <td><strong>${entry.asset}</strong></td>
+        <td>${entry.strategy}</td>
+        <td>${entry.roundsCount}</td>
+        <td style="color:${pnlColor}"><strong>${fmtPct(entry.avgPnlPercent)}</strong></td>
+        <td>${fmtNum(entry.avgWinRatePercent, 1)}%</td>
+        <td>${fmtNum(entry.avgProfitFactor, 2)}</td>
+        <td>${fmtPct(entry.bestPnlPercent)}</td>
+        <td>${fmtPct(entry.worstPnlPercent)}</td>
+        <td>${fmtDate(entry.lastRanAtMs)}</td>
+      </tr>`;
+    })
+    .join("");
+  return `<table class="backtesting__table"><thead><tr>
+      <th>#</th><th>Ativo</th><th>Estrategia</th><th>Rodadas</th><th>PnL Medio</th><th>WinRate Medio</th><th>PF Medio</th><th>Melhor</th><th>Pior</th><th>Ultima</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+async function refreshHistoryAndLeaderboard(historyEl, leaderboardEl) {
+  historyEl.innerHTML = renderLoading();
+  leaderboardEl.innerHTML = renderLoading();
+  try {
+    const [hRes, lRes] = await Promise.all([
+      fetch(`${HISTORY_ENDPOINT}?limit=20`),
+      fetch(LEADERBOARD_ENDPOINT),
+    ]);
+    if (!hRes.ok) throw new Error(`history HTTP ${hRes.status}`);
+    if (!lRes.ok) throw new Error(`leaderboard HTTP ${lRes.status}`);
+    const hJson = await hRes.json();
+    const lJson = await lRes.json();
+    historyEl.innerHTML = renderHistory(hJson?.data?.items ?? []);
+    leaderboardEl.innerHTML = renderLeaderboard(lJson?.data?.items ?? []);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    historyEl.innerHTML = renderError(msg);
+    leaderboardEl.innerHTML = renderError(msg);
+  }
+}
+
 export function initBacktestingPanel() {
   const root = document.querySelector("#backtesting-panel");
   if (!(root instanceof HTMLElement)) {
@@ -276,13 +360,41 @@ export function initBacktestingPanel() {
       </header>
       ${buildForm()}
       <div class="backtesting__output" id="backtesting-output">${renderEmpty()}</div>
+      <section class="backtesting__history-section">
+        <header class="backtesting__section-header">
+          <h3>Historico de comparacoes</h3>
+          <button type="button" class="backtesting__refresh" id="backtesting-refresh">Atualizar</button>
+        </header>
+        <div id="backtesting-history">${renderLoading()}</div>
+      </section>
+      <section class="backtesting__history-section">
+        <header class="backtesting__section-header">
+          <h3>Leaderboard (PnL medio por ativo+estrategia)</h3>
+        </header>
+        <div id="backtesting-leaderboard">${renderLoading()}</div>
+      </section>
     </div>
   `;
 
   const form = root.querySelector("#backtesting-form");
   const output = root.querySelector("#backtesting-output");
-  if (!(form instanceof HTMLFormElement) || !(output instanceof HTMLElement)) {
+  const historyEl = root.querySelector("#backtesting-history");
+  const leaderboardEl = root.querySelector("#backtesting-leaderboard");
+  const refreshBtn = root.querySelector("#backtesting-refresh");
+  if (
+    !(form instanceof HTMLFormElement) ||
+    !(output instanceof HTMLElement) ||
+    !(historyEl instanceof HTMLElement) ||
+    !(leaderboardEl instanceof HTMLElement)
+  ) {
     return;
+  }
+
+  void refreshHistoryAndLeaderboard(historyEl, leaderboardEl);
+  if (refreshBtn instanceof HTMLButtonElement) {
+    refreshBtn.addEventListener("click", () => {
+      void refreshHistoryAndLeaderboard(historyEl, leaderboardEl);
+    });
   }
 
   form.addEventListener("submit", (event) => {
@@ -302,7 +414,9 @@ export function initBacktestingPanel() {
         ...base,
         strategies: STRATEGIES.map((s) => ({ strategy: s.id })),
       };
-      void executeCompare(payload, output);
+      void executeCompare(payload, output).then(() => {
+        void refreshHistoryAndLeaderboard(historyEl, leaderboardEl);
+      });
       return;
     }
     const payload = {

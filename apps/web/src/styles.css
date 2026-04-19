@@ -5102,3 +5102,10 @@ body.sidebar-collapsed .app-shell {
   background: rgba(16, 185, 129, 0.18);
   color: #10b981; font-weight: 700;
 }
+
+/* Backtesting History + Leaderboard (Wave 21 — ADR-061) */
+.backtesting__history-section { margin-top:1.5rem; padding-top:1rem; border-top:1px solid rgba(148,163,184,0.18); }
+.backtesting__section-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem; }
+.backtesting__section-header h3 { margin:0; font-size:1rem; color:#cbd5e1; }
+.backtesting__refresh { background:#1e293b; color:#cbd5e1; border:1px solid rgba(148,163,184,0.25); padding:0.25rem 0.6rem; border-radius:4px; cursor:pointer; font-size:0.8rem; }
+.backtesting__refresh:hover { background:#334155; }

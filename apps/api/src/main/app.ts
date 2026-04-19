@@ -44,6 +44,7 @@ import { MultiExchangeMarketDataAdapter } from "../integrations/market_data/mult
 import { BacktestEngine } from "../modules/backtesting/application/backtest-engine.js";
 import { BacktestingService } from "../modules/backtesting/application/backtesting-service.js";
 import { BacktestingController } from "../modules/backtesting/interface/backtesting-controller.js";
+import { JsonlBacktestRunStore } from "../modules/backtesting/infrastructure/jsonl-backtest-run-store.js";
 import {
   registerBacktestingInternalRoutes,
   registerBacktestingPublicRoutes,
@@ -195,9 +196,14 @@ export function buildApp() {
 
   if (env.BACKTESTING_ENABLED) {
     const backtestEngine = new BacktestEngine();
+    const backtestHistoryStore = new JsonlBacktestRunStore(
+      env.BACKTESTING_HISTORY_DATA_FILE,
+      env.BACKTESTING_HISTORY_MAX_ENTRIES,
+    );
     const backtestingService = new BacktestingService({
       engine: backtestEngine,
       marketDataAdapter: multiExchangeAdapter,
+      historyStore: backtestHistoryStore,
     });
     const backtestingController = new BacktestingController(
       backtestEngine,

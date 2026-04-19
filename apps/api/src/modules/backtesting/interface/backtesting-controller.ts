@@ -30,4 +30,30 @@ export class BacktestingController {
     const result = await this.service.compareForAsset(request.body);
     void reply.send(buildSuccessResponse(request.id, result));
   };
+
+  public listBacktestHistory = (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): void => {
+    const query = request.query as { limit?: string } | undefined;
+    let limit: number | undefined;
+    if (query?.limit !== undefined) {
+      const parsed = Number.parseInt(query.limit, 10);
+      if (Number.isFinite(parsed) && parsed > 0) limit = parsed;
+    }
+    const items = this.service.listHistory(limit);
+    void reply.send(
+      buildSuccessResponse(request.id, { count: items.length, items }),
+    );
+  };
+
+  public getBacktestLeaderboard = (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): void => {
+    const items = this.service.computeLeaderboard();
+    void reply.send(
+      buildSuccessResponse(request.id, { count: items.length, items }),
+    );
+  };
 }

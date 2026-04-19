@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import type {
   MultiExchangeMarketChart,
   MultiExchangeMarketDataAdapter,
 } from "../../../integrations/market_data/multi-exchange-market-data-adapter.js";
+import { JsonlBacktestRunStore } from "../infrastructure/jsonl-backtest-run-store.js";
 import { BacktestEngine } from "./backtest-engine.js";
 import { BacktestingService } from "./backtesting-service.js";
 
@@ -220,5 +224,100 @@ void describe("BacktestingService", () => {
     if (a.trades.length > 0) {
       assert.ok(b.trades[0]!.pnlPercent < a.trades[0]!.pnlPercent);
     }
+  });
+
+  void it("compareForAsset persiste rodada no historyStore (Wave 21)", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "bt-history-"));
+    const store = new JsonlBacktestRunStore(join(tmpDir, "history.jsonl"));
+
+    const closes: number[] = [];
+    for (let i = 0; i < 25; i += 1) closes.push(100);
+    for (let i = 0; i < 35; i += 1) closes.push(100 + (i + 1) * 1.5);
+    const adapter = buildFakeAdapter(buildChart(closes));
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+      historyStore: store,
+      clock: () => 1_700_000_000_000,
+    });
+
+    assert.equal(store.size(), 0);
+    await service.compareForAsset({
+      asset: "bitcoin",
+      strategies: [
+        { strategy: "ema_crossover" },
+        { strategy: "rsi_mean_reversion" },
+      ],
+    });
+
+    assert.equal(store.size(), 1);
+    const items = service.listHistory();
+    assert.equal(items.length, 1);
+    const first = items[0];
+    if (first === undefined) {
+      assert.fail("primeiro item ausente");
+    }
+    assert.equal(first.asset, "bitcoin");
+    assert.equal(first.results.length, 2);
+    assert.equal(first.ranAtMs, 1_700_000_000_000);
+  });
+
+  void it("computeLeaderboard agrega medias por (asset, strategy) (Wave 21)", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "bt-leaderboard-"));
+    const store = new JsonlBacktestRunStore(join(tmpDir, "history.jsonl"));
+
+    const closes: number[] = [];
+    for (let i = 0; i < 25; i += 1) closes.push(100);
+    for (let i = 0; i < 35; i += 1) closes.push(100 + (i + 1) * 1.5);
+    const adapter = buildFakeAdapter(buildChart(closes));
+    let nowMs = 1_700_000_000_000;
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+      historyStore: store,
+      clock: () => {
+        nowMs += 60_000;
+        return nowMs;
+      },
+    });
+
+    await service.compareForAsset({
+      asset: "bitcoin",
+      strategies: [{ strategy: "ema_crossover" }],
+    });
+    await service.compareForAsset({
+      asset: "bitcoin",
+      strategies: [{ strategy: "ema_crossover" }],
+    });
+    await service.compareForAsset({
+      asset: "ethereum",
+      strategies: [{ strategy: "rsi_mean_reversion" }],
+    });
+
+    const leaderboard = service.computeLeaderboard();
+    assert.equal(leaderboard.length, 2);
+    const btc = leaderboard.find(
+      (e) => e.asset === "bitcoin" && e.strategy === "ema_crossover",
+    );
+    const eth = leaderboard.find(
+      (e) => e.asset === "ethereum" && e.strategy === "rsi_mean_reversion",
+    );
+    if (btc === undefined || eth === undefined) {
+      assert.fail("buckets esperados ausentes do leaderboard");
+    }
+    assert.equal(btc.roundsCount, 2);
+    assert.equal(eth.roundsCount, 1);
+    // eth rodou depois de btc (clock incrementa a cada call)
+    assert.ok(eth.lastRanAtMs > btc.lastRanAtMs);
+  });
+
+  void it("listHistory e computeLeaderboard retornam vazio sem historyStore (Wave 21)", () => {
+    const adapter = buildFakeAdapter(buildChart([100, 100, 100]));
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+    });
+    assert.deepEqual(service.listHistory(), []);
+    assert.deepEqual(service.computeLeaderboard(), []);
   });
 });
