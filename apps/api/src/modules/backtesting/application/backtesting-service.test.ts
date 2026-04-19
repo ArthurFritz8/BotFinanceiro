@@ -1,0 +1,139 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import type {
+  MultiExchangeMarketChart,
+  MultiExchangeMarketDataAdapter,
+} from "../../../integrations/market_data/multi-exchange-market-data-adapter.js";
+import { BacktestEngine } from "./backtest-engine.js";
+import { BacktestingService } from "./backtesting-service.js";
+
+function buildChart(closes: ReadonlyArray<number>): MultiExchangeMarketChart {
+  let prevClose = closes[0]!;
+  const points = closes.map((close, i) => {
+    const open = i === 0 ? close : prevClose;
+    const high = Math.max(open, close) * 1.005;
+    const low = Math.min(open, close) * 0.995;
+    const tMs = 1_700_000_000_000 + i * 60_000;
+    prevClose = close;
+    return {
+      close,
+      high,
+      low,
+      open,
+      timestamp: new Date(tMs).toISOString(),
+      volume: null,
+    };
+  });
+  return {
+    assetId: "bitcoin",
+    broker: "bybit",
+    fetchedAt: new Date().toISOString(),
+    points,
+    range: "30d",
+    symbol: "BTCUSDT",
+  };
+}
+
+function buildFakeAdapter(
+  chart: MultiExchangeMarketChart,
+): MultiExchangeMarketDataAdapter {
+  const fake = {
+    getMarketChart: async (input: {
+      assetId: string;
+      broker: string;
+      range: string;
+    }): Promise<MultiExchangeMarketChart> => {
+      return Promise.resolve({
+        ...chart,
+        assetId: input.assetId,
+        broker: input.broker as MultiExchangeMarketChart["broker"],
+        range: input.range as MultiExchangeMarketChart["range"],
+      });
+    },
+  };
+  return fake as unknown as MultiExchangeMarketDataAdapter;
+}
+
+void describe("BacktestingService", () => {
+  void it("runForAsset busca chart via adapter e roda engine (Wave 18)", async () => {
+    const closes: number[] = [];
+    for (let i = 0; i < 25; i += 1) closes.push(100);
+    for (let i = 0; i < 35; i += 1) closes.push(100 + (i + 1) * 1.5);
+    const chart = buildChart(closes);
+    const adapter = buildFakeAdapter(chart);
+    const engine = new BacktestEngine();
+    const service = new BacktestingService({
+      engine,
+      marketDataAdapter: adapter,
+    });
+
+    const result = await service.runForAsset({
+      asset: "bitcoin",
+      strategy: "ema_crossover",
+      emaParams: {
+        fastPeriod: 5,
+        slowPeriod: 13,
+        stopLossPercent: 1,
+        takeProfitPercent: 2,
+      },
+    });
+
+    assert.equal(result.asset, "bitcoin");
+    assert.equal(result.candleCount, 60);
+    assert.ok(result.trades.length >= 1);
+  });
+
+  void it("runForAsset rejeita asset vazio", async () => {
+    const adapter = buildFakeAdapter(buildChart([100, 100]));
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+    });
+    await assert.rejects(() =>
+      service.runForAsset({ asset: "", strategy: "ema_crossover" }),
+    );
+  });
+
+  void it("runForAsset propaga commission/slippage para o engine", async () => {
+    const closes: number[] = [];
+    for (let i = 0; i < 25; i += 1) closes.push(100);
+    for (let i = 0; i < 35; i += 1) closes.push(100 + (i + 1) * 1.5);
+    const chart = buildChart(closes);
+    const adapter = buildFakeAdapter(chart);
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+    });
+
+    const baseline = await service.runForAsset({
+      asset: "bitcoin",
+      strategy: "ema_crossover",
+      emaParams: {
+        fastPeriod: 5,
+        slowPeriod: 13,
+        stopLossPercent: 1,
+        takeProfitPercent: 2,
+      },
+    });
+    const withFees = await service.runForAsset({
+      asset: "bitcoin",
+      strategy: "ema_crossover",
+      emaParams: {
+        fastPeriod: 5,
+        slowPeriod: 13,
+        stopLossPercent: 1,
+        takeProfitPercent: 2,
+      },
+      commissionPercent: 0.5,
+      slippagePercent: 0.1,
+    });
+
+    assert.equal(baseline.trades.length, withFees.trades.length);
+    if (baseline.trades.length > 0) {
+      const a = baseline.trades[0]!;
+      const b = withFees.trades[0]!;
+      assert.ok(b.pnlPercent < a.pnlPercent);
+    }
+  });
+});

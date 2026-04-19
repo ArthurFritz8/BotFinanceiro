@@ -52,7 +52,13 @@ export class BacktestEngine {
 
     for (let i = 0; i < candles.length; i += 1) {
       if (openTrade) {
-        const closed = this.tryCloseTrade(openTrade, candles[i]!, i);
+        const closed = this.tryCloseTrade(
+          openTrade,
+          candles[i]!,
+          i,
+          request.commissionPercent,
+          request.slippagePercent,
+        );
         if (closed) {
           trades.push(closed);
           cooldownUntilIndex = i + request.cooldownCandles;
@@ -67,11 +73,17 @@ export class BacktestEngine {
       if (!signal) {
         continue;
       }
+      // Slippage: entrada pior em `slippagePercent` (long paga mais, short recebe menos)
+      const slippageFactor = request.slippagePercent / 100;
+      const adjustedEntry =
+        signal.side === "long"
+          ? signal.entryPrice * (1 + slippageFactor)
+          : signal.entryPrice * (1 - slippageFactor);
       openTrade = {
         side: signal.side,
         entryIndex: i,
         entryTMs: candles[i]!.tMs,
-        entryPrice: signal.entryPrice,
+        entryPrice: adjustedEntry,
         stopPrice: signal.stopPrice,
         targetPrice: signal.targetPrice,
       };
@@ -106,6 +118,8 @@ export class BacktestEngine {
     open: OpenSimTrade,
     candle: Candle,
     index: number,
+    commissionPercent: number,
+    slippagePercent: number,
   ): BacktestTrade | null {
     if (index === open.entryIndex) {
       return null;
@@ -121,8 +135,18 @@ export class BacktestEngine {
     if (!stopHit && !targetHit) {
       return null;
     }
-    const exitPrice = stopHit ? open.stopPrice : open.targetPrice;
-    const outcome: "win" | "loss" = stopHit ? "loss" : "win";
+    const rawExit = stopHit ? open.stopPrice : open.targetPrice;
+    // Slippage na saida tambem (long sai mais barato, short recompra mais caro)
+    const slippageFactor = slippagePercent / 100;
+    const exitPrice =
+      open.side === "long"
+        ? rawExit * (1 - slippageFactor)
+        : rawExit * (1 + slippageFactor);
+    const grossPnl = computePnlPercent(open.side, open.entryPrice, exitPrice);
+    // Comissao por lado: descontada 2x (entrada + saida)
+    const totalCommissionPercent = commissionPercent * 2;
+    const netPnl = grossPnl - totalCommissionPercent;
+    const outcome: "win" | "loss" = netPnl >= 0 ? "win" : "loss";
     return {
       index: open.entryIndex,
       side: open.side,
@@ -133,7 +157,7 @@ export class BacktestEngine {
       stopPrice: open.stopPrice,
       targetPrice: open.targetPrice,
       outcome,
-      pnlPercent: computePnlPercent(open.side, open.entryPrice, exitPrice),
+      pnlPercent: netPnl,
     };
   }
 }

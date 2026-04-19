@@ -74,6 +74,16 @@ export const backtestRunRequestSchema = z.object({
    * Default: 1 (estrategia nao pode reentrar no proximo candle apos saida).
    */
   cooldownCandles: z.number().int().min(0).max(500).default(1),
+  /**
+   * Comissao por lado em % do notional (ex.: 0.1 = 0.1% por entrada +
+   * 0.1% por saida = 0.2% total descontado do PnL). Default 0 (zero-cost).
+   */
+  commissionPercent: z.number().min(0).max(5).default(0),
+  /**
+   * Slippage modelado em % aplicado contra o trader: entradas piores +
+   * saidas piores em `slippagePercent` cada. Default 0.
+   */
+  slippagePercent: z.number().min(0).max(5).default(0),
 });
 
 export type BacktestRunRequest = z.infer<typeof backtestRunRequestSchema>;

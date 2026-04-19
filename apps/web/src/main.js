@@ -14,6 +14,7 @@ import { filterOutOtc, getAssetFilterSnapshot } from "./shared/asset-filters.js"
 import { setLiveStatus, getLiveStatusSnapshot, LIVE_STATUS } from "./shared/live-status-indicator.js";
 import { initPushNotifications } from "./shared/push-notifications.js";
 import { initPaperTradingPanel } from "./shared/paper-trading-panel.js";
+import { initBacktestingPanel } from "./shared/backtesting-panel.js";
 import "./styles.css";
 
 const chatForm = document.querySelector("#chat-form");
@@ -49,6 +50,7 @@ const intelligenceStageSection = document.querySelector(".intelligence-stage");
 const memecoinsStageSection = document.querySelector(".memecoins-stage");
 const airdropsStageSection = document.querySelector(".airdrops-stage");
 const paperTradingPanelSection = document.querySelector("#paper-trading-panel");
+const backtestingPanelSection = document.querySelector("#backtesting-panel");
 const chartControlsForm = document.querySelector("#chart-controls");
 const chartAssetSelect = document.querySelector("#chart-asset");
 const chartModeSelect = document.querySelector("#chart-mode");
@@ -222,6 +224,7 @@ const APP_ROUTE_MERCADOS = "mercados";
 const APP_ROUTE_MEMECOINS = "memecoins";
 const APP_ROUTE_AIRDROPS = "airdrops";
 const APP_ROUTE_PAPER = "paper";
+const APP_ROUTE_BACKTESTING = "backtesting";
 const APP_ROUTES = new Set([
   APP_ROUTE_CHAT,
   APP_ROUTE_CHART_LAB,
@@ -229,6 +232,7 @@ const APP_ROUTES = new Set([
   APP_ROUTE_MEMECOINS,
   APP_ROUTE_AIRDROPS,
   APP_ROUTE_PAPER,
+  APP_ROUTE_BACKTESTING,
 ]);
 const APP_ROUTE_LABELS = {
   [APP_ROUTE_CHAT]: "Chat",
@@ -237,6 +241,7 @@ const APP_ROUTE_LABELS = {
   [APP_ROUTE_MEMECOINS]: "Memecoins",
   [APP_ROUTE_AIRDROPS]: "Airdrops",
   [APP_ROUTE_PAPER]: "Paper Trading",
+  [APP_ROUTE_BACKTESTING]: "Backtesting",
 };
 const APP_ROUTE_SHORTCUTS = {
   Digit7: APP_ROUTE_CHAT,
@@ -2526,6 +2531,10 @@ function resolveRouteFromLocation() {
     return APP_ROUTE_PAPER;
   }
 
+  if (pathname.endsWith(`/${APP_ROUTE_BACKTESTING}`) || hash === "#/backtesting") {
+    return APP_ROUTE_BACKTESTING;
+  }
+
   return APP_ROUTE_CHAT;
 }
 
@@ -2569,6 +2578,7 @@ function setRouteVisibility(route) {
   const showMemecoins = route === APP_ROUTE_MEMECOINS;
   const showAirdrops = route === APP_ROUTE_AIRDROPS;
   const showPaperTrading = route === APP_ROUTE_PAPER;
+  const showBacktesting = route === APP_ROUTE_BACKTESTING;
 
   if (chartDeskSection instanceof HTMLElement) {
     chartDeskSection.classList.toggle("route-hidden", !showChartDesk);
@@ -2600,6 +2610,10 @@ function setRouteVisibility(route) {
 
   if (paperTradingPanelSection instanceof HTMLElement) {
     paperTradingPanelSection.classList.toggle("route-hidden", !showPaperTrading);
+  }
+
+  if (backtestingPanelSection instanceof HTMLElement) {
+    backtestingPanelSection.classList.toggle("route-hidden", !showBacktesting);
   }
 
   if (workspaceStageSection instanceof HTMLElement) {
@@ -16597,6 +16611,7 @@ setupAirdropRadarPanel();
 setupMemecoinRadarPanel();
 initPushNotifications();
 initPaperTradingPanel();
+initBacktestingPanel();
 void (async () => {
   await initializeAuth();
 })();

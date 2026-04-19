@@ -42,8 +42,12 @@ import {
 import { AutoPaperTradingJobRunner } from "../jobs/auto-paper-trading-job-runner.js";
 import { MultiExchangeMarketDataAdapter } from "../integrations/market_data/multi-exchange-market-data-adapter.js";
 import { BacktestEngine } from "../modules/backtesting/application/backtest-engine.js";
+import { BacktestingService } from "../modules/backtesting/application/backtesting-service.js";
 import { BacktestingController } from "../modules/backtesting/interface/backtesting-controller.js";
-import { registerBacktestingInternalRoutes } from "../modules/backtesting/interface/backtesting-routes.js";
+import {
+  registerBacktestingInternalRoutes,
+  registerBacktestingPublicRoutes,
+} from "../modules/backtesting/interface/backtesting-routes.js";
 import { env } from "../shared/config/env.js";
 import { httpErrorHandler } from "../shared/errors/http-error-handler.js";
 import { logger } from "../shared/logger/logger.js";
@@ -191,8 +195,22 @@ export function buildApp() {
 
   if (env.BACKTESTING_ENABLED) {
     const backtestEngine = new BacktestEngine();
-    const backtestingController = new BacktestingController(backtestEngine);
+    const backtestingService = new BacktestingService({
+      engine: backtestEngine,
+      marketDataAdapter: multiExchangeAdapter,
+    });
+    const backtestingController = new BacktestingController(
+      backtestEngine,
+      backtestingService,
+    );
     registerBacktestingInternalRoutes(app, backtestingController);
+    void app.register(
+      (instance, _, done) => {
+        registerBacktestingPublicRoutes(instance, backtestingController);
+        done();
+      },
+      { prefix: "/v1" },
+    );
   }
 
   void app.register(

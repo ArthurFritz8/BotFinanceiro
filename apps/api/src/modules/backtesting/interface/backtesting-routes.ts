@@ -38,3 +38,15 @@ export function registerBacktestingInternalRoutes(
     controller.runBacktest,
   );
 }
+
+/**
+ * Rota publica para UI: aceita asset+broker+range+strategy, busca candles
+ * via MultiExchangeAdapter (zero-cost) e roda backtest. Cap de 1y/365
+ * candles ja limita CPU. Rate-limit publico (ADR-050) protege.
+ */
+export function registerBacktestingPublicRoutes(
+  app: FastifyInstance,
+  controller: BacktestingController,
+): void {
+  app.post("/backtesting/run-asset", controller.runBacktestForAsset);
+}

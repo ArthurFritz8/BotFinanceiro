@@ -179,4 +179,85 @@ void describe("BacktestEngine", () => {
       assert.ok(first.pnlPercent < 0);
     }
   });
+
+  void it("commissionPercent reduz pnl em ~2x o valor configurado (Wave 18)", () => {
+    const engine = new BacktestEngine();
+    const closes: number[] = [];
+    for (let i = 0; i < 25; i += 1) closes.push(100);
+    for (let i = 0; i < 35; i += 1) closes.push(100 + (i + 1) * 1.5);
+    const candles = buildCandles(closes);
+    const baseline = engine.run({
+      asset: "synthetic",
+      candles,
+      strategy: "ema_crossover",
+      emaParams: {
+        fastPeriod: 5,
+        slowPeriod: 13,
+        stopLossPercent: 1,
+        takeProfitPercent: 2,
+      },
+    });
+    const withCommission = engine.run({
+      asset: "synthetic",
+      candles,
+      strategy: "ema_crossover",
+      emaParams: {
+        fastPeriod: 5,
+        slowPeriod: 13,
+        stopLossPercent: 1,
+        takeProfitPercent: 2,
+      },
+      commissionPercent: 0.5,
+    });
+    assert.equal(baseline.trades.length, withCommission.trades.length);
+    for (let i = 0; i < baseline.trades.length; i += 1) {
+      const base = baseline.trades[i]!;
+      const fee = withCommission.trades[i]!;
+      const delta = base.pnlPercent - fee.pnlPercent;
+      assert.ok(
+        Math.abs(delta - 1.0) < 1e-6,
+        `trade ${i}: esperado delta ~1.0, recebido ${delta}`,
+      );
+    }
+  });
+
+  void it("slippagePercent piora entry e exit (Wave 18)", () => {
+    const engine = new BacktestEngine();
+    const closes: number[] = [];
+    for (let i = 0; i < 25; i += 1) closes.push(100);
+    for (let i = 0; i < 35; i += 1) closes.push(100 + (i + 1) * 1.5);
+    const candles = buildCandles(closes);
+    const baseline = engine.run({
+      asset: "synthetic",
+      candles,
+      strategy: "ema_crossover",
+      emaParams: {
+        fastPeriod: 5,
+        slowPeriod: 13,
+        stopLossPercent: 1,
+        takeProfitPercent: 2,
+      },
+    });
+    const withSlippage = engine.run({
+      asset: "synthetic",
+      candles,
+      strategy: "ema_crossover",
+      emaParams: {
+        fastPeriod: 5,
+        slowPeriod: 13,
+        stopLossPercent: 1,
+        takeProfitPercent: 2,
+      },
+      slippagePercent: 0.5,
+    });
+    assert.equal(baseline.trades.length, withSlippage.trades.length);
+    const longBaseline = baseline.trades.find((t) => t.side === "long");
+    const longSlip = withSlippage.trades.find((t) => t.side === "long");
+    if (longBaseline && longSlip) {
+      // entry pior (mais alto) e exit pior (mais baixo) -> pnl menor
+      assert.ok(longSlip.entryPrice > longBaseline.entryPrice);
+      assert.ok(longSlip.exitPrice < longBaseline.exitPrice);
+      assert.ok(longSlip.pnlPercent < longBaseline.pnlPercent);
+    }
+  });
 });

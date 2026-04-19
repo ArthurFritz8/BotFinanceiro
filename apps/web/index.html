@@ -136,6 +136,22 @@
             </span>
             <span class="sidebar-nav-label">Paper</span>
           </button>
+          <button
+            type="button"
+            class="sidebar-nav-button"
+            data-route="backtesting"
+            data-label="Backtest"
+            title="Backtesting Engine"
+          >
+            <span class="sidebar-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 4v16h16" />
+                <path d="M4 16h4v4" />
+                <path d="M9 12l3-3 3 3 4-5" />
+              </svg>
+            </span>
+            <span class="sidebar-nav-label">Backtest</span>
+          </button>
         </nav>
       </aside>
 
@@ -1027,6 +1043,8 @@
         <div class="paper-trading__stats" aria-live="polite">Carregando estatísticas...</div>
         <div class="paper-trading__trades" aria-live="polite"></div>
       </section>
+
+      <section id="backtesting-panel" class="backtesting reveal reveal-delay-2 route-hidden"></section>
     </main>
 
     <section id="auth-gate" class="auth-gate is-hidden" aria-live="polite">
