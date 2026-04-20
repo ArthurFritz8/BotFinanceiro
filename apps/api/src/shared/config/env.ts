@@ -78,6 +78,13 @@ const environmentSchema = z
       .min(0)
       .max(7 * 24 * 60 * 60 * 1000)
       .default(60 * 60 * 1000),
+    BACKTESTING_REGIME_ALERTS_SCAN_ENABLED: booleanFromString.default("true"),
+    BACKTESTING_REGIME_ALERTS_SCAN_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(60_000)
+      .max(24 * 60 * 60 * 1000)
+      .default(15 * 60 * 1000),
     SCHEDULER_ENABLED: booleanFromString.default("true"),
     SCHEDULER_ECONOMY_MODE: booleanFromString.default("false"),
     SCHEDULER_JITTER_MAX_PERCENT: z.coerce.number().int().min(0).max(100).default(20),

@@ -120,6 +120,7 @@ Politica de retencao:
 34. ADR 062: `docs/ADR/ADR-062-backtest-regime-alerts.md`
 35. ADR 063: `docs/ADR/ADR-063-backtest-alerts-history-recurrence.md`
 36. ADR 064: `docs/ADR/ADR-064-regime-alerts-push-notifications.md`
+37. ADR 065: `docs/ADR/ADR-065-regime-alerts-periodic-scanner.md`
 
 ## Relatorio completo desta entrega
 

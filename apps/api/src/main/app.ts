@@ -40,6 +40,7 @@ import {
   registerPaperTradingPublicRoutes,
 } from "../modules/paper_trading/interface/paper-trading-routes.js";
 import { AutoPaperTradingJobRunner } from "../jobs/auto-paper-trading-job-runner.js";
+import { RegimeAlertsScannerJobRunner } from "../jobs/regime-alerts-scanner-job-runner.js";
 import { MultiExchangeMarketDataAdapter } from "../integrations/market_data/multi-exchange-market-data-adapter.js";
 import { BacktestEngine } from "../modules/backtesting/application/backtest-engine.js";
 import { BacktestingService } from "../modules/backtesting/application/backtesting-service.js";
@@ -225,6 +226,15 @@ export function buildApp() {
       },
       { prefix: "/v1" },
     );
+
+    const regimeAlertsScannerJobRunner = new RegimeAlertsScannerJobRunner({
+      service: backtestingService,
+    });
+    regimeAlertsScannerJobRunner.start();
+    app.addHook("onClose", (_instance, done) => {
+      regimeAlertsScannerJobRunner.stop();
+      done();
+    });
   }
 
   void app.register(
