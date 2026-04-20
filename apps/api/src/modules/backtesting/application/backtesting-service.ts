@@ -100,6 +100,33 @@ export interface LeaderboardEntry {
 }
 
 /**
+ * Alerta de degradacao de regime (Wave 22 / ADR-062). Comparacao entre
+ * baseline (primeiras N rodadas de uma combinacao asset+strategy) e
+ * recente (ultimas M rodadas). `severity` escala com a queda: warning
+ * (>= threshold), critical (>= 2 * threshold).
+ */
+export interface RegimeAlert {
+  readonly asset: string;
+  readonly strategy: StrategyKind;
+  readonly baselineRoundsCount: number;
+  readonly recentRoundsCount: number;
+  readonly baselineAvgPnlPercent: number;
+  readonly recentAvgPnlPercent: number;
+  readonly deltaPnlPercent: number;
+  readonly severity: "warning" | "critical";
+  readonly lastRanAtMs: number;
+}
+
+export interface RegimeAlertOptions {
+  /** Numero minimo de rodadas para considerar baseline + recente (default 6: 3+3). */
+  readonly minTotalRounds?: number;
+  /** Tamanho da janela recente em rodadas (default 3). */
+  readonly recentWindow?: number;
+  /** Queda em pontos percentuais para emitir warning (default 5). */
+  readonly warningThresholdPercent?: number;
+}
+
+/**
  * BacktestingService: orquestra fetch de OHLC histórico via
  * MultiExchangeMarketDataAdapter (zero-cost — exchanges publicas) e
  * delega a execucao para o BacktestEngine puro. Permite ao frontend
@@ -253,6 +280,74 @@ export class BacktestingService {
     }
     entries.sort((a, b) => b.avgPnlPercent - a.avgPnlPercent);
     return entries;
+  }
+
+  /**
+   * Detecta degradacao de regime: compara avg PnL do baseline (rodadas
+   * antigas) com janela recente para cada (asset, strategy). Emite alerta
+   * quando `recent - baseline <= -warningThreshold`. Severity critical se
+   * a queda for >= 2x o threshold. Ordenado por deltaPnlPercent ascendente
+   * (piores degradacoes primeiro).
+   */
+  public computeRegimeAlerts(
+    options: RegimeAlertOptions = {},
+  ): readonly RegimeAlert[] {
+    if (this.historyStore === undefined) return [];
+    const recentWindow = options.recentWindow ?? 3;
+    const warningThreshold = options.warningThresholdPercent ?? 5;
+    const minTotalRounds = options.minTotalRounds ?? recentWindow * 2;
+    if (recentWindow < 1) return [];
+
+    const buckets = new Map<
+      string,
+      {
+        asset: string;
+        strategy: StrategyKind;
+        runs: { ranAtMs: number; pnl: number }[];
+      }
+    >();
+    for (const entry of this.historyStore.list()) {
+      for (const result of entry.results) {
+        const key = `${entry.asset}::${result.strategy}`;
+        let bucket = buckets.get(key);
+        if (bucket === undefined) {
+          bucket = { asset: entry.asset, strategy: result.strategy, runs: [] };
+          buckets.set(key, bucket);
+        }
+        bucket.runs.push({
+          ranAtMs: entry.ranAtMs,
+          pnl: result.totalPnlPercent,
+        });
+      }
+    }
+
+    const alerts: RegimeAlert[] = [];
+    for (const bucket of buckets.values()) {
+      if (bucket.runs.length < minTotalRounds) continue;
+      bucket.runs.sort((a, b) => a.ranAtMs - b.ranAtMs);
+      const recent = bucket.runs.slice(-recentWindow);
+      const baseline = bucket.runs.slice(0, bucket.runs.length - recentWindow);
+      if (baseline.length === 0) continue;
+      const baselineAvg = avg(baseline.map((r) => r.pnl));
+      const recentAvg = avg(recent.map((r) => r.pnl));
+      const delta = recentAvg - baselineAvg;
+      if (delta > -warningThreshold) continue;
+      const severity: RegimeAlert["severity"] =
+        delta <= -2 * warningThreshold ? "critical" : "warning";
+      alerts.push({
+        asset: bucket.asset,
+        strategy: bucket.strategy,
+        baselineRoundsCount: baseline.length,
+        recentRoundsCount: recent.length,
+        baselineAvgPnlPercent: baselineAvg,
+        recentAvgPnlPercent: recentAvg,
+        deltaPnlPercent: delta,
+        severity,
+        lastRanAtMs: recent[recent.length - 1]!.ranAtMs,
+      });
+    }
+    alerts.sort((a, b) => a.deltaPnlPercent - b.deltaPnlPercent);
+    return alerts;
   }
 
   private persistHistory(

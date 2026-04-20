@@ -5109,3 +5109,7 @@ body.sidebar-collapsed .app-shell {
 .backtesting__section-header h3 { margin:0; font-size:1rem; color:#cbd5e1; }
 .backtesting__refresh { background:#1e293b; color:#cbd5e1; border:1px solid rgba(148,163,184,0.25); padding:0.25rem 0.6rem; border-radius:4px; cursor:pointer; font-size:0.8rem; }
 .backtesting__refresh:hover { background:#334155; }
+
+/* Backtesting Regime Alerts (Wave 22 — ADR-062) */
+.backtesting__alert--warning td { background:rgba(245,158,11,0.12); color:#fbbf24; }
+.backtesting__alert--critical td { background:rgba(239,68,68,0.18); color:#f87171; font-weight:600; }

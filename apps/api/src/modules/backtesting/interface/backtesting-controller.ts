@@ -56,4 +56,42 @@ export class BacktestingController {
       buildSuccessResponse(request.id, { count: items.length, items }),
     );
   };
+
+  public getBacktestRegimeAlerts = (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): void => {
+    const query = request.query as
+      | {
+          recentWindow?: string;
+          warningThresholdPercent?: string;
+          minTotalRounds?: string;
+        }
+      | undefined;
+    const options: {
+      recentWindow?: number;
+      warningThresholdPercent?: number;
+      minTotalRounds?: number;
+    } = {};
+    if (query?.recentWindow !== undefined) {
+      const parsed = Number.parseInt(query.recentWindow, 10);
+      if (Number.isFinite(parsed) && parsed >= 1) options.recentWindow = parsed;
+    }
+    if (query?.warningThresholdPercent !== undefined) {
+      const parsed = Number.parseFloat(query.warningThresholdPercent);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        options.warningThresholdPercent = parsed;
+      }
+    }
+    if (query?.minTotalRounds !== undefined) {
+      const parsed = Number.parseInt(query.minTotalRounds, 10);
+      if (Number.isFinite(parsed) && parsed >= 2) {
+        options.minTotalRounds = parsed;
+      }
+    }
+    const items = this.service.computeRegimeAlerts(options);
+    void reply.send(
+      buildSuccessResponse(request.id, { count: items.length, items }),
+    );
+  };
 }

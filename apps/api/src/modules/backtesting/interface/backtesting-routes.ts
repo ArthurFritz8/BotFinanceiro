@@ -52,4 +52,5 @@ export function registerBacktestingPublicRoutes(
   app.post("/backtesting/compare-asset", controller.compareBacktestForAsset);
   app.get("/backtesting/history", controller.listBacktestHistory);
   app.get("/backtesting/leaderboard", controller.getBacktestLeaderboard);
+  app.get("/backtesting/regime-alerts", controller.getBacktestRegimeAlerts);
 }

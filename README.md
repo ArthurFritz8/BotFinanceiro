@@ -117,6 +117,7 @@ Politica de retencao:
 31. ADR 059: `docs/ADR/ADR-059-smc-confluence-estrategia-backtest.md`
 32. ADR 060: `docs/ADR/ADR-060-backtest-comparativo-multi-estrategia.md`
 33. ADR 061: `docs/ADR/ADR-061-backtest-historico-leaderboard.md`
+34. ADR 062: `docs/ADR/ADR-062-backtest-regime-alerts.md`
 
 ## Relatorio completo desta entrega
 

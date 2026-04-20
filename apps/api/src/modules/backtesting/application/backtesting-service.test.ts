@@ -320,4 +320,145 @@ void describe("BacktestingService", () => {
     assert.deepEqual(service.listHistory(), []);
     assert.deepEqual(service.computeLeaderboard(), []);
   });
+
+  void it("computeRegimeAlerts emite warning quando recente cai >= threshold (Wave 22)", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "bt-alerts-"));
+    const store = new JsonlBacktestRunStore(join(tmpDir, "history.jsonl"));
+    const adapter = buildFakeAdapter(buildChart([100, 100, 100]));
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+      historyStore: store,
+    });
+
+    // 6 rodadas: 3 baseline (PnL 10) + 3 recentes (PnL 2). Delta = -8.
+    let nowMs = 1_700_000_000_000;
+    const baselinePnls = [10, 10, 10, 2, 2, 2];
+    for (const pnl of baselinePnls) {
+      nowMs += 60_000;
+      store.append({
+        id: `id-${nowMs}`,
+        ranAtMs: nowMs,
+        asset: "bitcoin",
+        broker: "bybit",
+        range: "30d",
+        candleCount: 60,
+        cooldownCandles: 1,
+        commissionPercent: 0,
+        slippagePercent: 0,
+        results: [
+          {
+            strategy: "ema_crossover",
+            totalTrades: 5,
+            winRatePercent: 50,
+            profitFactor: 1.5,
+            totalPnlPercent: pnl,
+            maxDrawdownPercent: 1,
+          },
+        ],
+      });
+    }
+
+    const alerts = service.computeRegimeAlerts({
+      recentWindow: 3,
+      warningThresholdPercent: 5,
+    });
+    assert.equal(alerts.length, 1);
+    const alert = alerts[0];
+    if (alert === undefined) assert.fail("alerta esperado ausente");
+    assert.equal(alert.asset, "bitcoin");
+    assert.equal(alert.strategy, "ema_crossover");
+    assert.equal(alert.severity, "warning");
+    assert.equal(alert.baselineRoundsCount, 3);
+    assert.equal(alert.recentRoundsCount, 3);
+    assert.ok(alert.deltaPnlPercent < -5);
+  });
+
+  void it("computeRegimeAlerts emite critical quando queda >= 2x threshold (Wave 22)", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "bt-alerts-"));
+    const store = new JsonlBacktestRunStore(join(tmpDir, "history.jsonl"));
+    const adapter = buildFakeAdapter(buildChart([100, 100, 100]));
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+      historyStore: store,
+    });
+
+    let nowMs = 1_700_000_000_000;
+    const pnls = [20, 20, 20, -5, -5, -5];
+    for (const pnl of pnls) {
+      nowMs += 60_000;
+      store.append({
+        id: `id-${nowMs}`,
+        ranAtMs: nowMs,
+        asset: "ethereum",
+        broker: "bybit",
+        range: "30d",
+        candleCount: 60,
+        cooldownCandles: 1,
+        commissionPercent: 0,
+        slippagePercent: 0,
+        results: [
+          {
+            strategy: "rsi_mean_reversion",
+            totalTrades: 5,
+            winRatePercent: 50,
+            profitFactor: 1.5,
+            totalPnlPercent: pnl,
+            maxDrawdownPercent: 1,
+          },
+        ],
+      });
+    }
+
+    const alerts = service.computeRegimeAlerts({
+      recentWindow: 3,
+      warningThresholdPercent: 5,
+    });
+    assert.equal(alerts.length, 1);
+    const alert = alerts[0];
+    if (alert === undefined) assert.fail("alerta esperado ausente");
+    assert.equal(alert.severity, "critical");
+  });
+
+  void it("computeRegimeAlerts ignora buckets com poucas rodadas (Wave 22)", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "bt-alerts-"));
+    const store = new JsonlBacktestRunStore(join(tmpDir, "history.jsonl"));
+    const adapter = buildFakeAdapter(buildChart([100, 100, 100]));
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+      historyStore: store,
+    });
+
+    // Apenas 4 rodadas — abaixo do minTotalRounds default (6 = 3+3).
+    let nowMs = 1_700_000_000_000;
+    for (const pnl of [50, 50, -50, -50]) {
+      nowMs += 60_000;
+      store.append({
+        id: `id-${nowMs}`,
+        ranAtMs: nowMs,
+        asset: "bitcoin",
+        broker: "bybit",
+        range: "30d",
+        candleCount: 60,
+        cooldownCandles: 1,
+        commissionPercent: 0,
+        slippagePercent: 0,
+        results: [
+          {
+            strategy: "ema_crossover",
+            totalTrades: 5,
+            winRatePercent: 50,
+            profitFactor: 1.5,
+            totalPnlPercent: pnl,
+            maxDrawdownPercent: 1,
+          },
+        ],
+      });
+    }
+
+    const alerts = service.computeRegimeAlerts();
+    assert.equal(alerts.length, 0);
+  });
 });
