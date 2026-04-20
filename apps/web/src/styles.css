@@ -5113,3 +5113,7 @@ body.sidebar-collapsed .app-shell {
 /* Backtesting Regime Alerts (Wave 22 — ADR-062) */
 .backtesting__alert--warning td { background:rgba(245,158,11,0.12); color:#fbbf24; }
 .backtesting__alert--critical td { background:rgba(239,68,68,0.18); color:#f87171; font-weight:600; }
+
+/* Backtesting Recurrence Badges (Wave 23 — ADR-063) */
+.backtesting__badge { display:inline-block; padding:0 .35rem; border-radius:8px; background:#7c2d12; color:#fed7aa; font-size:.7rem; margin-left:.35rem; }
+.backtesting__badge--muted { background:#374151; color:#cbd5e1; }

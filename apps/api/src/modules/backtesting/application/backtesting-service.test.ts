@@ -9,6 +9,7 @@ import type {
   MultiExchangeMarketDataAdapter,
 } from "../../../integrations/market_data/multi-exchange-market-data-adapter.js";
 import { JsonlBacktestRunStore } from "../infrastructure/jsonl-backtest-run-store.js";
+import { JsonlRegimeAlertsHistoryStore } from "../infrastructure/jsonl-regime-alerts-history-store.js";
 import { BacktestEngine } from "./backtest-engine.js";
 import { BacktestingService } from "./backtesting-service.js";
 
@@ -460,5 +461,169 @@ void describe("BacktestingService", () => {
 
     const alerts = service.computeRegimeAlerts();
     assert.equal(alerts.length, 0);
+  });
+
+  void it("computeRegimeAlerts persiste apenas critical no alertsHistoryStore (Wave 23)", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "bt-ah-"));
+    const histStore = new JsonlBacktestRunStore(join(tmpDir, "h.jsonl"));
+    const alertsStore = new JsonlRegimeAlertsHistoryStore(
+      join(tmpDir, "a.jsonl"),
+    );
+    const adapter = buildFakeAdapter(buildChart([100, 100, 100]));
+    const nowMs = 1_700_000_000_000;
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+      historyStore: histStore,
+      alertsHistoryStore: alertsStore,
+      clock: () => nowMs,
+    });
+
+    // Bucket A: warning (delta -8) — NAO persiste
+    let ts = 1_700_000_000_000;    for (const pnl of [10, 10, 10, 2, 2, 2]) {
+      ts += 60_000;
+      histStore.append({
+        id: `a-${ts}`,
+        ranAtMs: ts,
+        asset: "bitcoin",
+        broker: "bybit",
+        range: "30d",
+        candleCount: 60,
+        cooldownCandles: 1,
+        commissionPercent: 0,
+        slippagePercent: 0,
+        results: [
+          {
+            strategy: "ema_crossover",
+            totalTrades: 5,
+            winRatePercent: 50,
+            profitFactor: 1.5,
+            totalPnlPercent: pnl,
+            maxDrawdownPercent: 1,
+          },
+        ],
+      });
+    }
+
+    // Bucket B: critical (delta -25) — persiste
+    for (const pnl of [20, 20, 20, -5, -5, -5]) {
+      ts += 60_000;
+      histStore.append({
+        id: `b-${ts}`,
+        ranAtMs: ts,
+        asset: "ethereum",
+        broker: "bybit",
+        range: "30d",
+        candleCount: 60,
+        cooldownCandles: 1,
+        commissionPercent: 0,
+        slippagePercent: 0,
+        results: [
+          {
+            strategy: "rsi_mean_reversion",
+            totalTrades: 5,
+            winRatePercent: 50,
+            profitFactor: 1.5,
+            totalPnlPercent: pnl,
+            maxDrawdownPercent: 1,
+          },
+        ],
+      });
+    }
+
+    const alerts = service.computeRegimeAlerts({
+      recentWindow: 3,
+      warningThresholdPercent: 5,
+    });
+    assert.equal(alerts.length, 2);
+    const persisted = service.listRegimeAlertsHistory();
+    assert.equal(persisted.length, 1);
+    const first = persisted[0];
+    if (first === undefined) assert.fail("entry esperada ausente");
+    assert.equal(first.severity, "critical");
+    assert.equal(first.asset, "ethereum");
+    assert.equal(first.recordedAtMs, nowMs);
+  });
+
+  void it("computeRegimeAlerts escala warning para critical apos recurrenceEscalationCount (Wave 23)", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "bt-rec-"));
+    const histStore = new JsonlBacktestRunStore(join(tmpDir, "h.jsonl"));
+    const alertsStore = new JsonlRegimeAlertsHistoryStore(
+      join(tmpDir, "a.jsonl"),
+    );
+    const adapter = buildFakeAdapter(buildChart([100, 100, 100]));
+    const nowMs = 1_700_000_000_000;
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+      historyStore: histStore,
+      alertsHistoryStore: alertsStore,
+      clock: () => nowMs,
+    });
+
+    let ts = 1_700_000_000_000;
+    for (const pnl of [10, 10, 10, 2, 2, 2]) {
+      ts += 60_000;
+      histStore.append({
+        id: `w-${ts}`,
+        ranAtMs: ts,
+        asset: "bitcoin",
+        broker: "bybit",
+        range: "30d",
+        candleCount: 60,
+        cooldownCandles: 1,
+        commissionPercent: 0,
+        slippagePercent: 0,
+        results: [
+          {
+            strategy: "ema_crossover",
+            totalTrades: 5,
+            winRatePercent: 50,
+            profitFactor: 1.5,
+            totalPnlPercent: pnl,
+            maxDrawdownPercent: 1,
+          },
+        ],
+      });
+    }
+
+    // Pre-popula 3 alertas critical recentes para o mesmo bucket
+    for (let i = 0; i < 3; i++) {
+      alertsStore.append({
+        id: `seed-${i}`,
+        recordedAtMs: nowMs - 60_000 * (i + 1),
+        asset: "bitcoin",
+        strategy: "ema_crossover",
+        baselineAvgPnlPercent: 10,
+        recentAvgPnlPercent: -10,
+        deltaPnlPercent: -20,
+        baselineRoundsCount: 3,
+        recentRoundsCount: 3,
+        severity: "critical",
+        lastRanAtMs: nowMs - 60_000 * (i + 1),
+      });
+    }
+
+    const alerts = service.computeRegimeAlerts({
+      recentWindow: 3,
+      warningThresholdPercent: 5,
+      recurrenceEscalationCount: 3,
+    });
+    assert.equal(alerts.length, 1);
+    const alert = alerts[0];
+    if (alert === undefined) assert.fail("alerta esperado ausente");
+    // Delta -8 normalmente seria warning, mas escalado por recorrencia
+    assert.equal(alert.severity, "critical");
+    assert.equal(alert.escalatedByRecurrence, true);
+    assert.equal(alert.recurrenceCount, 3);
+  });
+
+  void it("listRegimeAlertsHistory retorna vazio sem alertsHistoryStore (Wave 23)", () => {
+    const adapter = buildFakeAdapter(buildChart([100, 100, 100]));
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+    });
+    assert.deepEqual(service.listRegimeAlertsHistory(), []);
   });
 });

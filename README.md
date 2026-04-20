@@ -118,6 +118,7 @@ Politica de retencao:
 32. ADR 060: `docs/ADR/ADR-060-backtest-comparativo-multi-estrategia.md`
 33. ADR 061: `docs/ADR/ADR-061-backtest-historico-leaderboard.md`
 34. ADR 062: `docs/ADR/ADR-062-backtest-regime-alerts.md`
+35. ADR 063: `docs/ADR/ADR-063-backtest-alerts-history-recurrence.md`
 
 ## Relatorio completo desta entrega
 

@@ -14,6 +14,10 @@ import type {
   BacktestHistoryEntry,
   JsonlBacktestRunStore,
 } from "../infrastructure/jsonl-backtest-run-store.js";
+import type {
+  JsonlRegimeAlertsHistoryStore,
+  RegimeAlertHistoryEntry,
+} from "../infrastructure/jsonl-regime-alerts-history-store.js";
 import type { BacktestEngine } from "./backtest-engine.js";
 
 export const backtestRunAssetRequestSchema = z.object({
@@ -76,6 +80,8 @@ interface BacktestingServiceOptions {
   readonly marketDataAdapter: MultiExchangeMarketDataAdapter;
   /** Store opcional para persistir rodadas comparativas (Wave 21 / ADR-061). */
   readonly historyStore?: JsonlBacktestRunStore;
+  /** Store opcional para historico de alertas critical de regime (Wave 23 / ADR-063). */
+  readonly alertsHistoryStore?: JsonlRegimeAlertsHistoryStore;
   /** Clock injetavel para tests (default Date.now). */
   readonly clock?: () => number;
 }
@@ -115,6 +121,17 @@ export interface RegimeAlert {
   readonly deltaPnlPercent: number;
   readonly severity: "warning" | "critical";
   readonly lastRanAtMs: number;
+  /**
+   * Quantos alertas critical anteriores existem no historico para essa
+   * combinacao (asset, strategy) dentro da `recurrenceWindowMs` (Wave 23
+   * / ADR-063). 0 quando nao ha alertsHistoryStore configurado.
+   */
+  readonly recurrenceCount: number;
+  /**
+   * `true` quando o alerta foi promovido de warning -> critical por
+   * recorrencia (Wave 23 / ADR-063).
+   */
+  readonly escalatedByRecurrence: boolean;
 }
 
 export interface RegimeAlertOptions {
@@ -124,6 +141,18 @@ export interface RegimeAlertOptions {
   readonly recentWindow?: number;
   /** Queda em pontos percentuais para emitir warning (default 5). */
   readonly warningThresholdPercent?: number;
+  /**
+   * Janela retroativa em ms para contagem de recorrencia (Wave 23 /
+   * ADR-063). Default 7 dias. `recurrenceCount` em cada alerta retornado
+   * indica quantos alertas critical ja existem para o mesmo bucket dentro
+   * dessa janela ANTES da gravacao atual.
+   */
+  readonly recurrenceWindowMs?: number;
+  /**
+   * Limite de alertas critical recentes para escalar warning -> critical
+   * (Wave 23 / ADR-063). Default 3.
+   */
+  readonly recurrenceEscalationCount?: number;
 }
 
 /**
@@ -136,12 +165,16 @@ export class BacktestingService {
   private readonly engine: BacktestEngine;
   private readonly marketDataAdapter: MultiExchangeMarketDataAdapter;
   private readonly historyStore: JsonlBacktestRunStore | undefined;
+  private readonly alertsHistoryStore:
+    | JsonlRegimeAlertsHistoryStore
+    | undefined;
   private readonly clock: () => number;
 
   public constructor(options: BacktestingServiceOptions) {
     this.engine = options.engine;
     this.marketDataAdapter = options.marketDataAdapter;
     this.historyStore = options.historyStore;
+    this.alertsHistoryStore = options.alertsHistoryStore;
     this.clock = options.clock ?? ((): number => Date.now());
   }
 
@@ -321,6 +354,11 @@ export class BacktestingService {
       }
     }
 
+    const recurrenceWindowMs =
+      options.recurrenceWindowMs ?? 7 * 24 * 60 * 60 * 1000;
+    const recurrenceEscalationCount = options.recurrenceEscalationCount ?? 3;
+    const nowMs = this.clock();
+
     const alerts: RegimeAlert[] = [];
     for (const bucket of buckets.values()) {
       if (bucket.runs.length < minTotalRounds) continue;
@@ -328,13 +366,30 @@ export class BacktestingService {
       const recent = bucket.runs.slice(-recentWindow);
       const baseline = bucket.runs.slice(0, bucket.runs.length - recentWindow);
       if (baseline.length === 0) continue;
+      const last = recent[recent.length - 1];
+      if (last === undefined) continue;
       const baselineAvg = avg(baseline.map((r) => r.pnl));
       const recentAvg = avg(recent.map((r) => r.pnl));
       const delta = recentAvg - baselineAvg;
       if (delta > -warningThreshold) continue;
-      const severity: RegimeAlert["severity"] =
+      const baseSeverity: RegimeAlert["severity"] =
         delta <= -2 * warningThreshold ? "critical" : "warning";
-      alerts.push({
+      const recurrenceCount =
+        this.alertsHistoryStore !== undefined
+          ? this.alertsHistoryStore.countRecentForBucket(
+              bucket.asset,
+              bucket.strategy,
+              nowMs,
+              recurrenceWindowMs,
+            )
+          : 0;
+      const escalatedByRecurrence =
+        baseSeverity === "warning" &&
+        recurrenceCount >= recurrenceEscalationCount;
+      const severity: RegimeAlert["severity"] = escalatedByRecurrence
+        ? "critical"
+        : baseSeverity;
+      const alert: RegimeAlert = {
         asset: bucket.asset,
         strategy: bucket.strategy,
         baselineRoundsCount: baseline.length,
@@ -343,11 +398,48 @@ export class BacktestingService {
         recentAvgPnlPercent: recentAvg,
         deltaPnlPercent: delta,
         severity,
-        lastRanAtMs: recent[recent.length - 1]!.ranAtMs,
-      });
+        lastRanAtMs: last.ranAtMs,
+        recurrenceCount,
+        escalatedByRecurrence,
+      };
+      alerts.push(alert);
+      if (severity === "critical" && this.alertsHistoryStore !== undefined) {
+        this.persistRegimeAlert(alert, nowMs);
+      }
     }
     alerts.sort((a, b) => a.deltaPnlPercent - b.deltaPnlPercent);
     return alerts;
+  }
+
+  /**
+   * Lista o historico persistido de alertas critical de regime
+   * (Wave 23 / ADR-063), mais recentes primeiro. Retorna [] sem store.
+   */
+  public listRegimeAlertsHistory(
+    limit?: number,
+  ): readonly RegimeAlertHistoryEntry[] {
+    if (this.alertsHistoryStore === undefined) return [];
+    const all = this.alertsHistoryStore.list();
+    if (limit === undefined || limit <= 0) return all;
+    return all.slice(0, limit);
+  }
+
+  private persistRegimeAlert(alert: RegimeAlert, nowMs: number): void {
+    if (this.alertsHistoryStore === undefined) return;
+    const id = `${nowMs.toString(36)}-${alert.asset}-${alert.strategy}`;
+    this.alertsHistoryStore.append({
+      id,
+      recordedAtMs: nowMs,
+      asset: alert.asset,
+      strategy: alert.strategy,
+      baselineAvgPnlPercent: alert.baselineAvgPnlPercent,
+      recentAvgPnlPercent: alert.recentAvgPnlPercent,
+      deltaPnlPercent: alert.deltaPnlPercent,
+      baselineRoundsCount: alert.baselineRoundsCount,
+      recentRoundsCount: alert.recentRoundsCount,
+      severity: alert.severity,
+      lastRanAtMs: alert.lastRanAtMs,
+    });
   }
 
   private persistHistory(

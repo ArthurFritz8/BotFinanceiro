@@ -63,6 +63,15 @@ const environmentSchema = z
       .min(10)
       .max(10000)
       .default(500),
+    BACKTESTING_REGIME_ALERTS_DATA_FILE: z
+      .string()
+      .default("apps/api/data/backtesting-regime-alerts.jsonl"),
+    BACKTESTING_REGIME_ALERTS_MAX_ENTRIES: z.coerce
+      .number()
+      .int()
+      .min(10)
+      .max(10000)
+      .default(500),
     SCHEDULER_ENABLED: booleanFromString.default("true"),
     SCHEDULER_ECONOMY_MODE: booleanFromString.default("false"),
     SCHEDULER_JITTER_MAX_PERCENT: z.coerce.number().int().min(0).max(100).default(20),

@@ -11,6 +11,7 @@ const COMPARE_ASSET_ENDPOINT = "/v1/backtesting/compare-asset";
 const HISTORY_ENDPOINT = "/v1/backtesting/history";
 const LEADERBOARD_ENDPOINT = "/v1/backtesting/leaderboard";
 const REGIME_ALERTS_ENDPOINT = "/v1/backtesting/regime-alerts";
+const REGIME_ALERTS_HISTORY_ENDPOINT = "/v1/backtesting/regime-alerts/history";
 
 const STRATEGIES = [
   { id: "ema_crossover", label: "EMA Crossover (trend-following)" },
@@ -327,33 +328,64 @@ function renderLeaderboard(items) {
     </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-async function refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl) {
+async function refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl, alertsHistoryEl) {
   historyEl.innerHTML = renderLoading();
   leaderboardEl.innerHTML = renderLoading();
   if (alertsEl instanceof HTMLElement) alertsEl.innerHTML = renderLoading();
+  if (alertsHistoryEl instanceof HTMLElement) alertsHistoryEl.innerHTML = renderLoading();
   try {
-    const [hRes, lRes, aRes] = await Promise.all([
+    const [hRes, lRes, aRes, ahRes] = await Promise.all([
       fetch(`${HISTORY_ENDPOINT}?limit=20`),
       fetch(LEADERBOARD_ENDPOINT),
       fetch(REGIME_ALERTS_ENDPOINT),
+      fetch(`${REGIME_ALERTS_HISTORY_ENDPOINT}?limit=30`),
     ]);
     if (!hRes.ok) throw new Error(`history HTTP ${hRes.status}`);
     if (!lRes.ok) throw new Error(`leaderboard HTTP ${lRes.status}`);
     if (!aRes.ok) throw new Error(`alerts HTTP ${aRes.status}`);
+    if (!ahRes.ok) throw new Error(`alerts history HTTP ${ahRes.status}`);
     const hJson = await hRes.json();
     const lJson = await lRes.json();
     const aJson = await aRes.json();
+    const ahJson = await ahRes.json();
     historyEl.innerHTML = renderHistory(hJson?.data?.items ?? []);
     leaderboardEl.innerHTML = renderLeaderboard(lJson?.data?.items ?? []);
     if (alertsEl instanceof HTMLElement) {
       alertsEl.innerHTML = renderAlerts(aJson?.data?.items ?? []);
+    }
+    if (alertsHistoryEl instanceof HTMLElement) {
+      alertsHistoryEl.innerHTML = renderAlertsHistory(ahJson?.data?.items ?? []);
     }
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     historyEl.innerHTML = renderError(msg);
     leaderboardEl.innerHTML = renderError(msg);
     if (alertsEl instanceof HTMLElement) alertsEl.innerHTML = renderError(msg);
+    if (alertsHistoryEl instanceof HTMLElement) alertsHistoryEl.innerHTML = renderError(msg);
   }
+}
+
+function renderAlertsHistory(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return `<div class="backtesting__empty">Sem alertas critical persistidos.</div>`;
+  }
+  const rows = items
+    .map((entry) => {
+      const sevClass = entry.severity === "critical" ? "backtesting__alert--critical" : "backtesting__alert--warning";
+      return `<tr class="${sevClass}">
+        <td>${fmtDateTime(entry.recordedAtMs)}</td>
+        <td><strong>${entry.severity.toUpperCase()}</strong></td>
+        <td><strong>${entry.asset}</strong></td>
+        <td>${entry.strategy}</td>
+        <td>${fmtPct(entry.baselineAvgPnlPercent)}</td>
+        <td>${fmtPct(entry.recentAvgPnlPercent)}</td>
+        <td><strong>${fmtPct(entry.deltaPnlPercent)}</strong></td>
+      </tr>`;
+    })
+    .join("");
+  return `<table class="backtesting__table"><thead><tr>
+      <th>Quando</th><th>Severidade</th><th>Ativo</th><th>Estrategia</th><th>PnL Base</th><th>PnL Recente</th><th>Delta</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderAlerts(items) {
@@ -363,8 +395,13 @@ function renderAlerts(items) {
   const rows = items
     .map((alert) => {
       const sevClass = alert.severity === "critical" ? "backtesting__alert--critical" : "backtesting__alert--warning";
+      const recurrenceBadge = alert.escalatedByRecurrence
+        ? ` <span class="backtesting__badge" title="Escalado por recorrencia (${alert.recurrenceCount} alertas critical recentes)">⇑${alert.recurrenceCount}</span>`
+        : alert.recurrenceCount > 0
+          ? ` <span class="backtesting__badge backtesting__badge--muted" title="${alert.recurrenceCount} alertas critical recentes">${alert.recurrenceCount}</span>`
+          : "";
       return `<tr class="${sevClass}">
-        <td><strong>${alert.severity.toUpperCase()}</strong></td>
+        <td><strong>${alert.severity.toUpperCase()}</strong>${recurrenceBadge}</td>
         <td><strong>${alert.asset}</strong></td>
         <td>${alert.strategy}</td>
         <td>${fmtPct(alert.baselineAvgPnlPercent)}</td>
@@ -401,6 +438,12 @@ export function initBacktestingPanel() {
       </section>
       <section class="backtesting__history-section">
         <header class="backtesting__section-header">
+          <h3>Timeline de alertas critical</h3>
+        </header>
+        <div id="backtesting-alerts-history">${renderLoading()}</div>
+      </section>
+      <section class="backtesting__history-section">
+        <header class="backtesting__section-header">
           <h3>Historico de comparacoes</h3>
           <button type="button" class="backtesting__refresh" id="backtesting-refresh">Atualizar</button>
         </header>
@@ -420,6 +463,7 @@ export function initBacktestingPanel() {
   const historyEl = root.querySelector("#backtesting-history");
   const leaderboardEl = root.querySelector("#backtesting-leaderboard");
   const alertsEl = root.querySelector("#backtesting-alerts");
+  const alertsHistoryEl = root.querySelector("#backtesting-alerts-history");
   const refreshBtn = root.querySelector("#backtesting-refresh");
   if (
     !(form instanceof HTMLFormElement) ||
@@ -430,10 +474,10 @@ export function initBacktestingPanel() {
     return;
   }
 
-  void refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl);
+  void refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl, alertsHistoryEl);
   if (refreshBtn instanceof HTMLButtonElement) {
     refreshBtn.addEventListener("click", () => {
-      void refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl);
+      void refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl, alertsHistoryEl);
     });
   }
 
@@ -455,7 +499,7 @@ export function initBacktestingPanel() {
         strategies: STRATEGIES.map((s) => ({ strategy: s.id })),
       };
       void executeCompare(payload, output).then(() => {
-        void refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl);
+        void refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl, alertsHistoryEl);
       });
       return;
     }

@@ -53,4 +53,8 @@ export function registerBacktestingPublicRoutes(
   app.get("/backtesting/history", controller.listBacktestHistory);
   app.get("/backtesting/leaderboard", controller.getBacktestLeaderboard);
   app.get("/backtesting/regime-alerts", controller.getBacktestRegimeAlerts);
+  app.get(
+    "/backtesting/regime-alerts/history",
+    controller.listRegimeAlertsHistory,
+  );
 }
