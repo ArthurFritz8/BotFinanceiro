@@ -14,6 +14,7 @@ const REGIME_ALERTS_ENDPOINT = "/v1/backtesting/regime-alerts";
 const REGIME_ALERTS_HISTORY_ENDPOINT = "/v1/backtesting/regime-alerts/history";
 const REGIME_ALERTS_MUTE_ENDPOINT = "/v1/backtesting/regime-alerts/mute";
 const REGIME_ALERTS_UNMUTE_ENDPOINT = "/v1/backtesting/regime-alerts/unmute";
+const SCANNER_STATUS_ENDPOINT = "/v1/backtesting/scanner/status";
 
 const MUTE_DURATION_OPTIONS = [
   { label: "1h", ms: 60 * 60 * 1000 },
@@ -337,17 +338,19 @@ function renderLeaderboard(items) {
     </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-async function refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl, alertsHistoryEl) {
+async function refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl, alertsHistoryEl, scannerStatusEl) {
   historyEl.innerHTML = renderLoading();
   leaderboardEl.innerHTML = renderLoading();
   if (alertsEl instanceof HTMLElement) alertsEl.innerHTML = renderLoading();
   if (alertsHistoryEl instanceof HTMLElement) alertsHistoryEl.innerHTML = renderLoading();
+  if (scannerStatusEl instanceof HTMLElement) scannerStatusEl.innerHTML = renderLoading();
   try {
-    const [hRes, lRes, aRes, ahRes] = await Promise.all([
+    const [hRes, lRes, aRes, ahRes, sRes] = await Promise.all([
       fetch(`${HISTORY_ENDPOINT}?limit=20`),
       fetch(LEADERBOARD_ENDPOINT),
       fetch(REGIME_ALERTS_ENDPOINT),
       fetch(`${REGIME_ALERTS_HISTORY_ENDPOINT}?limit=30`),
+      fetch(SCANNER_STATUS_ENDPOINT),
     ]);
     if (!hRes.ok) throw new Error(`history HTTP ${hRes.status}`);
     if (!lRes.ok) throw new Error(`leaderboard HTTP ${lRes.status}`);
@@ -365,12 +368,22 @@ async function refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl, 
     if (alertsHistoryEl instanceof HTMLElement) {
       alertsHistoryEl.innerHTML = renderAlertsHistory(ahJson?.data?.items ?? []);
     }
+    if (scannerStatusEl instanceof HTMLElement) {
+      // Status e endpoint opcional; nao quebra refresh se 404 (ex: BACKTESTING_ENABLED off)
+      if (sRes.ok) {
+        const sJson = await sRes.json();
+        scannerStatusEl.innerHTML = renderScannerStatus(sJson?.data ?? null);
+      } else {
+        scannerStatusEl.innerHTML = `<div class="backtesting__empty">Scanner indisponivel (HTTP ${sRes.status}).</div>`;
+      }
+    }
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     historyEl.innerHTML = renderError(msg);
     leaderboardEl.innerHTML = renderError(msg);
     if (alertsEl instanceof HTMLElement) alertsEl.innerHTML = renderError(msg);
     if (alertsHistoryEl instanceof HTMLElement) alertsHistoryEl.innerHTML = renderError(msg);
+    if (scannerStatusEl instanceof HTMLElement) scannerStatusEl.innerHTML = renderError(msg);
   }
 }
 
@@ -395,6 +408,42 @@ function renderAlertsHistory(items) {
   return `<table class="backtesting__table"><thead><tr>
       <th>Quando</th><th>Severidade</th><th>Ativo</th><th>Estrategia</th><th>PnL Base</th><th>PnL Recente</th><th>Delta</th>
     </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderScannerStatus(status) {
+  if (!status || typeof status !== "object") {
+    return `<div class="backtesting__empty">Sem dados de status.</div>`;
+  }
+  const enabledTxt = status.enabled ? "ativo" : "desabilitado";
+  const runningTxt = status.running ? "rodando" : "parado";
+  const intervalTxt = `${Math.round(status.intervalMs / 1000)}s`;
+  const lastTickTxt =
+    typeof status.lastTickAtMs === "number" ? fmtDateTime(status.lastTickAtMs) : "—";
+  const nextTickTxt =
+    typeof status.nextTickAtMs === "number" ? fmtDateTime(status.nextTickAtMs) : "—";
+  const lastDurationTxt =
+    typeof status.lastDurationMs === "number" ? `${status.lastDurationMs}ms` : "—";
+  const lastTotalTxt =
+    typeof status.lastAlertsTotal === "number" ? String(status.lastAlertsTotal) : "—";
+  const lastCritTxt =
+    typeof status.lastAlertsCritical === "number"
+      ? String(status.lastAlertsCritical)
+      : "—";
+  const errorRow =
+    typeof status.lastErrorMessage === "string" && status.lastErrorMessage.length > 0
+      ? `<tr class="backtesting__alert--critical"><td><strong>Ultimo erro</strong></td><td colspan="3">${status.lastErrorMessage}</td></tr>`
+      : "";
+  return `<table class="backtesting__table"><tbody>
+    <tr><td><strong>Estado</strong></td><td>${enabledTxt} / ${runningTxt}</td>
+        <td><strong>Intervalo</strong></td><td>${intervalTxt}</td></tr>
+    <tr><td><strong>Ticks total</strong></td><td>${status.ticksTotal}</td>
+        <td><strong>Ticks falhos</strong></td><td>${status.ticksFailed}</td></tr>
+    <tr><td><strong>Ultimo tick</strong></td><td>${lastTickTxt}</td>
+        <td><strong>Proximo</strong></td><td>${nextTickTxt}</td></tr>
+    <tr><td><strong>Duracao</strong></td><td>${lastDurationTxt}</td>
+        <td><strong>Alertas (tot/crit)</strong></td><td>${lastTotalTxt} / ${lastCritTxt}</td></tr>
+    ${errorRow}
+  </tbody></table>`;
 }
 
 function renderAlerts(items) {
@@ -451,6 +500,12 @@ export function initBacktestingPanel() {
       <div class="backtesting__output" id="backtesting-output">${renderEmpty()}</div>
       <section class="backtesting__history-section">
         <header class="backtesting__section-header">
+          <h3>Status do scanner periodico</h3>
+        </header>
+        <div id="backtesting-scanner-status">${renderLoading()}</div>
+      </section>
+      <section class="backtesting__history-section">
+        <header class="backtesting__section-header">
           <h3>Alertas de degradacao de regime</h3>
         </header>
         <div id="backtesting-alerts">${renderLoading()}</div>
@@ -483,6 +538,7 @@ export function initBacktestingPanel() {
   const leaderboardEl = root.querySelector("#backtesting-leaderboard");
   const alertsEl = root.querySelector("#backtesting-alerts");
   const alertsHistoryEl = root.querySelector("#backtesting-alerts-history");
+  const scannerStatusEl = root.querySelector("#backtesting-scanner-status");
   const refreshBtn = root.querySelector("#backtesting-refresh");
   if (
     !(form instanceof HTMLFormElement) ||
@@ -493,10 +549,10 @@ export function initBacktestingPanel() {
     return;
   }
 
-  void refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl, alertsHistoryEl);
+  void refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl, alertsHistoryEl, scannerStatusEl);
   if (refreshBtn instanceof HTMLButtonElement) {
     refreshBtn.addEventListener("click", () => {
-      void refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl, alertsHistoryEl);
+      void refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl, alertsHistoryEl, scannerStatusEl);
     });
   }
 
@@ -522,7 +578,7 @@ export function initBacktestingPanel() {
       })
         .then(async (res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          await refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl, alertsHistoryEl);
+          await refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl, alertsHistoryEl, scannerStatusEl);
         })
         .catch((err) => {
           target.disabled = false;
@@ -549,7 +605,7 @@ export function initBacktestingPanel() {
         strategies: STRATEGIES.map((s) => ({ strategy: s.id })),
       };
       void executeCompare(payload, output).then(() => {
-        void refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl, alertsHistoryEl);
+        void refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl, alertsHistoryEl, scannerStatusEl);
       });
       return;
     }

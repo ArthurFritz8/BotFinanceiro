@@ -122,6 +122,7 @@ Politica de retencao:
 36. ADR 064: `docs/ADR/ADR-064-regime-alerts-push-notifications.md`
 37. ADR 065: `docs/ADR/ADR-065-regime-alerts-periodic-scanner.md`
 38. ADR 066: `docs/ADR/ADR-066-regime-alerts-mute.md`
+39. ADR 067: `docs/ADR/ADR-067-regime-alerts-scanner-status.md`
 
 ## Relatorio completo desta entrega
 
