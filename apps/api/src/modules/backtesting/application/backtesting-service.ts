@@ -82,8 +82,36 @@ interface BacktestingServiceOptions {
   readonly historyStore?: JsonlBacktestRunStore;
   /** Store opcional para historico de alertas critical de regime (Wave 23 / ADR-063). */
   readonly alertsHistoryStore?: JsonlRegimeAlertsHistoryStore;
+  /**
+   * Notifier opcional para broadcast de alertas critical NOVOS via Web Push
+   * (Wave 24 / ADR-064). Interface estreita para evitar acoplar com o
+   * modulo notifications inteiro.
+   */
+  readonly notifier?: RegimeAlertNotifier;
+  /**
+   * Janela de cooldown em ms para evitar spam de notificacoes do mesmo
+   * bucket (Wave 24 / ADR-064). Default 1h. Quando ja existe critical
+   * persistido para o mesmo (asset, strategy) dentro dessa janela, NAO
+   * dispara broadcast novo.
+   */
+  readonly notificationCooldownMs?: number;
   /** Clock injetavel para tests (default Date.now). */
   readonly clock?: () => number;
+}
+
+/**
+ * Interface minima do notifier consumido pelo service. Compatible com
+ * `NotificationService` do modulo notifications (Wave 24 / ADR-064).
+ */
+export interface RegimeAlertNotifier {
+  isEnabled(): boolean;
+  broadcast(payload: {
+    readonly title: string;
+    readonly body: string;
+    readonly tag?: string;
+    readonly url?: string;
+    readonly data?: Record<string, unknown>;
+  }): Promise<unknown>;
 }
 
 /**
@@ -168,6 +196,8 @@ export class BacktestingService {
   private readonly alertsHistoryStore:
     | JsonlRegimeAlertsHistoryStore
     | undefined;
+  private readonly notifier: RegimeAlertNotifier | undefined;
+  private readonly notificationCooldownMs: number;
   private readonly clock: () => number;
 
   public constructor(options: BacktestingServiceOptions) {
@@ -175,6 +205,9 @@ export class BacktestingService {
     this.marketDataAdapter = options.marketDataAdapter;
     this.historyStore = options.historyStore;
     this.alertsHistoryStore = options.alertsHistoryStore;
+    this.notifier = options.notifier;
+    this.notificationCooldownMs =
+      options.notificationCooldownMs ?? 60 * 60 * 1000;
     this.clock = options.clock ?? ((): number => Date.now());
   }
 
@@ -404,11 +437,55 @@ export class BacktestingService {
       };
       alerts.push(alert);
       if (severity === "critical" && this.alertsHistoryStore !== undefined) {
+        // Anti-spam: so notifica se NAO houver critical persistido para o
+        // mesmo bucket dentro da janela de cooldown (Wave 24 / ADR-064).
+        // Conta ANTES de persistir (countRecentForBucket le do store atual).
+        const recentCriticalsForCooldown =
+          this.alertsHistoryStore.countRecentForBucket(
+            bucket.asset,
+            bucket.strategy,
+            nowMs,
+            this.notificationCooldownMs,
+          );
         this.persistRegimeAlert(alert, nowMs);
+        if (recentCriticalsForCooldown === 0) {
+          this.notifyRegimeAlert(alert);
+        }
       }
     }
     alerts.sort((a, b) => a.deltaPnlPercent - b.deltaPnlPercent);
     return alerts;
+  }
+
+  /**
+   * Dispara broadcast Web Push para o alerta critical novo (Wave 24 /
+   * ADR-064). Failure-soft: erros sao silenciados — alerta principal nao
+   * deve falhar por problema de notificacao. Retorno fire-and-forget.
+   */
+  private notifyRegimeAlert(alert: RegimeAlert): void {
+    if (this.notifier === undefined) return;
+    if (!this.notifier.isEnabled()) return;
+    const deltaTxt = alert.deltaPnlPercent.toFixed(1);
+    const recentTxt = alert.recentAvgPnlPercent.toFixed(1);
+    const escalatedSuffix = alert.escalatedByRecurrence
+      ? ` (escalado x${alert.recurrenceCount})`
+      : "";
+    const payload = {
+      title: `Regime degradation: ${alert.asset}`,
+      body: `${alert.strategy} | PnL recente ${recentTxt}% | Delta ${deltaTxt} pp${escalatedSuffix}`,
+      tag: `regime-alert:${alert.asset}:${alert.strategy}`,
+      url: "/#/backtesting",
+      data: {
+        kind: "regime-alert" as const,
+        asset: alert.asset,
+        strategy: alert.strategy,
+        severity: alert.severity,
+        deltaPnlPercent: alert.deltaPnlPercent,
+      },
+    };
+    void this.notifier.broadcast(payload).catch(() => {
+      /* failure-soft: ignora erros do canal de notificacao */
+    });
   }
 
   /**

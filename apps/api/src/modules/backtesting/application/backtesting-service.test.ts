@@ -626,4 +626,209 @@ void describe("BacktestingService", () => {
     });
     assert.deepEqual(service.listRegimeAlertsHistory(), []);
   });
+
+  void it("notifier recebe broadcast quando critical novo aparece (Wave 24)", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "bt-notify-"));
+    const histStore = new JsonlBacktestRunStore(join(tmpDir, "h.jsonl"));
+    const alertsStore = new JsonlRegimeAlertsHistoryStore(
+      join(tmpDir, "a.jsonl"),
+    );
+    const adapter = buildFakeAdapter(buildChart([100, 100, 100]));
+    const broadcasts: Array<{ title: string; body: string; tag?: string }> = [];
+    const notifier = {
+      isEnabled: (): boolean => true,
+      broadcast: (payload: {
+        readonly title: string;
+        readonly body: string;
+        readonly tag?: string;
+      }): Promise<unknown> => {
+        broadcasts.push({
+          title: payload.title,
+          body: payload.body,
+          tag: payload.tag,
+        });
+        return Promise.resolve({ delivered: 1 });
+      },
+    };
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+      historyStore: histStore,
+      alertsHistoryStore: alertsStore,
+      notifier,
+      notificationCooldownMs: 60 * 60 * 1000,
+      clock: () => 1_700_000_000_000,
+    });
+
+    let ts = 1_700_000_000_000;
+    for (const pnl of [20, 20, 20, -5, -5, -5]) {
+      ts += 60_000;
+      histStore.append({
+        id: `n-${ts}`,
+        ranAtMs: ts,
+        asset: "ethereum",
+        broker: "bybit",
+        range: "30d",
+        candleCount: 60,
+        cooldownCandles: 1,
+        commissionPercent: 0,
+        slippagePercent: 0,
+        results: [
+          {
+            strategy: "rsi_mean_reversion",
+            totalTrades: 5,
+            winRatePercent: 50,
+            profitFactor: 1.5,
+            totalPnlPercent: pnl,
+            maxDrawdownPercent: 1,
+          },
+        ],
+      });
+    }
+
+    service.computeRegimeAlerts({
+      recentWindow: 3,
+      warningThresholdPercent: 5,
+    });
+    // Aguarda o microtask do void this.notifier.broadcast(...)
+    await Promise.resolve();
+    assert.equal(broadcasts.length, 1);
+    const sent = broadcasts[0];
+    if (sent === undefined) assert.fail("broadcast esperado ausente");
+    assert.match(sent.title, /ethereum/);
+    assert.match(sent.body, /rsi_mean_reversion/);
+    assert.equal(sent.tag, "regime-alert:ethereum:rsi_mean_reversion");
+  });
+
+  void it("notifier respeita cooldown anti-spam para mesmo bucket (Wave 24)", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "bt-cool-"));
+    const histStore = new JsonlBacktestRunStore(join(tmpDir, "h.jsonl"));
+    const alertsStore = new JsonlRegimeAlertsHistoryStore(
+      join(tmpDir, "a.jsonl"),
+    );
+    const adapter = buildFakeAdapter(buildChart([100, 100, 100]));
+    let broadcastCount = 0;
+    const notifier = {
+      isEnabled: (): boolean => true,
+      broadcast: (): Promise<unknown> => {
+        broadcastCount += 1;
+        return Promise.resolve({ delivered: 1 });
+      },
+    };
+    const nowMs = 1_700_000_000_000;
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+      historyStore: histStore,
+      alertsHistoryStore: alertsStore,
+      notifier,
+      notificationCooldownMs: 60 * 60 * 1000,
+      clock: () => nowMs,
+    });
+
+    // Pre-popula 1 alerta critical RECENTE (dentro do cooldown)
+    alertsStore.append({
+      id: "seed-cooldown",
+      recordedAtMs: nowMs - 10 * 60 * 1000, // 10 min atras
+      asset: "bitcoin",
+      strategy: "ema_crossover",
+      baselineAvgPnlPercent: 10,
+      recentAvgPnlPercent: -10,
+      deltaPnlPercent: -20,
+      baselineRoundsCount: 3,
+      recentRoundsCount: 3,
+      severity: "critical",
+      lastRanAtMs: nowMs - 10 * 60 * 1000,
+    });
+
+    let ts = 1_700_000_000_000;
+    for (const pnl of [20, 20, 20, -5, -5, -5]) {
+      ts += 60_000;
+      histStore.append({
+        id: `c-${ts}`,
+        ranAtMs: ts,
+        asset: "bitcoin",
+        broker: "bybit",
+        range: "30d",
+        candleCount: 60,
+        cooldownCandles: 1,
+        commissionPercent: 0,
+        slippagePercent: 0,
+        results: [
+          {
+            strategy: "ema_crossover",
+            totalTrades: 5,
+            winRatePercent: 50,
+            profitFactor: 1.5,
+            totalPnlPercent: pnl,
+            maxDrawdownPercent: 1,
+          },
+        ],
+      });
+    }
+
+    service.computeRegimeAlerts({
+      recentWindow: 3,
+      warningThresholdPercent: 5,
+    });
+    await Promise.resolve();
+    // Cooldown bloqueou: zero broadcasts mesmo sendo critical novo
+    assert.equal(broadcastCount, 0);
+    // Mas persistiu o alerta atual (timeline auditavel)
+    assert.equal(service.listRegimeAlertsHistory().length, 2);
+  });
+
+  void it("notifier desabilitado nao dispara broadcast (Wave 24)", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "bt-disabled-"));
+    const histStore = new JsonlBacktestRunStore(join(tmpDir, "h.jsonl"));
+    const alertsStore = new JsonlRegimeAlertsHistoryStore(
+      join(tmpDir, "a.jsonl"),
+    );
+    const adapter = buildFakeAdapter(buildChart([100, 100, 100]));
+    let broadcastCount = 0;
+    const notifier = {
+      isEnabled: (): boolean => false,
+      broadcast: (): Promise<unknown> => {
+        broadcastCount += 1;
+        return Promise.resolve({ delivered: 1 });
+      },
+    };
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+      historyStore: histStore,
+      alertsHistoryStore: alertsStore,
+      notifier,
+      clock: () => 1_700_000_000_000,
+    });
+
+    let ts = 1_700_000_000_000;
+    for (const pnl of [20, 20, 20, -5, -5, -5]) {
+      ts += 60_000;
+      histStore.append({
+        id: `d-${ts}`,
+        ranAtMs: ts,
+        asset: "solana",
+        broker: "bybit",
+        range: "30d",
+        candleCount: 60,
+        cooldownCandles: 1,
+        commissionPercent: 0,
+        slippagePercent: 0,
+        results: [
+          {
+            strategy: "ema_crossover",
+            totalTrades: 5,
+            winRatePercent: 50,
+            profitFactor: 1.5,
+            totalPnlPercent: pnl,
+            maxDrawdownPercent: 1,
+          },
+        ],
+      });
+    }
+
+    service.computeRegimeAlerts();
+    assert.equal(broadcastCount, 0);
+  });
 });

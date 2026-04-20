@@ -210,6 +210,8 @@ export function buildApp() {
       marketDataAdapter: multiExchangeAdapter,
       historyStore: backtestHistoryStore,
       alertsHistoryStore: regimeAlertsHistoryStore,
+      notifier: notificationsService,
+      notificationCooldownMs: env.BACKTESTING_REGIME_ALERTS_NOTIFY_COOLDOWN_MS,
     });
     const backtestingController = new BacktestingController(
       backtestEngine,

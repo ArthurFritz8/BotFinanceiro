@@ -72,6 +72,12 @@ const environmentSchema = z
       .min(10)
       .max(10000)
       .default(500),
+    BACKTESTING_REGIME_ALERTS_NOTIFY_COOLDOWN_MS: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(7 * 24 * 60 * 60 * 1000)
+      .default(60 * 60 * 1000),
     SCHEDULER_ENABLED: booleanFromString.default("true"),
     SCHEDULER_ECONOMY_MODE: booleanFromString.default("false"),
     SCHEDULER_JITTER_MAX_PERCENT: z.coerce.number().int().min(0).max(100).default(20),
