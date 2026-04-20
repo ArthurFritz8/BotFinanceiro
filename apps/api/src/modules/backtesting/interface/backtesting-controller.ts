@@ -110,4 +110,32 @@ export class BacktestingController {
       buildSuccessResponse(request.id, { count: items.length, items }),
     );
   };
+
+  public muteRegimeAlert = (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): void => {
+    const entry = this.service.muteRegimeAlert(request.body);
+    void reply.send(buildSuccessResponse(request.id, entry));
+  };
+
+  public unmuteRegimeAlert = (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): void => {
+    const removed = this.service.unmuteRegimeAlert(request.body);
+    void reply.send(buildSuccessResponse(request.id, { removed }));
+  };
+
+  public listRegimeAlertMutes = (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): void => {
+    const query = request.query as { activeOnly?: string } | undefined;
+    const activeOnly = query?.activeOnly === "true";
+    const items = this.service.listRegimeAlertMutes(activeOnly);
+    void reply.send(
+      buildSuccessResponse(request.id, { count: items.length, items }),
+    );
+  };
 }

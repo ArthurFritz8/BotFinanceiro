@@ -15,10 +15,40 @@ import type {
   JsonlBacktestRunStore,
 } from "../infrastructure/jsonl-backtest-run-store.js";
 import type {
+  JsonlRegimeAlertMutesStore,
+  RegimeAlertMuteEntry,
+} from "../infrastructure/jsonl-regime-alert-mutes-store.js";
+import type {
   JsonlRegimeAlertsHistoryStore,
   RegimeAlertHistoryEntry,
 } from "../infrastructure/jsonl-regime-alerts-history-store.js";
 import type { BacktestEngine } from "./backtest-engine.js";
+
+/**
+ * Schema do request publico para silenciar push notifications de regime
+ * alerts em uma combinacao (asset, strategy) (Wave 26 / ADR-066). O
+ * alerta continua aparecendo na UI; apenas o broadcast Web Push e
+ * suprimido durante a janela.
+ */
+export const muteRegimeAlertRequestSchema = z.object({
+  asset: z.string().trim().min(1).max(40),
+  strategy: strategyKindSchema,
+  durationMs: z.number().int().min(60_000).max(30 * 24 * 60 * 60 * 1000),
+  reason: z.string().trim().max(200).optional(),
+});
+
+export type MuteRegimeAlertRequest = z.infer<
+  typeof muteRegimeAlertRequestSchema
+>;
+
+export const unmuteRegimeAlertRequestSchema = z.object({
+  asset: z.string().trim().min(1).max(40),
+  strategy: strategyKindSchema,
+});
+
+export type UnmuteRegimeAlertRequest = z.infer<
+  typeof unmuteRegimeAlertRequestSchema
+>;
 
 export const backtestRunAssetRequestSchema = z.object({
   asset: z.string().trim().min(1).max(40),
@@ -95,6 +125,13 @@ interface BacktestingServiceOptions {
    * dispara broadcast novo.
    */
   readonly notificationCooldownMs?: number;
+  /**
+   * Store opcional para mutes manuais de push de regime alerts (Wave 26 /
+   * ADR-066). Quando presente, broadcast e suprimido para buckets com
+   * mute ativo. O alerta principal continua aparecendo em
+   * `computeRegimeAlerts` com `muted: true`.
+   */
+  readonly mutesStore?: JsonlRegimeAlertMutesStore;
   /** Clock injetavel para tests (default Date.now). */
   readonly clock?: () => number;
 }
@@ -160,6 +197,14 @@ export interface RegimeAlert {
    * recorrencia (Wave 23 / ADR-063).
    */
   readonly escalatedByRecurrence: boolean;
+  /**
+   * `true` quando ha mute manual ativo para esse bucket (Wave 26 /
+   * ADR-066). UI continua exibindo, push notifications sao suprimidas
+   * durante a janela.
+   */
+  readonly muted: boolean;
+  /** Timestamp ms ate quando o mute esta ativo (Wave 26 / ADR-066). */
+  readonly mutedUntilMs: number | null;
 }
 
 export interface RegimeAlertOptions {
@@ -198,6 +243,7 @@ export class BacktestingService {
     | undefined;
   private readonly notifier: RegimeAlertNotifier | undefined;
   private readonly notificationCooldownMs: number;
+  private readonly mutesStore: JsonlRegimeAlertMutesStore | undefined;
   private readonly clock: () => number;
 
   public constructor(options: BacktestingServiceOptions) {
@@ -208,6 +254,7 @@ export class BacktestingService {
     this.notifier = options.notifier;
     this.notificationCooldownMs =
       options.notificationCooldownMs ?? 60 * 60 * 1000;
+    this.mutesStore = options.mutesStore;
     this.clock = options.clock ?? ((): number => Date.now());
   }
 
@@ -422,6 +469,10 @@ export class BacktestingService {
       const severity: RegimeAlert["severity"] = escalatedByRecurrence
         ? "critical"
         : baseSeverity;
+      const activeMute =
+        this.mutesStore !== undefined
+          ? this.mutesStore.getActive(bucket.asset, bucket.strategy, nowMs)
+          : undefined;
       const alert: RegimeAlert = {
         asset: bucket.asset,
         strategy: bucket.strategy,
@@ -434,6 +485,8 @@ export class BacktestingService {
         lastRanAtMs: last.ranAtMs,
         recurrenceCount,
         escalatedByRecurrence,
+        muted: activeMute !== undefined,
+        mutedUntilMs: activeMute?.mutedUntilMs ?? null,
       };
       alerts.push(alert);
       if (severity === "critical" && this.alertsHistoryStore !== undefined) {
@@ -448,7 +501,9 @@ export class BacktestingService {
             this.notificationCooldownMs,
           );
         this.persistRegimeAlert(alert, nowMs);
-        if (recentCriticalsForCooldown === 0) {
+        // Wave 26 / ADR-066: mute manual suprime push, mas alerta segue
+        // visivel na UI e persistido no historico.
+        if (recentCriticalsForCooldown === 0 && !alert.muted) {
           this.notifyRegimeAlert(alert);
         }
       }
@@ -499,6 +554,54 @@ export class BacktestingService {
     const all = this.alertsHistoryStore.list();
     if (limit === undefined || limit <= 0) return all;
     return all.slice(0, limit);
+  }
+
+  /**
+   * Cria/renova um mute manual de push notifications para `(asset,
+   * strategy)` (Wave 26 / ADR-066). Lanca se `mutesStore` nao foi
+   * configurado. Valida via Zod no boundary.
+   */
+  public muteRegimeAlert(rawRequest: unknown): RegimeAlertMuteEntry {
+    if (this.mutesStore === undefined) {
+      throw new Error("Regime alert mutes store nao configurado");
+    }
+    const request = muteRegimeAlertRequestSchema.parse(rawRequest);
+    const nowMs = this.clock();
+    const entry: RegimeAlertMuteEntry = {
+      asset: request.asset,
+      strategy: request.strategy,
+      mutedUntilMs: nowMs + request.durationMs,
+      createdAtMs: nowMs,
+      ...(request.reason !== undefined ? { reason: request.reason } : {}),
+    };
+    this.mutesStore.upsert(entry);
+    return entry;
+  }
+
+  /**
+   * Remove o mute do bucket (Wave 26 / ADR-066). Retorna `true` se
+   * existia algo para remover.
+   */
+  public unmuteRegimeAlert(rawRequest: unknown): boolean {
+    if (this.mutesStore === undefined) {
+      throw new Error("Regime alert mutes store nao configurado");
+    }
+    const request = unmuteRegimeAlertRequestSchema.parse(rawRequest);
+    return this.mutesStore.remove(request.asset, request.strategy);
+  }
+
+  /**
+   * Lista mutes (Wave 26 / ADR-066). Quando `activeOnly`, filtra os ja
+   * expirados em relacao ao clock atual.
+   */
+  public listRegimeAlertMutes(
+    activeOnly = false,
+  ): readonly RegimeAlertMuteEntry[] {
+    if (this.mutesStore === undefined) return [];
+    const all = this.mutesStore.list();
+    if (!activeOnly) return all;
+    const nowMs = this.clock();
+    return all.filter((entry) => entry.mutedUntilMs > nowMs);
   }
 
   private persistRegimeAlert(alert: RegimeAlert, nowMs: number): void {

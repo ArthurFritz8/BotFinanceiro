@@ -46,6 +46,7 @@ import { BacktestEngine } from "../modules/backtesting/application/backtest-engi
 import { BacktestingService } from "../modules/backtesting/application/backtesting-service.js";
 import { BacktestingController } from "../modules/backtesting/interface/backtesting-controller.js";
 import { JsonlBacktestRunStore } from "../modules/backtesting/infrastructure/jsonl-backtest-run-store.js";
+import { JsonlRegimeAlertMutesStore } from "../modules/backtesting/infrastructure/jsonl-regime-alert-mutes-store.js";
 import { JsonlRegimeAlertsHistoryStore } from "../modules/backtesting/infrastructure/jsonl-regime-alerts-history-store.js";
 import {
   registerBacktestingInternalRoutes,
@@ -206,6 +207,10 @@ export function buildApp() {
       env.BACKTESTING_REGIME_ALERTS_DATA_FILE,
       env.BACKTESTING_REGIME_ALERTS_MAX_ENTRIES,
     );
+    const regimeAlertMutesStore = new JsonlRegimeAlertMutesStore(
+      env.BACKTESTING_REGIME_ALERTS_MUTES_DATA_FILE,
+      env.BACKTESTING_REGIME_ALERTS_MUTES_MAX_ENTRIES,
+    );
     const backtestingService = new BacktestingService({
       engine: backtestEngine,
       marketDataAdapter: multiExchangeAdapter,
@@ -213,6 +218,7 @@ export function buildApp() {
       alertsHistoryStore: regimeAlertsHistoryStore,
       notifier: notificationsService,
       notificationCooldownMs: env.BACKTESTING_REGIME_ALERTS_NOTIFY_COOLDOWN_MS,
+      mutesStore: regimeAlertMutesStore,
     });
     const backtestingController = new BacktestingController(
       backtestEngine,

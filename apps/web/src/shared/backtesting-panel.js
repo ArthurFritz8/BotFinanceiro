@@ -12,6 +12,15 @@ const HISTORY_ENDPOINT = "/v1/backtesting/history";
 const LEADERBOARD_ENDPOINT = "/v1/backtesting/leaderboard";
 const REGIME_ALERTS_ENDPOINT = "/v1/backtesting/regime-alerts";
 const REGIME_ALERTS_HISTORY_ENDPOINT = "/v1/backtesting/regime-alerts/history";
+const REGIME_ALERTS_MUTE_ENDPOINT = "/v1/backtesting/regime-alerts/mute";
+const REGIME_ALERTS_UNMUTE_ENDPOINT = "/v1/backtesting/regime-alerts/unmute";
+
+const MUTE_DURATION_OPTIONS = [
+  { label: "1h", ms: 60 * 60 * 1000 },
+  { label: "24h", ms: 24 * 60 * 60 * 1000 },
+  { label: "7d", ms: 7 * 24 * 60 * 60 * 1000 },
+  { label: "30d", ms: 30 * 24 * 60 * 60 * 1000 },
+];
 
 const STRATEGIES = [
   { id: "ema_crossover", label: "EMA Crossover (trend-following)" },
@@ -400,8 +409,17 @@ function renderAlerts(items) {
         : alert.recurrenceCount > 0
           ? ` <span class="backtesting__badge backtesting__badge--muted" title="${alert.recurrenceCount} alertas critical recentes">${alert.recurrenceCount}</span>`
           : "";
+      const mutedBadge = alert.muted
+        ? ` <span class="backtesting__badge backtesting__badge--muted" title="Push silenciado ate ${fmtDateTime(alert.mutedUntilMs)}">🔕</span>`
+        : "";
+      const actionCell = alert.muted
+        ? `<button type="button" class="backtesting__refresh" data-mute-action="unmute" data-asset="${alert.asset}" data-strategy="${alert.strategy}">🔔 Unmute</button>`
+        : MUTE_DURATION_OPTIONS.map(
+            (opt) =>
+              `<button type="button" class="backtesting__refresh" data-mute-action="mute" data-asset="${alert.asset}" data-strategy="${alert.strategy}" data-duration-ms="${opt.ms}" title="Silenciar push por ${opt.label}">🔕 ${opt.label}</button>`,
+          ).join(" ");
       return `<tr class="${sevClass}">
-        <td><strong>${alert.severity.toUpperCase()}</strong>${recurrenceBadge}</td>
+        <td><strong>${alert.severity.toUpperCase()}</strong>${recurrenceBadge}${mutedBadge}</td>
         <td><strong>${alert.asset}</strong></td>
         <td>${alert.strategy}</td>
         <td>${fmtPct(alert.baselineAvgPnlPercent)}</td>
@@ -409,11 +427,12 @@ function renderAlerts(items) {
         <td><strong>${fmtPct(alert.deltaPnlPercent)}</strong></td>
         <td>${alert.baselineRoundsCount} → ${alert.recentRoundsCount}</td>
         <td>${fmtDate(alert.lastRanAtMs)}</td>
+        <td>${actionCell}</td>
       </tr>`;
     })
     .join("");
   return `<table class="backtesting__table"><thead><tr>
-      <th>Severidade</th><th>Ativo</th><th>Estrategia</th><th>PnL Base</th><th>PnL Recente</th><th>Delta</th><th>Base/Recente</th><th>Ultima</th>
+      <th>Severidade</th><th>Ativo</th><th>Estrategia</th><th>PnL Base</th><th>PnL Recente</th><th>Delta</th><th>Base/Recente</th><th>Ultima</th><th>Acoes</th>
     </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
@@ -478,6 +497,37 @@ export function initBacktestingPanel() {
   if (refreshBtn instanceof HTMLButtonElement) {
     refreshBtn.addEventListener("click", () => {
       void refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl, alertsHistoryEl);
+    });
+  }
+
+  if (alertsEl instanceof HTMLElement) {
+    alertsEl.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const action = target.dataset.muteAction;
+      if (action !== "mute" && action !== "unmute") return;
+      const asset = target.dataset.asset;
+      const strategy = target.dataset.strategy;
+      if (typeof asset !== "string" || typeof strategy !== "string") return;
+      target.disabled = true;
+      const payload =
+        action === "mute"
+          ? { asset, strategy, durationMs: Number(target.dataset.durationMs ?? 0) }
+          : { asset, strategy };
+      const endpoint = action === "mute" ? REGIME_ALERTS_MUTE_ENDPOINT : REGIME_ALERTS_UNMUTE_ENDPOINT;
+      void fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          await refreshHistoryAndLeaderboard(historyEl, leaderboardEl, alertsEl, alertsHistoryEl);
+        })
+        .catch((err) => {
+          target.disabled = false;
+          alertsEl.innerHTML = renderError(err instanceof Error ? err.message : String(err));
+        });
     });
   }
 

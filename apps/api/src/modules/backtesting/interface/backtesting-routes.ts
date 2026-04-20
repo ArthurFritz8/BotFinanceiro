@@ -57,4 +57,16 @@ export function registerBacktestingPublicRoutes(
     "/backtesting/regime-alerts/history",
     controller.listRegimeAlertsHistory,
   );
+  app.get(
+    "/backtesting/regime-alerts/mutes",
+    controller.listRegimeAlertMutes,
+  );
+  app.post(
+    "/backtesting/regime-alerts/mute",
+    controller.muteRegimeAlert,
+  );
+  app.post(
+    "/backtesting/regime-alerts/unmute",
+    controller.unmuteRegimeAlert,
+  );
 }

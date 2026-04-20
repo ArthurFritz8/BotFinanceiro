@@ -10,6 +10,7 @@ import type {
 } from "../../../integrations/market_data/multi-exchange-market-data-adapter.js";
 import { JsonlBacktestRunStore } from "../infrastructure/jsonl-backtest-run-store.js";
 import { JsonlRegimeAlertsHistoryStore } from "../infrastructure/jsonl-regime-alerts-history-store.js";
+import { JsonlRegimeAlertMutesStore } from "../infrastructure/jsonl-regime-alert-mutes-store.js";
 import { BacktestEngine } from "./backtest-engine.js";
 import { BacktestingService } from "./backtesting-service.js";
 
@@ -830,5 +831,268 @@ void describe("BacktestingService", () => {
 
     service.computeRegimeAlerts();
     assert.equal(broadcastCount, 0);
+  });
+
+  void it("mute manual suprime broadcast mas alerta segue visivel (Wave 26)", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "bt-mute-"));
+    const histStore = new JsonlBacktestRunStore(join(tmpDir, "h.jsonl"));
+    const alertsStore = new JsonlRegimeAlertsHistoryStore(
+      join(tmpDir, "a.jsonl"),
+    );
+    const mutesStore = new JsonlRegimeAlertMutesStore(
+      join(tmpDir, "m.jsonl"),
+    );
+    const adapter = buildFakeAdapter(buildChart([100, 100, 100]));
+    let broadcastCount = 0;
+    const notifier = {
+      isEnabled: (): boolean => true,
+      broadcast: (): Promise<unknown> => {
+        broadcastCount += 1;
+        return Promise.resolve({ delivered: 1 });
+      },
+    };
+    const nowMs = 1_700_000_000_000;
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+      historyStore: histStore,
+      alertsHistoryStore: alertsStore,
+      notifier,
+      mutesStore,
+      clock: () => nowMs,
+    });
+    service.muteRegimeAlert({
+      asset: "bitcoin",
+      strategy: "ema_crossover",
+      durationMs: 60 * 60 * 1000,
+      reason: "test",
+    });
+
+    let ts = nowMs;
+    for (const pnl of [20, 20, 20, -5, -5, -5]) {
+      ts += 60_000;
+      histStore.append({
+        id: `mute-${ts}`,
+        ranAtMs: ts,
+        asset: "bitcoin",
+        broker: "bybit",
+        range: "30d",
+        candleCount: 60,
+        cooldownCandles: 1,
+        commissionPercent: 0,
+        slippagePercent: 0,
+        results: [
+          {
+            strategy: "ema_crossover",
+            totalTrades: 5,
+            winRatePercent: 50,
+            profitFactor: 1.5,
+            totalPnlPercent: pnl,
+            maxDrawdownPercent: 1,
+          },
+        ],
+      });
+    }
+
+    const alerts = service.computeRegimeAlerts({
+      recentWindow: 3,
+      warningThresholdPercent: 5,
+    });
+    await Promise.resolve();
+
+    // Alerta segue visivel com flag muted=true
+    assert.equal(alerts.length, 1);
+    const alert = alerts[0];
+    if (alert === undefined) assert.fail("alerta esperado");
+    assert.equal(alert.muted, true);
+    assert.equal(alert.mutedUntilMs, nowMs + 60 * 60 * 1000);
+    assert.equal(alert.severity, "critical");
+    // Push foi suprimido
+    assert.equal(broadcastCount, 0);
+    // Mas persistiu no historico (auditavel)
+    assert.equal(service.listRegimeAlertsHistory().length, 1);
+  });
+
+  void it("unmute reativa broadcast em proxima rodada (Wave 26)", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "bt-unmute-"));
+    const histStore = new JsonlBacktestRunStore(join(tmpDir, "h.jsonl"));
+    const alertsStore = new JsonlRegimeAlertsHistoryStore(
+      join(tmpDir, "a.jsonl"),
+    );
+    const mutesStore = new JsonlRegimeAlertMutesStore(
+      join(tmpDir, "m.jsonl"),
+    );
+    const adapter = buildFakeAdapter(buildChart([100, 100, 100]));
+    let broadcastCount = 0;
+    const notifier = {
+      isEnabled: (): boolean => true,
+      broadcast: (): Promise<unknown> => {
+        broadcastCount += 1;
+        return Promise.resolve({ delivered: 1 });
+      },
+    };
+    const nowMs = 1_700_000_000_000;
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+      historyStore: histStore,
+      alertsHistoryStore: alertsStore,
+      notifier,
+      mutesStore,
+      notificationCooldownMs: 60 * 60 * 1000,
+      clock: () => nowMs,
+    });
+    service.muteRegimeAlert({
+      asset: "ethereum",
+      strategy: "rsi_mean_reversion",
+      durationMs: 60 * 60 * 1000,
+    });
+
+    let ts = nowMs;
+    for (const pnl of [20, 20, 20, -5, -5, -5]) {
+      ts += 60_000;
+      histStore.append({
+        id: `unm-${ts}`,
+        ranAtMs: ts,
+        asset: "ethereum",
+        broker: "bybit",
+        range: "30d",
+        candleCount: 60,
+        cooldownCandles: 1,
+        commissionPercent: 0,
+        slippagePercent: 0,
+        results: [
+          {
+            strategy: "rsi_mean_reversion",
+            totalTrades: 5,
+            winRatePercent: 50,
+            profitFactor: 1.5,
+            totalPnlPercent: pnl,
+            maxDrawdownPercent: 1,
+          },
+        ],
+      });
+    }
+
+    // Primeira rodada: muted -> sem broadcast
+    service.computeRegimeAlerts({
+      recentWindow: 3,
+      warningThresholdPercent: 5,
+    });
+    await Promise.resolve();
+    assert.equal(broadcastCount, 0);
+
+    // Unmute + nova rodada: cooldown ja foi acionado pela rodada anterior
+    // (alerta foi persistido), entao broadcast continua bloqueado pelo
+    // cooldown. Limpamos o store para simular nova janela.
+    const removed = service.unmuteRegimeAlert({
+      asset: "ethereum",
+      strategy: "rsi_mean_reversion",
+    });
+    assert.equal(removed, true);
+    alertsStore.clear();
+
+    const alerts = service.computeRegimeAlerts({
+      recentWindow: 3,
+      warningThresholdPercent: 5,
+    });
+    await Promise.resolve();
+    const alert = alerts[0];
+    if (alert === undefined) assert.fail("alerta esperado");
+    assert.equal(alert.muted, false);
+    assert.equal(alert.mutedUntilMs, null);
+    assert.equal(broadcastCount, 1);
+  });
+
+  void it("mute expirado nao bloqueia broadcast (Wave 26)", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "bt-expmute-"));
+    const histStore = new JsonlBacktestRunStore(join(tmpDir, "h.jsonl"));
+    const alertsStore = new JsonlRegimeAlertsHistoryStore(
+      join(tmpDir, "a.jsonl"),
+    );
+    const mutesStore = new JsonlRegimeAlertMutesStore(
+      join(tmpDir, "m.jsonl"),
+    );
+    const adapter = buildFakeAdapter(buildChart([100, 100, 100]));
+    let broadcastCount = 0;
+    const notifier = {
+      isEnabled: (): boolean => true,
+      broadcast: (): Promise<unknown> => {
+        broadcastCount += 1;
+        return Promise.resolve({ delivered: 1 });
+      },
+    };
+    const nowMs = 1_700_000_000_000;
+    const pastClock = nowMs - 2 * 60 * 60 * 1000;
+    // Mute criado 2h atras com duracao 1h -> ja expirou
+    mutesStore.upsert({
+      asset: "solana",
+      strategy: "ema_crossover",
+      mutedUntilMs: pastClock + 60 * 60 * 1000,
+      createdAtMs: pastClock,
+    });
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+      historyStore: histStore,
+      alertsHistoryStore: alertsStore,
+      notifier,
+      mutesStore,
+      clock: () => nowMs,
+    });
+
+    let ts = nowMs;
+    for (const pnl of [20, 20, 20, -5, -5, -5]) {
+      ts += 60_000;
+      histStore.append({
+        id: `exp-${ts}`,
+        ranAtMs: ts,
+        asset: "solana",
+        broker: "bybit",
+        range: "30d",
+        candleCount: 60,
+        cooldownCandles: 1,
+        commissionPercent: 0,
+        slippagePercent: 0,
+        results: [
+          {
+            strategy: "ema_crossover",
+            totalTrades: 5,
+            winRatePercent: 50,
+            profitFactor: 1.5,
+            totalPnlPercent: pnl,
+            maxDrawdownPercent: 1,
+          },
+        ],
+      });
+    }
+
+    const alerts = service.computeRegimeAlerts({
+      recentWindow: 3,
+      warningThresholdPercent: 5,
+    });
+    await Promise.resolve();
+    const alert = alerts[0];
+    if (alert === undefined) assert.fail("alerta esperado");
+    assert.equal(alert.muted, false);
+    assert.equal(broadcastCount, 1);
+    // listRegimeAlertMutes(true) filtra os expirados
+    assert.equal(service.listRegimeAlertMutes(true).length, 0);
+    assert.equal(service.listRegimeAlertMutes(false).length, 1);
+  });
+
+  void it("muteRegimeAlert sem store configurado lanca (Wave 26)", () => {
+    const adapter = buildFakeAdapter(buildChart([100, 100, 100]));
+    const service = new BacktestingService({
+      engine: new BacktestEngine(),
+      marketDataAdapter: adapter,
+    });
+    assert.throws(() =>
+      service.muteRegimeAlert({
+        asset: "bitcoin",
+        strategy: "ema_crossover",
+        durationMs: 60 * 60 * 1000,
+      }),
+    );
   });
 });
