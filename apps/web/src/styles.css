@@ -5117,3 +5117,101 @@ body.sidebar-collapsed .app-shell {
 /* Backtesting Recurrence Badges (Wave 23 — ADR-063) */
 .backtesting__badge { display:inline-block; padding:0 .35rem; border-radius:8px; background:#7c2d12; color:#fed7aa; font-size:.7rem; margin-left:.35rem; }
 .backtesting__badge--muted { background:#374151; color:#cbd5e1; }
+
+/* SMC confluence badge + Harmonic geometry scanner (Intelligence Desk) */
+.analysis-block--confluence {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  padding: 0.6rem 0.78rem;
+  border: 1px solid rgba(94, 138, 196, 0.32);
+  border-radius: 10px;
+  margin-bottom: 0.5rem;
+  background: rgba(6, 18, 33, 0.55);
+}
+.analysis-block--confluence[data-tone="ok"] {
+  border-color: rgba(101, 235, 182, 0.55);
+  background: rgba(20, 56, 42, 0.45);
+}
+.analysis-block--confluence[data-tone="ok"] strong {
+  color: #6ff0b8;
+}
+.analysis-block--confluence[data-tone="pending"] strong {
+  color: #ffd166;
+}
+.analysis-block--confluence small {
+  color: #8ca9ce;
+  font-size: 0.62rem;
+}
+.harmonic-scanner {
+  display: grid;
+  gap: 0.42rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-top: 0.42rem;
+}
+.harmonic-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.32rem;
+  padding: 0.52rem 0.62rem;
+  border: 1px solid rgba(94, 138, 196, 0.26);
+  border-radius: 10px;
+  background: rgba(6, 18, 33, 0.55);
+}
+.harmonic-card[data-tone="ok"] { border-color: rgba(101, 235, 182, 0.55); }
+.harmonic-card[data-tone="warning"] { border-color: rgba(255, 209, 102, 0.45); }
+.harmonic-card[data-tone="pending"] { border-color: rgba(94, 138, 196, 0.32); }
+.harmonic-card[data-tone="muted"] { opacity: 0.65; }
+.harmonic-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.46rem;
+}
+.harmonic-card__name {
+  color: #eaf4ff;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.harmonic-card__state {
+  font-size: 0.6rem;
+  font-weight: 700;
+  padding: 0.16rem 0.42rem;
+  border-radius: 999px;
+  background: rgba(94, 138, 196, 0.18);
+  color: #cbd9ee;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.harmonic-card__state--ok { background: rgba(101, 235, 182, 0.2); color: #6ff0b8; }
+.harmonic-card__state--warning { background: rgba(255, 209, 102, 0.18); color: #ffd166; }
+.harmonic-card__state--pending { background: rgba(135, 175, 230, 0.18); color: #b8cfee; }
+.harmonic-card__state--muted { background: rgba(120, 145, 175, 0.16); color: #8ca9ce; }
+.harmonic-card__progress {
+  height: 6px;
+  background: rgba(94, 138, 196, 0.18);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.harmonic-card__progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #4cc6ff, #6ff0b8);
+  border-radius: 999px;
+  transition: width 220ms ease;
+}
+.harmonic-card__progress-label {
+  color: #8ca9ce;
+  font-size: 0.62rem;
+}
+.harmonic-levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.32rem 0.68rem;
+  font-size: 0.66rem;
+  color: #cbd9ee;
+}
+.harmonic-levels strong {
+  color: #eaf4ff;
+  margin-right: 0.2rem;
+}
+.harmonic-levels--locked { font-style: italic; opacity: 0.7; }

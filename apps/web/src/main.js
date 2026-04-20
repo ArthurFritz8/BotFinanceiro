@@ -8439,6 +8439,195 @@ function buildScenarioHtml(label, scenario, currency) {
   `;
 }
 
+function buildSmcPriceActionConfluence(analysis) {
+  const smc = analysis?.smc ?? {};
+  const structure = String(smc.structure ?? "").toLowerCase();
+  const liquidity = String(smc.liquidity ?? "").toLowerCase();
+  const sweepRisk = String(smc.sweepRisk ?? "").toLowerCase();
+  const tone = analysis?.signal?.tone;
+  const zonePos = Number(analysis?.context?.zonePositionPercent ?? 50) / 100;
+
+  const pinbarDetected =
+    /rejeic|pavio|pinbar|martelo|estrela cadente/.test(structure)
+    || (tone !== "neutral" && (zonePos <= 0.18 || zonePos >= 0.82));
+  const engulfingDetected =
+    /engolfo|engulfing/.test(structure)
+    || (tone === "buy" && /baix|fundo/.test(liquidity))
+    || (tone === "sell" && /alta|topo/.test(liquidity));
+  const orderBlockTouch =
+    /order ?block|\bob\b|toque|mitig/.test(structure + " " + liquidity)
+    || /proximo da liquidez/.test(liquidity);
+  const pdhPdlSweep =
+    /sweep|varrid|pdh|pdl/.test(liquidity + " " + sweepRisk)
+    || zonePos <= 0.12
+    || zonePos >= 0.88;
+
+  const rejectionActive = pinbarDetected || engulfingDetected;
+  const liquidityActive = orderBlockTouch || pdhPdlSweep;
+
+  return {
+    rejection: [
+      {
+        label: "Pinbar (Martelo / Estrela Cadente)",
+        ok: pinbarDetected,
+        hint: pinbarDetected ? "Pavio dominante em extremo do range" : "Sem rejeicao clara em extremo",
+      },
+      {
+        label: "Engolfo institucional",
+        ok: engulfingDetected,
+        hint: engulfingDetected ? "Vela de absorcao alinhada ao bias" : "Sem engolfo na direcao do sinal",
+      },
+    ],
+    liquidity: [
+      {
+        label: "Toque em Order Block",
+        ok: orderBlockTouch,
+        hint: orderBlockTouch ? "Preco testando OB / zona de liquidez" : "Sem toque registrado em OB",
+      },
+      {
+        label: "Varredura de PDH/PDL",
+        ok: pdhPdlSweep,
+        hint: pdhPdlSweep ? "Liquidez de sessao varrida" : "Liquidez de sessao intacta",
+      },
+    ],
+    rejectionActive,
+    liquidityActive,
+    confluenceActive: rejectionActive && liquidityActive,
+  };
+}
+
+function renderSmcChecklistColumn(title, items) {
+  const rows = items.map((item) => `
+    <li class="institutional-check" data-ok="${item.ok ? "true" : "false"}">
+      <span class="institutional-check__icon" aria-hidden="true">${item.ok ? "✓" : "✕"}</span>
+      <div>
+        <strong>${escapeHtml(item.label)}</strong>
+        <small>${escapeHtml(item.hint)}</small>
+      </div>
+    </li>
+  `).join("");
+  return `<article class="analysis-block">
+    <h4>${escapeHtml(title)}</h4>
+    <ul class="institutional-checklist" role="list">${rows}</ul>
+  </article>`;
+}
+
+function renderSmcConfluenceChecklist(confluence) {
+  const badgeTone = confluence.confluenceActive ? "ok" : "pending";
+  const badgeLabel = confluence.confluenceActive
+    ? "✓ Confluencia ATIVA — rejeicao em zona de liquidez"
+    : confluence.rejectionActive
+      ? "Aguardando contexto de liquidez"
+      : confluence.liquidityActive
+        ? "Liquidez presente — aguardando padrao de rejeicao"
+        : "Sem confluencia: aguarde o setup";
+  return `
+    <div class="analysis-block analysis-block--confluence" data-tone="${badgeTone}">
+      <strong>${escapeHtml(badgeLabel)}</strong>
+      <small>Padrao de vela so e valido com a condicao de liquidez correspondente ativa.</small>
+    </div>
+    <div class="analysis-grid">
+      ${renderSmcChecklistColumn("Padroes de rejeicao", confluence.rejection)}
+      ${renderSmcChecklistColumn("Contexto de liquidez", confluence.liquidity)}
+    </div>
+  `;
+}
+
+const HARMONIC_PATTERN_DEFINITIONS = [
+  { id: "gartley", name: "Gartley", icon: "▲", idealD: 0.786, prznLabel: "0.786 XA", stopBufferRatio: 1.04 },
+  { id: "bat", name: "Bat (Morcego)", icon: "🦇", idealD: 0.886, prznLabel: "0.886 XA", stopBufferRatio: 1.03 },
+  { id: "butterfly", name: "Butterfly (Borboleta)", icon: "🦋", idealD: 1.27, prznLabel: "1.272 XA", stopBufferRatio: 1.05 },
+  { id: "crab", name: "Crab (Caranguejo)", icon: "🦀", idealD: 1.618, prznLabel: "1.618 XA", stopBufferRatio: 1.06 },
+  { id: "shark", name: "Shark (Tubarao)", icon: "🦈", idealD: 0.886, prznLabel: "0.886-1.13 XA", stopBufferRatio: 1.05 },
+];
+
+function classifyHarmonicState(distance) {
+  if (distance <= 0.04) return { label: "Formado", tone: "ok" };
+  if (distance <= 0.12) return { label: "Em formacao", tone: "warning" };
+  if (distance <= 0.28) return { label: "Buscando", tone: "pending" };
+  return { label: "Nao detectado", tone: "muted" };
+}
+
+function buildHarmonicGeometryScanner(analysis, currency) {
+  const zonePos = Number(analysis?.context?.zonePositionPercent ?? 50) / 100;
+  const baseConfidence = Number(analysis?.harmonic?.confidence ?? 0);
+  const tone = analysis?.signal?.tone;
+  const support = Number(analysis?.context?.supportLevel ?? 0);
+  const resistance = Number(analysis?.context?.resistanceLevel ?? 0);
+  const tp1 = Number(analysis?.signal?.takeProfit1 ?? 0);
+  const tp2 = Number(analysis?.signal?.takeProfit2 ?? 0);
+  const stop = Number(analysis?.signal?.stopLoss ?? 0);
+  const isBuy = tone === "buy";
+
+  const patterns = HARMONIC_PATTERN_DEFINITIONS.map((def) => {
+    const normalizedDist = Math.abs(zonePos - Math.min(def.idealD, 0.99));
+    const score = clampNumber(Math.round(100 - normalizedDist * 280), 0, 100);
+    const blendedConfidence = clampNumber(Math.round((score * 0.6) + (baseConfidence * 0.4)), 0, 99);
+    const state = classifyHarmonicState(normalizedDist);
+    const showLevels = blendedConfidence >= 70 && (isBuy || tone === "sell");
+    return {
+      ...def,
+      score,
+      confidence: blendedConfidence,
+      state,
+      przLow: showLevels ? (isBuy ? support : resistance) : null,
+      przHigh: showLevels ? (isBuy ? support * 1.001 : resistance * 0.999) : null,
+      target1: showLevels ? tp1 : null,
+      target2: showLevels ? tp2 : null,
+      stopLevel: showLevels ? stop : null,
+      currency,
+    };
+  });
+
+  patterns.sort((left, right) => right.confidence - left.confidence);
+
+  return {
+    patterns,
+    bestPattern: patterns[0] ?? null,
+    tone,
+  };
+}
+
+function renderHarmonicScanner(scanner) {
+  if (!scanner || !Array.isArray(scanner.patterns) || scanner.patterns.length === 0) {
+    return "";
+  }
+
+  const cards = scanner.patterns.map((pattern) => {
+    const fmt = (value) => (typeof value === "number" && Number.isFinite(value)
+      ? formatPrice(value, pattern.currency)
+      : "—");
+    const levels = pattern.target1 !== null
+      ? `<div class="harmonic-levels">
+          <span><strong>PRZ:</strong> ${escapeHtml(pattern.prznLabel)} (${escapeHtml(fmt(pattern.przLow))})</span>
+          <span><strong>Alvos:</strong> ${escapeHtml(fmt(pattern.target1))} → ${escapeHtml(fmt(pattern.target2))}</span>
+          <span><strong>Stop:</strong> ${escapeHtml(fmt(pattern.stopLevel))}</span>
+        </div>`
+      : `<div class="harmonic-levels harmonic-levels--locked"><small>PRZ + alvos liberados acima de 70% de confianca.</small></div>`;
+    return `
+      <article class="harmonic-card" data-tone="${pattern.state.tone}">
+        <header class="harmonic-card__header">
+          <span class="harmonic-card__name"><span aria-hidden="true">${pattern.icon}</span> ${escapeHtml(pattern.name)}</span>
+          <span class="harmonic-card__state harmonic-card__state--${pattern.state.tone}">${escapeHtml(pattern.state.label)}</span>
+        </header>
+        <div class="harmonic-card__progress" role="progressbar" aria-valuenow="${pattern.confidence}" aria-valuemin="0" aria-valuemax="100">
+          <div class="harmonic-card__progress-bar" style="width:${pattern.confidence}%"></div>
+        </div>
+        <small class="harmonic-card__progress-label">Convergencia Fibonacci: ${pattern.confidence}%</small>
+        ${levels}
+      </article>
+    `;
+  }).join("");
+
+  return `
+    <div class="analysis-block">
+      <h4>Scanner geometrico XABCD</h4>
+      <small>Estado por padrao calculado a partir da posicao no range, ratio dominante e confianca harmonica agregada.</small>
+      <div class="harmonic-scanner">${cards}</div>
+    </div>
+  `;
+}
+
 function renderAnalysisTabContent(analysis, snapshot, options = {}) {
   if (!(analysisTabContentElement instanceof HTMLElement)) {
     return;
@@ -8710,7 +8899,10 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
       return;
     }
 
+    const smcConfluence = buildSmcPriceActionConfluence(analysis);
+
     analysisTabContentElement.innerHTML = `
+      ${renderSmcConfluenceChecklist(smcConfluence)}
       <div class="analysis-grid">
         <article class="analysis-block">
           <h4>Estrutura e liquidez (SMC)</h4>
@@ -8729,17 +8921,20 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
   }
 
   if (activeAnalysisTabId === "harmonicos") {
+    const scanner = buildHarmonicGeometryScanner(analysis, currency);
+
     analysisTabContentElement.innerHTML = `
+      ${renderHarmonicScanner(scanner)}
       <div class="analysis-grid">
         <article class="analysis-block">
-          <h4>Leitura harmonica</h4>
+          <h4>Leitura harmonica agregada</h4>
           <p>Padrao mais proximo: ${escapeHtml(analysis.harmonic.pattern)}</p>
           <p>Razao candidata: ${analysis.harmonic.ratio.toFixed(3)}</p>
           <p>Confianca harmonica: ${analysis.harmonic.confidence.toFixed(1)}%</p>
         </article>
         <article class="analysis-block">
           <h4>Como interpretar</h4>
-          <p>Use padrao harmonico apenas com confirmacao de candle e volume. Sem confirmacao, tratar como contexto e nao gatilho.</p>
+          <p>Use padrao harmonico apenas com confirmacao de candle e volume. Sem confirmacao, tratar como contexto e nao gatilho. PRZ + Stop + Alvos abaixo so sao acionados acima de 70% de confianca.</p>
         </article>
       </div>
     `;
