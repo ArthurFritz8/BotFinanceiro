@@ -6142,3 +6142,329 @@ body.sidebar-collapsed .app-shell {
   .smc-zone-marker { animation: none; }
   .smc-drilldown { break-inside: avoid; }
 }
+
+/* =============================================================
+   ADR-073 — Central WEGD Institucional (Wyckoff · Elliott · Gann · Dow)
+   Glassmorphism dark, sub-tabs ARIA, prefers-reduced-motion safe.
+   ============================================================= */
+.wegd-institutional {
+  position: relative;
+  display: flex; flex-direction: column; gap: 16px;
+  padding: 18px 20px 16px;
+  background: linear-gradient(180deg, rgba(15,23,42,0.55) 0%, rgba(2,6,23,0.45) 100%);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px;
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  box-shadow: 0 18px 44px rgba(2,6,23,0.45);
+  color: #e5e7eb;
+}
+.wegd-institutional::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+  background: radial-gradient(120% 60% at 50% -10%, rgba(56,189,248,0.06) 0%, transparent 60%);
+}
+.wegd-institutional[data-tone="bull"]::before {
+  background: radial-gradient(120% 60% at 50% -10%, rgba(34,197,94,0.10) 0%, transparent 60%);
+}
+.wegd-institutional[data-tone="bear"]::before {
+  background: radial-gradient(120% 60% at 50% -10%, rgba(239,68,68,0.10) 0%, transparent 60%);
+}
+
+.wegd-institutional .font-mono {
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.wegd-institutional__head {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 12px 14px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+}
+.wegd-head-identity { display: flex; align-items: center; gap: 12px; }
+.wegd-head-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; border-radius: 50%;
+  background: linear-gradient(135deg, #06b6d4, #34d399);
+  color: #0f172a; font-weight: 700; font-size: 16px;
+}
+.wegd-head-title { margin: 0; font-size: 15px; font-weight: 700; color: #f1f5f9; letter-spacing: 0.01em; }
+.wegd-head-sub { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.08em; }
+.wegd-head-verdict { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.wegd-verdict-badge {
+  font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px;
+  background: rgba(148,163,184,0.18); color: #cbd5e1;
+  border: 1px solid rgba(148,163,184,0.22);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.wegd-verdict-badge[data-tone="bull"] { background: rgba(34,197,94,0.18); color: #4ade80; border-color: rgba(34,197,94,0.32); }
+.wegd-verdict-badge[data-tone="bear"] { background: rgba(239,68,68,0.18); color: #f87171; border-color: rgba(239,68,68,0.32); }
+.wegd-verdict-meta { font-size: 11px; color: #94a3b8; }
+.wegd-head-summary {
+  margin: -4px 4px 0; font-size: 12px; color: #94a3b8;
+  padding: 8px 12px; background: rgba(255,255,255,0.02); border-radius: 8px;
+  border-left: 2px solid rgba(56,189,248,0.4);
+}
+
+/* Sub-tabs Wyckoff/Elliott/Gann/Dow */
+.wegd-subnav {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  padding: 6px; background: rgba(15,23,42,0.55); border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.wegd-subtab-button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 9px 12px; border-radius: 8px;
+  background: transparent; border: 1px solid transparent;
+  color: #cbd5e1; font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+  cursor: pointer; transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+.wegd-subtab-button:hover { background: rgba(255,255,255,0.04); color: #f1f5f9; }
+.wegd-subtab-button:focus-visible { outline: 2px solid #38bdf8; outline-offset: 2px; }
+.wegd-subtab-button.is-active {
+  background: rgba(56,189,248,0.10);
+  border-color: rgba(56,189,248,0.40);
+  color: #f0f9ff;
+  box-shadow: 0 0 0 1px rgba(56,189,248,0.18) inset;
+}
+.wegd-subtab-icon { font-size: 14px; opacity: 0.85; }
+
+/* Painel ativo */
+.wegd-panel { display: flex; flex-direction: column; gap: 14px; }
+
+.wegd-panel-headline {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, rgba(15,23,42,0.55), rgba(2,6,23,0.65));
+  border: 1px solid rgba(255,255,255,0.06);
+  border-left: 3px solid rgba(148,163,184,0.4);
+  border-radius: 10px;
+}
+.wegd-panel-headline[data-tone="bull"] { border-left-color: #22c55e; }
+.wegd-panel-headline[data-tone="bear"] { border-left-color: #ef4444; }
+.wegd-headline-title { display: flex; flex-direction: column; gap: 2px; }
+.wegd-headline-eyebrow { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8; }
+.wegd-headline-phase { font-size: 18px; font-weight: 700; color: #f1f5f9; }
+.wegd-headline-sub { font-size: 11px; color: #94a3b8; }
+.wegd-headline-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.wegd-headline-progress { font-size: 18px; font-weight: 700; color: #f1f5f9; }
+.wegd-headline-tag { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; }
+
+/* Barra de progresso (sempre clamped 0-100% no JS — FIX bug 257%) */
+.wegd-progress-track {
+  position: relative; height: 6px; background: rgba(255,255,255,0.06);
+  border-radius: 999px; overflow: hidden;
+}
+.wegd-progress-fill {
+  height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, #38bdf8, #22d3ee);
+  transition: width 220ms cubic-bezier(0.4,0,0.2,1);
+}
+.wegd-progress-fill.is-buy { background: linear-gradient(90deg, #22c55e, #4ade80); }
+.wegd-progress-fill.is-sell { background: linear-gradient(90deg, #ef4444, #f87171); }
+.wegd-progress-fill.is-neutral { background: linear-gradient(90deg, #64748b, #94a3b8); }
+.wegd-progress-caption { font-size: 11px; color: #94a3b8; margin: -6px 2px 0; }
+
+/* Cards genéricos */
+.wegd-grid { display: grid; gap: 12px; }
+.wegd-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.wegd-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 720px) {
+  .wegd-grid-2, .wegd-grid-3 { grid-template-columns: 1fr; }
+}
+.wegd-card {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 14px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+}
+.wegd-card-title {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin: 0; font-size: 12px; font-weight: 700;
+  color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.wegd-card-title.is-bull { color: #4ade80; }
+.wegd-card-title.is-bear { color: #f87171; }
+.wegd-card-pill {
+  font-size: 10px; padding: 2px 8px; border-radius: 999px;
+  background: rgba(34,197,94,0.18); color: #4ade80;
+  border: 1px solid rgba(34,197,94,0.30); text-transform: none; letter-spacing: 0;
+}
+.wegd-card-pill.is-warn { background: rgba(251,191,36,0.16); color: #fbbf24; border-color: rgba(251,191,36,0.32); }
+.wegd-card-foot { margin: 0; font-size: 11px; color: #94a3b8; }
+
+/* Wyckoff específicos */
+.wegd-cycle-row { display: flex; align-items: center; gap: 10px; }
+.wegd-cycle-cell {
+  flex: 1; display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 10px; background: rgba(15,23,42,0.5);
+  border: 1px solid rgba(255,255,255,0.05); border-radius: 8px;
+}
+.wegd-cycle-cell span { font-size: 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.06em; }
+.wegd-cycle-cell strong { font-size: 13px; color: #f1f5f9; }
+.wegd-cycle-cell.is-next { background: rgba(56,189,248,0.06); border-color: rgba(56,189,248,0.22); }
+.wegd-cycle-arrow { color: #64748b; font-size: 16px; }
+
+.wegd-composite {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px; border-radius: 8px;
+  background: rgba(15,23,42,0.5); border: 1px solid rgba(255,255,255,0.05);
+}
+.wegd-composite.is-buy { background: rgba(34,197,94,0.10); border-color: rgba(34,197,94,0.30); }
+.wegd-composite.is-sell { background: rgba(239,68,68,0.10); border-color: rgba(239,68,68,0.30); }
+.wegd-composite-icon { font-size: 22px; }
+.wegd-composite-label { font-size: 14px; color: #f1f5f9; }
+
+.wegd-event-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.wegd-event-item {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center;
+  padding: 8px 10px; border-radius: 6px;
+  background: rgba(15,23,42,0.4); border-left: 2px solid rgba(148,163,184,0.4);
+  font-size: 11px;
+}
+.wegd-event-item.is-confirmed { border-left-color: #22c55e; background: rgba(34,197,94,0.06); }
+.wegd-event-item.is-pending { border-left-color: #fbbf24; background: rgba(251,191,36,0.05); color: #cbd5e1; }
+.wegd-event-item.is-empty { font-style: italic; color: #6b7280; border-left-color: transparent; grid-template-columns: 1fr; }
+.wegd-event-key {
+  display: inline-block; padding: 1px 6px; border-radius: 4px;
+  background: rgba(34,197,94,0.20); color: #4ade80; font-weight: 700; font-size: 10px;
+}
+.wegd-event-name { color: #cbd5e1; }
+.wegd-event-price { color: #f1f5f9; }
+.wegd-extra-detect { margin: 6px 0 0; font-size: 11px; color: #4ade80; }
+
+.wegd-volume-row {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center;
+  padding: 10px 12px; border-radius: 8px;
+  background: rgba(15,23,42,0.4); border: 1px solid rgba(255,255,255,0.06);
+}
+.wegd-volume-row[data-tone="bull"] { border-color: rgba(34,197,94,0.30); }
+.wegd-volume-row[data-tone="bear"] { border-color: rgba(239,68,68,0.30); }
+.wegd-volume-row strong { font-size: 14px; color: #f1f5f9; }
+.wegd-volume-narr { font-size: 11px; color: #94a3b8; }
+.wegd-volume-meta { font-size: 11px; color: #cbd5e1; }
+
+/* Elliott */
+.wegd-wave-row {
+  display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px;
+}
+@media (max-width: 720px) {
+  .wegd-wave-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+.wegd-wave-cell {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 8px 4px; border-radius: 8px;
+  background: rgba(15,23,42,0.5); border: 1px solid rgba(255,255,255,0.06);
+}
+.wegd-wave-cell.is-impulsive { border-color: rgba(34,197,94,0.30); }
+.wegd-wave-cell.is-corrective { border-color: rgba(251,191,36,0.30); }
+.wegd-wave-label { font-size: 14px; font-weight: 700; color: #f1f5f9; }
+.wegd-wave-cell.is-impulsive .wegd-wave-label { color: #4ade80; }
+.wegd-wave-cell.is-corrective .wegd-wave-label { color: #fbbf24; }
+.wegd-wave-price { font-size: 10px; color: #94a3b8; }
+.wegd-elliott-badge {
+  font-size: 10px; padding: 3px 8px; border-radius: 999px;
+  background: rgba(148,163,184,0.18); color: #cbd5e1; border: 1px solid rgba(148,163,184,0.22);
+  text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;
+}
+.wegd-elliott-badge[data-tone="bull"] { background: rgba(34,197,94,0.18); color: #4ade80; border-color: rgba(34,197,94,0.30); }
+.wegd-elliott-badge[data-tone="bear"] { background: rgba(239,68,68,0.18); color: #f87171; border-color: rgba(239,68,68,0.30); }
+.wegd-next-wave {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 14px 10px; border-radius: 8px;
+  background: rgba(56,189,248,0.06); border: 1px solid rgba(56,189,248,0.22);
+}
+.wegd-next-wave strong { font-size: 16px; color: #38bdf8; }
+.wegd-next-wave span { font-size: 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.06em; }
+.wegd-fib-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.wegd-fib-target {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 10px; border-radius: 6px;
+  background: rgba(15,23,42,0.45); border: 1px solid rgba(255,255,255,0.05);
+  font-size: 11px;
+}
+.wegd-fib-target.is-empty { font-style: italic; color: #6b7280; justify-content: center; }
+.wegd-fib-ratio { color: #94a3b8; }
+.wegd-fib-price { color: #f1f5f9; }
+.wegd-invalidation { border-color: rgba(239,68,68,0.30); background: rgba(239,68,68,0.05); }
+.wegd-invalidation-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.wegd-invalidation-row span { font-size: 11px; color: #94a3b8; }
+.wegd-invalidation-row strong { font-size: 14px; color: #f87171; }
+
+/* Gann */
+.wegd-gann-deg { font-size: 13px; color: #94a3b8; }
+.wegd-gann-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.wegd-gann-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 10px; border-radius: 6px;
+  background: rgba(15,23,42,0.45); font-size: 11px;
+}
+.wegd-gann-row.is-support { border-left: 2px solid #22c55e; color: #4ade80; }
+.wegd-gann-row.is-resistance { border-left: 2px solid #ef4444; color: #f87171; }
+.wegd-gann-row strong { color: #f1f5f9; }
+
+/* Dow */
+.wegd-trend-card { align-items: center; text-align: center; }
+.wegd-trend-card[data-tone="bull"] { border-color: rgba(34,197,94,0.32); background: rgba(34,197,94,0.06); }
+.wegd-trend-card[data-tone="bear"] { border-color: rgba(239,68,68,0.32); background: rgba(239,68,68,0.06); }
+.wegd-trend-card[data-tone="neutral"] { border-color: rgba(251,191,36,0.28); background: rgba(251,191,36,0.05); }
+.wegd-trend-card .wegd-card-title { justify-content: center; color: #94a3b8; }
+.wegd-trend-value { display: flex; align-items: center; gap: 8px; justify-content: center; }
+.wegd-trend-arrow { font-size: 18px; }
+.wegd-trend-card[data-tone="bull"] .wegd-trend-value strong { color: #4ade80; }
+.wegd-trend-card[data-tone="bear"] .wegd-trend-value strong { color: #f87171; }
+.wegd-trend-card[data-tone="neutral"] .wegd-trend-value strong { color: #fbbf24; }
+
+.wegd-market-phase { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 8px; background: rgba(15,23,42,0.45); border: 1px solid rgba(255,255,255,0.06); }
+.wegd-market-phase[data-tone="bull"] { border-color: rgba(34,197,94,0.30); }
+.wegd-market-phase[data-tone="bear"] { border-color: rgba(239,68,68,0.30); }
+.wegd-market-phase-head { display: flex; align-items: center; justify-content: space-between; }
+.wegd-market-phase-head strong { font-size: 14px; color: #f1f5f9; }
+.wegd-market-phase-head span { font-size: 13px; color: #cbd5e1; cursor: help; }
+
+.wegd-confirm-card {
+  display: flex; flex-direction: column; gap: 4px; align-items: center; text-align: center;
+  padding: 10px; border-radius: 8px;
+  background: rgba(15,23,42,0.45); border: 1px solid rgba(255,255,255,0.06);
+}
+.wegd-confirm-card.is-confirmed { background: rgba(34,197,94,0.08); border-color: rgba(34,197,94,0.30); }
+.wegd-confirm-card.is-pending { background: rgba(251,191,36,0.06); border-color: rgba(251,191,36,0.28); }
+.wegd-confirm-card span { font-size: 11px; color: #94a3b8; }
+.wegd-confirm-card.is-confirmed strong { color: #4ade80; }
+.wegd-confirm-card.is-pending strong { color: #fbbf24; }
+
+.wegd-empty-state { text-align: center; color: #94a3b8; }
+.wegd-empty-state p { margin: 6px 0 0; font-size: 12px; }
+
+.wegd-panel-summary {
+  margin: 4px 0 0; padding: 10px 12px;
+  background: rgba(56,189,248,0.05); border: 1px solid rgba(56,189,248,0.18);
+  border-radius: 8px; font-size: 11px; color: #cbd5e1;
+}
+
+.wegd-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 4px 0;
+  font-size: 10px; color: #6b7280;
+}
+.wegd-foot-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px; border-radius: 999px;
+  background: rgba(251,191,36,0.10); color: #fbbf24;
+  border: 1px solid rgba(251,191,36,0.22);
+  cursor: help;
+}
+.wegd-foot-hint { color: #6b7280; }
+
+@media (prefers-reduced-motion: reduce) {
+  .wegd-progress-fill, .wegd-subtab-button { transition: none; }
+}
+
+@media print {
+  .wegd-institutional { color: #1f2937; }
+  .wegd-foot, .wegd-subnav { display: none; }
+  .wegd-panel { break-inside: avoid; }
+}

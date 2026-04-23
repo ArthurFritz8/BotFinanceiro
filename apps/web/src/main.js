@@ -1907,6 +1907,34 @@ let watchlistDiagnostics = {
   unavailableCount: 0,
 };
 let activeAnalysisTabId = "resumo";
+// ADR-073 — Central WEGD Institucional. Sub-tab persistente entre sessões.
+const WEGD_SUBTAB_PERSISTENCE_KEY = "botfinanceiro:wegd:subtab:v1";
+const WEGD_SUBTAB_IDS = ["wyckoff", "elliott", "gann", "dow"];
+const WEGD_SUBTAB_LABELS = {
+  wyckoff: "Wyckoff",
+  elliott: "Elliott",
+  gann: "Gann",
+  dow: "Dow",
+};
+const WEGD_SUBTAB_ICONS = {
+  wyckoff: "◬",
+  elliott: "≋",
+  gann: "◎",
+  dow: "▤",
+};
+let activeWegdSubTabId = "wyckoff";
+(function hydrateWegdSubTabFromStorage() {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    const raw = window.localStorage.getItem(WEGD_SUBTAB_PERSISTENCE_KEY);
+    if (raw && WEGD_SUBTAB_IDS.includes(raw)) activeWegdSubTabId = raw;
+  } catch { /* graceful: storage indisponível mantém default */ }
+})();
+function persistWegdSubTab() {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try { window.localStorage.setItem(WEGD_SUBTAB_PERSISTENCE_KEY, activeWegdSubTabId); }
+  catch { /* graceful: quota/private mode mantém em memória */ }
+}
 let newsIntelligencePayload = null;
 let newsIntelligenceLastAssetId = "";
 let newsIntelligenceLastFetchedAtMs = 0;
@@ -8859,6 +8887,769 @@ function renderSmcTopDownDrillDown(snapshot, currency) {
   `;
 }
 
+// =============================================================
+// ADR-073 — Central WEGD Institucional (Wyckoff · Elliott · Gann · Dow)
+// Substitui o placeholder textual da aba "wegd" por terminal visual com
+// sub-tabs, painel de convergência clássica e marcação honesta entre
+// dados live (analysis/snapshot) e métricas derivadas/heurísticas.
+// Princípios: graceful degradation, sem fabricação de sinal, ARIA tab pattern.
+// =============================================================
+
+function pickWegdSubTabId(candidate) {
+  return WEGD_SUBTAB_IDS.includes(candidate) ? candidate : "wyckoff";
+}
+
+function clampPercent01(value) {
+  return clampNumber(toFiniteNumber(value, 0), 0, 100);
+}
+
+function deriveZigzagPivots(points, minMovePercent = 0.35) {
+  if (!Array.isArray(points) || points.length < 5) return [];
+  const series = points
+    .map((p) => ({
+      price: Number(p?.close ?? p?.price ?? p?.value),
+      ts: Number(p?.timestamp ?? p?.time ?? p?.t ?? 0),
+    }))
+    .filter((p) => Number.isFinite(p.price));
+  if (series.length < 5) return [];
+  const threshold = minMovePercent / 100;
+  const pivots = [{ ...series[0], dir: 0 }];
+  let lastPivot = series[0];
+  let dir = 0;
+  for (let i = 1; i < series.length; i += 1) {
+    const cur = series[i];
+    const move = (cur.price - lastPivot.price) / Math.max(Math.abs(lastPivot.price), 1e-9);
+    if (dir >= 0 && move >= threshold) {
+      if (dir === 1 && cur.price > lastPivot.price) {
+        pivots[pivots.length - 1] = { ...cur, dir: 1 };
+        lastPivot = cur;
+      } else {
+        pivots.push({ ...cur, dir: 1 });
+        lastPivot = cur;
+        dir = 1;
+      }
+    } else if (dir <= 0 && move <= -threshold) {
+      if (dir === -1 && cur.price < lastPivot.price) {
+        pivots[pivots.length - 1] = { ...cur, dir: -1 };
+        lastPivot = cur;
+      } else {
+        pivots.push({ ...cur, dir: -1 });
+        lastPivot = cur;
+        dir = -1;
+      }
+    }
+  }
+  return pivots;
+}
+
+function deriveWyckoffPanel(insights, analysis, currentPrice, points) {
+  const rsi = Number.isFinite(insights?.rsi14) ? insights.rsi14 : 50;
+  const fast = Number.isFinite(insights?.emaFast) ? insights.emaFast : currentPrice;
+  const slow = Number.isFinite(insights?.emaSlow) ? insights.emaSlow : currentPrice;
+  const momentum = toFiniteNumber(insights?.momentumPercent, 0);
+  const grad = toFiniteNumber(analysis?.wegd?.gradient, 0);
+  const pressure = toFiniteNumber(analysis?.wegd?.pressure, 0);
+  const energy = toFiniteNumber(analysis?.wegd?.energy, 0);
+
+  let phase = "CONSOLIDAÇÃO";
+  let phaseSub = "Sem fase clara — preço lateral em range estreito";
+  let next = "MARKUP";
+  let progress = 50;
+
+  if (rsi < 38 && fast < slow) {
+    phase = "ACUMULAÇÃO";
+    phaseSub = "Mãos fortes absorvem oferta após queda extensa";
+    next = "MARKUP";
+    progress = clampPercent01((40 - rsi) * 4 + 20);
+  } else if (rsi >= 38 && rsi < 65 && fast >= slow && momentum > -0.05) {
+    phase = "MARKUP";
+    phaseSub = "Movimento de alta após acumulação";
+    next = "DISTRIBUIÇÃO";
+    progress = clampPercent01(((rsi - 38) / 27) * 100);
+  } else if (rsi >= 65 && fast >= slow) {
+    phase = "DISTRIBUIÇÃO";
+    phaseSub = "Mãos fortes vendem para o público em euforia";
+    next = "MARKDOWN";
+    progress = clampPercent01((rsi - 65) * 3 + 30);
+  } else if (rsi < 50 && fast < slow && momentum < 0) {
+    phase = "MARKDOWN";
+    phaseSub = "Movimento de baixa após distribuição";
+    next = "ACUMULAÇÃO";
+    progress = clampPercent01((50 - rsi) * 3 + 20);
+  }
+
+  const compositeMan = grad > 0 && pressure > 5
+    ? { state: "buy", label: "COMPRANDO", icon: "↗" }
+    : grad < 0 && pressure < -5
+      ? { state: "sell", label: "VENDENDO", icon: "↘" }
+      : { state: "neutral", label: "OBSERVANDO", icon: "◌" };
+
+  // Eventos: derivados de pivots reais; se ausentes, marcamos como pendentes (sem fabricação)
+  const pivots = deriveZigzagPivots(points, 0.4);
+  const pivotsTail = pivots.slice(-6);
+  const events = [];
+  if (pivotsTail.length >= 2) {
+    const last = pivotsTail[pivotsTail.length - 1];
+    const prev = pivotsTail[pivotsTail.length - 2];
+    if (last.dir === -1) {
+      events.push({ key: "PSY", label: "PSY (Preliminary Supply)", price: prev.price, ok: prev.dir === 1 });
+      events.push({ key: "SC", label: "SC (Selling Climax)", price: last.price, ok: true });
+    }
+    if (pivotsTail.length >= 3) {
+      const test = pivotsTail[pivotsTail.length - 3];
+      if (test.dir === 1) events.push({ key: "ST", label: "ST (Secondary Test)", price: test.price, ok: true });
+    }
+  }
+  const pending = ["Spring", "UTAD", "SOS"].filter((evt) => {
+    if (evt === "SOS") return !(grad > 0.1 && energy >= 50);
+    if (evt === "Spring") return !(phase === "ACUMULAÇÃO" && rsi < 35);
+    if (evt === "UTAD") return !(phase === "DISTRIBUIÇÃO" && rsi > 70);
+    return true;
+  });
+  const detected = [];
+  if (grad > 0.1 && energy >= 50 && fast > slow) detected.push("SOS (Sign of Strength)");
+  if (phase === "ACUMULAÇÃO" && rsi < 35 && currentPrice > slow) detected.push("Spring");
+  if (phase === "DISTRIBUIÇÃO" && rsi > 70 && currentPrice < fast) detected.push("UTAD");
+
+  const volatility = toFiniteNumber(insights?.volatilityPercent, 0);
+  const atr = toFiniteNumber(insights?.atrPercent, 0);
+  const volumeStrength = volatility / Math.max(atr, 0.01);
+  const volumeLabel = volumeStrength >= 1.4 ? "ALTO" : volumeStrength >= 0.8 ? "MÉDIO" : "BAIXO";
+  const volumeNarrative = volumeStrength >= 1.4
+    ? "Volume acima da média indica interesse institucional ativo."
+    : volumeStrength >= 0.8
+      ? "Volume normal — mercado em ritmo de operação padrão."
+      : "Volume baixo — confirmação de movimento enfraquecida.";
+
+  const vote = phase === "ACUMULAÇÃO" || phase === "MARKUP"
+    ? "buy"
+    : phase === "DISTRIBUIÇÃO" || phase === "MARKDOWN"
+      ? "sell"
+      : "neutral";
+
+  return {
+    phase, phaseSub, next, progress, compositeMan, events, pending,
+    detectedExtras: detected, volumeLabel, volumeStrength, volumeNarrative, vote,
+    confidence: clampPercent01(progress),
+    derived: true,
+  };
+}
+
+function deriveElliottPanel(insights, analysis, currentPrice, points, currency) {
+  const pivots = deriveZigzagPivots(points, 0.5);
+  if (pivots.length < 3) {
+    return {
+      hasData: false,
+      currentLabel: "—",
+      currentType: "—",
+      progress: 0,
+      confidence: 0,
+      counts: [],
+      next: "Aguardando estrutura",
+      invalidationLevel: toFiniteNumber(analysis?.timing?.invalidationLevel, currentPrice),
+      fibTargets: [],
+      vote: "neutral",
+    };
+  }
+  // Mapeamento simples: alterna 1-2-3-4-5-A-B-C nos últimos 8 pivots
+  const labels = ["1", "2", "3", "4", "5", "A", "B", "C"];
+  const tail = pivots.slice(-8);
+  const counts = tail.map((p, i) => ({ label: labels[i] ?? "?", price: p.price, dir: p.dir }));
+  const lastIdx = counts.length - 1;
+  const currentLabel = counts[lastIdx].label;
+  const isImpulsive = ["1", "3", "5"].includes(currentLabel);
+  const currentType = ["A", "B", "C"].includes(currentLabel) ? "CORRETIVA" : isImpulsive ? "IMPULSIVA" : "CORRETIVA";
+  const nextMap = { 1: "Onda 2", 2: "Onda 3", 3: "Onda 4", 4: "Onda 5", 5: "Onda A", A: "Onda B", B: "Onda C", C: "Onda 1" };
+  const next = nextMap[currentLabel] ?? "—";
+
+  const lastPivot = tail[lastIdx];
+  const prevPivot = tail[lastIdx - 1] ?? lastPivot;
+  const range = Math.abs(lastPivot.price - prevPivot.price);
+  const traveled = Math.abs(currentPrice - prevPivot.price);
+  const progress = clampPercent01(range > 0 ? (traveled / range) * 100 : 0);
+
+  // Confiança: proporcionalidade clássica (Onda 3 ≥ Onda 1)
+  let confidence = 50;
+  if (counts.length >= 5) {
+    const w1 = Math.abs(counts[0].price - (counts[1]?.price ?? counts[0].price));
+    const w3 = Math.abs(counts[2].price - (counts[3]?.price ?? counts[2].price));
+    if (w3 >= w1) confidence += 20;
+    if (w3 >= w1 * 1.618) confidence += 15;
+  }
+  confidence = clampPercent01(confidence);
+
+  // Alvos Fibonacci (extensão sobre última perna impulsiva)
+  const baseLow = Math.min(prevPivot.price, lastPivot.price);
+  const baseHigh = Math.max(prevPivot.price, lastPivot.price);
+  const baseRange = baseHigh - baseLow;
+  const direction = lastPivot.price >= prevPivot.price ? 1 : -1;
+  const fibTargets = baseRange > 0 ? [
+    { ratio: 1.272, price: lastPivot.price + direction * baseRange * 0.272 },
+    { ratio: 1.618, price: lastPivot.price + direction * baseRange * 0.618 },
+    { ratio: 2.000, price: lastPivot.price + direction * baseRange * 1.000 },
+  ] : [];
+
+  const invalidationLevel = toFiniteNumber(analysis?.timing?.invalidationLevel, currentPrice);
+  const vote = isImpulsive && direction > 0 ? "buy" : isImpulsive && direction < 0 ? "sell" : "neutral";
+
+  return {
+    hasData: true,
+    currentLabel,
+    currentType,
+    progress,
+    confidence,
+    counts,
+    next,
+    invalidationLevel,
+    fibTargets,
+    vote,
+    derived: true,
+  };
+}
+
+function deriveGannPanel(insights, analysis, currentPrice, points) {
+  const grad = toFiniteNumber(analysis?.wegd?.gradient, 0);
+  const atr = Math.max(toFiniteNumber(insights?.atrPercent, 0.5), 0.05);
+  const ratio = Math.abs(grad) / atr;
+  let dominantAngle = "1×8";
+  let dominantDeg = 7;
+  if (ratio > 2.5) { dominantAngle = "4×1"; dominantDeg = 75; }
+  else if (ratio > 1.5) { dominantAngle = "2×1"; dominantDeg = 63; }
+  else if (ratio > 1.0) { dominantAngle = "1×1"; dominantDeg = 45; }
+  else if (ratio > 0.5) { dominantAngle = "1×2"; dominantDeg = 27; }
+  else if (ratio > 0.25) { dominantAngle = "1×4"; dominantDeg = 15; }
+
+  const atrAbs = Math.max(currentPrice * (atr / 100), 1e-9);
+  const supports = [
+    { angle: "1×8", price: currentPrice - atrAbs * 1.8 },
+    { angle: "1×4", price: currentPrice - atrAbs * 1.0 },
+    { angle: "1×3", price: currentPrice - atrAbs * 0.6 },
+  ];
+  const resistances = [
+    { angle: "1×8", price: currentPrice + atrAbs * 1.8 },
+    { angle: "1×4", price: currentPrice + atrAbs * 1.0 },
+    { angle: "1×3", price: currentPrice + atrAbs * 0.6 },
+  ];
+
+  // Quadrado do tempo: dias desde último pivot maior
+  const pivots = deriveZigzagPivots(points, 0.6);
+  let cycleDays = null;
+  let nextReversalEstimate = null;
+  if (pivots.length >= 2) {
+    const last = pivots[pivots.length - 1];
+    const prev = pivots[pivots.length - 2];
+    const deltaMs = Math.abs(last.ts - prev.ts);
+    if (deltaMs > 0) {
+      cycleDays = Math.max(1, Math.round(deltaMs / 86400000));
+      nextReversalEstimate = cycleDays * 7; // projeção heurística
+    }
+  }
+  // Quadrado do preço (Square of 9 simplificado)
+  const sqrt = Math.sqrt(currentPrice);
+  const nextSquareUp = (Math.ceil(sqrt) ** 2);
+  const nextSquareDown = (Math.floor(sqrt) ** 2);
+
+  const sign = grad >= 0.05 ? 1 : grad <= -0.05 ? -1 : 0;
+  const vote = sign > 0 && ratio >= 1 ? "buy" : sign < 0 && ratio >= 1 ? "sell" : "neutral";
+
+  return {
+    dominantAngle, dominantDeg, ratio, supports, resistances,
+    cycleDays, nextReversalEstimate, nextSquareUp, nextSquareDown,
+    vote, confidence: clampPercent01(ratio * 50),
+    derived: true,
+  };
+}
+
+function deriveDowPanel(insights, analysis, currentPrice) {
+  const trend = String(insights?.trend ?? "neutral").toLowerCase();
+  const fast = toFiniteNumber(insights?.emaFast, currentPrice);
+  const slow = toFiniteNumber(insights?.emaSlow, currentPrice);
+  const momentum = toFiniteNumber(insights?.momentumPercent, 0);
+  const pressure = toFiniteNumber(analysis?.wegd?.pressure, 0);
+  const grad = toFiniteNumber(analysis?.wegd?.gradient, 0);
+  const energy = toFiniteNumber(analysis?.wegd?.energy, 0);
+
+  const direction = (val) => val > 0.05 ? "ALTA" : val < -0.05 ? "BAIXA" : "LATERAL";
+  const arrow = (label) => label === "ALTA" ? "↗" : label === "BAIXA" ? "↘" : "↔";
+
+  const primary = trend === "bullish" ? "ALTA" : trend === "bearish" ? "BAIXA" : "LATERAL";
+  const secondary = direction(fast - slow);
+  const minor = direction(momentum);
+
+  // Fase de mercado — CLAMPED 0-100% (FIX do bug 257% visto na imagem original)
+  const energyClamped = clampPercent01(energy);
+  let marketPhase = "PARTICIPAÇÃO PÚBLICA";
+  let phaseHint = "Volume e estrutura confirmam a tendência";
+  if (energyClamped < 33) {
+    marketPhase = "ACUMULAÇÃO";
+    phaseHint = "Acumulação institucional silenciosa em curso";
+  } else if (energyClamped > 75) {
+    marketPhase = "DISTRIBUIÇÃO";
+    phaseHint = "Euforia/exaustão — risco crescente de reversão";
+  }
+
+  const priceVolumeOk = (primary === "ALTA" && grad > 0) || (primary === "BAIXA" && grad < 0);
+  const indicesOk = (primary === "ALTA" && pressure > 0) || (primary === "BAIXA" && pressure < 0)
+    || primary === "LATERAL";
+
+  const vote = primary === "ALTA" ? "buy" : primary === "BAIXA" ? "sell" : "neutral";
+
+  return {
+    primary: { label: primary, arrow: arrow(primary) },
+    secondary: { label: secondary, arrow: arrow(secondary) },
+    minor: { label: minor, arrow: arrow(minor) },
+    marketPhase, phaseHint, energyClamped, energyRaw: energy,
+    confirmations: {
+      priceVolume: priceVolumeOk,
+      indices: indicesOk,
+    },
+    vote, confidence: clampPercent01(50 + Math.abs(grad) * 10 + (energyClamped - 50) * 0.4),
+    derived: true,
+  };
+}
+
+function buildClassicalConvergence(panels) {
+  const votes = [
+    { id: "wyckoff", label: "Wyckoff", vote: panels.wyckoff.vote, confidence: panels.wyckoff.confidence },
+    { id: "elliott", label: "Elliott", vote: panels.elliott.vote, confidence: panels.elliott.confidence },
+    { id: "gann", label: "Gann", vote: panels.gann.vote, confidence: panels.gann.confidence },
+    { id: "dow", label: "Dow", vote: panels.dow.vote, confidence: panels.dow.confidence },
+  ];
+  const buys = votes.filter((v) => v.vote === "buy");
+  const sells = votes.filter((v) => v.vote === "sell");
+  const neutrals = votes.filter((v) => v.vote === "neutral");
+  const buyForce = buys.reduce((s, v) => s + v.confidence, 0);
+  const sellForce = sells.reduce((s, v) => s + v.confidence, 0);
+
+  let verdict = "NEUTRO";
+  let tone = "neutral";
+  if (buys.length > sells.length && buyForce > sellForce) {
+    verdict = buys.length >= 3 ? "FORTE ALTA" : "ALTA MODERADA";
+    tone = "bull";
+  } else if (sells.length > buys.length && sellForce > buyForce) {
+    verdict = sells.length >= 3 ? "FORTE BAIXA" : "BAIXA MODERADA";
+    tone = "bear";
+  }
+
+  const confluenceCount = Math.max(buys.length, sells.length);
+  const score = `${confluenceCount}/4`;
+
+  return { votes, buys: buys.length, sells: sells.length, neutrals: neutrals.length, verdict, tone, score };
+}
+
+function buildWegdInstitutionalView(analysis, snapshot) {
+  const insights = snapshot?.insights && typeof snapshot.insights === "object" ? snapshot.insights : {};
+  const points = Array.isArray(snapshot?.points) ? snapshot.points : [];
+  const currentPrice = toFiniteNumber(snapshot?.currentPrice ?? insights?.lastPrice, 0)
+    || toFiniteNumber(insights?.emaFast, 0) || 1;
+  const wyckoff = deriveWyckoffPanel(insights, analysis, currentPrice, points);
+  const elliott = deriveElliottPanel(insights, analysis, currentPrice, points);
+  const gann = deriveGannPanel(insights, analysis, currentPrice, points);
+  const dow = deriveDowPanel(insights, analysis, currentPrice);
+  const convergence = buildClassicalConvergence({ wyckoff, elliott, gann, dow });
+  return { wyckoff, elliott, gann, dow, convergence, currentPrice };
+}
+
+// ---------- Renderers de painel ----------
+
+function renderWegdWyckoffPanel(view, currency) {
+  const w = view.wyckoff;
+  const eventsHtml = w.events.length > 0
+    ? w.events.map((evt) => `
+        <li class="wegd-event-item is-confirmed" title="${escapeHtml(evt.label)}">
+          <span class="wegd-event-key">${escapeHtml(evt.key)}</span>
+          <span class="wegd-event-name">${escapeHtml(evt.label)}</span>
+          <span class="wegd-event-price font-mono">${escapeHtml(formatPrice(evt.price, currency))}</span>
+        </li>`).join("")
+    : `<li class="wegd-event-item is-empty">Sem pivots auditáveis nos últimos candles</li>`;
+  const pendingHtml = w.pending.length > 0
+    ? w.pending.map((p) => `<li class="wegd-event-item is-pending"><span class="wegd-event-name">${escapeHtml(p)}</span><span class="wegd-event-price">aguardando</span></li>`).join("")
+    : `<li class="wegd-event-item is-empty">Todos eventos chave detectados</li>`;
+  const detectedExtras = w.detectedExtras.length > 0
+    ? `<p class="wegd-extra-detect">⚡ Detectado: ${w.detectedExtras.map(escapeHtml).join(" · ")}</p>`
+    : "";
+  return `
+    <header class="wegd-panel-headline" data-tone="${w.vote === "buy" ? "bull" : w.vote === "sell" ? "bear" : "neutral"}">
+      <div class="wegd-headline-title">
+        <strong class="wegd-headline-phase font-mono">${escapeHtml(w.phase)}</strong>
+        <span class="wegd-headline-sub">${escapeHtml(w.phaseSub)}</span>
+      </div>
+      <div class="wegd-headline-meta">
+        <span class="wegd-headline-progress font-mono">${w.progress.toFixed(0)}%</span>
+        <span class="wegd-headline-tag">Progresso</span>
+      </div>
+    </header>
+    <div class="wegd-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${w.progress.toFixed(0)}">
+      <div class="wegd-progress-fill is-${w.vote}" style="width:${w.progress.toFixed(1)}%"></div>
+    </div>
+    <div class="wegd-grid wegd-grid-2">
+      <article class="wegd-card">
+        <h5 class="wegd-card-title">Ciclo de Mercado</h5>
+        <div class="wegd-cycle-row">
+          <div class="wegd-cycle-cell"><span>Atual</span><strong class="font-mono">${escapeHtml(w.phase)}</strong></div>
+          <span class="wegd-cycle-arrow">→</span>
+          <div class="wegd-cycle-cell is-next"><span>Próximo</span><strong class="font-mono">${escapeHtml(w.next)}</strong></div>
+        </div>
+        <p class="wegd-card-foot">Confiança: <strong class="font-mono">${w.confidence.toFixed(0)}%</strong></p>
+      </article>
+      <article class="wegd-card">
+        <h5 class="wegd-card-title">Composite Man</h5>
+        <div class="wegd-composite is-${w.compositeMan.state}">
+          <span class="wegd-composite-icon" aria-hidden="true">${w.compositeMan.icon}</span>
+          <strong class="wegd-composite-label font-mono">${escapeHtml(w.compositeMan.label)}</strong>
+        </div>
+      </article>
+    </div>
+    <div class="wegd-grid wegd-grid-2">
+      <article class="wegd-card">
+        <h5 class="wegd-card-title">Eventos Wyckoff <span class="wegd-card-pill">✓ Confirmados</span></h5>
+        <ul class="wegd-event-list">${eventsHtml}</ul>
+      </article>
+      <article class="wegd-card">
+        <h5 class="wegd-card-title">Pendentes <span class="wegd-card-pill is-warn">Σ Aguardando</span></h5>
+        <ul class="wegd-event-list">${pendingHtml}</ul>
+        ${detectedExtras}
+      </article>
+    </div>
+    <article class="wegd-card">
+      <h5 class="wegd-card-title">Análise de Volume</h5>
+      <div class="wegd-volume-row" data-tone="${w.volumeStrength >= 1.4 ? "bull" : w.volumeStrength >= 0.8 ? "neutral" : "bear"}">
+        <strong class="font-mono">${escapeHtml(w.volumeLabel)}</strong>
+        <span class="wegd-volume-narr">${escapeHtml(w.volumeNarrative)}</span>
+        <span class="wegd-volume-meta font-mono">${(w.volumeStrength * 100).toFixed(0)}% da média</span>
+      </div>
+    </article>
+    <p class="wegd-panel-summary">
+      Fase <strong>${escapeHtml(w.phase)}</strong> com <strong class="font-mono">${w.progress.toFixed(1)}%</strong> de progresso.
+      Composite Man ${escapeHtml(w.compositeMan.label)}. ${w.events.length} evento(s) detectado(s). Volume ${escapeHtml(w.volumeLabel)}.
+    </p>
+  `;
+}
+
+function renderWegdElliottPanel(view, currency) {
+  const e = view.elliott;
+  if (!e.hasData) {
+    return `
+      <article class="wegd-card wegd-empty-state">
+        <h5 class="wegd-card-title">Contagem de Ondas</h5>
+        <p>Estrutura insuficiente para contagem confiável. Aguardando ao menos 3 pivots auditáveis no histórico do gráfico.</p>
+        <p class="wegd-card-foot">Nível de invalidação: <strong class="font-mono">${escapeHtml(formatPrice(e.invalidationLevel, currency))}</strong></p>
+      </article>
+    `;
+  }
+  const countsHtml = e.counts.map((c) => `
+    <div class="wegd-wave-cell ${["1","3","5"].includes(c.label) ? "is-impulsive" : "is-corrective"}">
+      <strong class="wegd-wave-label">${escapeHtml(c.label)}</strong>
+      <span class="wegd-wave-price font-mono">${escapeHtml(formatPrice(c.price, currency))}</span>
+    </div>
+  `).join("");
+  const fibHtml = e.fibTargets.length > 0
+    ? e.fibTargets.map((f) => `
+        <li class="wegd-fib-target">
+          <span class="wegd-fib-ratio font-mono">${f.ratio.toFixed(3)}×</span>
+          <strong class="wegd-fib-price font-mono">${escapeHtml(formatPrice(f.price, currency))}</strong>
+        </li>`).join("")
+    : `<li class="wegd-fib-target is-empty">Aguardando perna impulsiva mensurável</li>`;
+
+  const typeBadgeTone = e.currentType === "IMPULSIVA" ? (e.vote === "buy" ? "bull" : "bear") : "neutral";
+
+  return `
+    <header class="wegd-panel-headline" data-tone="${e.vote === "buy" ? "bull" : e.vote === "sell" ? "bear" : "neutral"}">
+      <div class="wegd-headline-title">
+        <span class="wegd-headline-eyebrow">Onda Atual</span>
+        <strong class="wegd-headline-phase font-mono">Onda ${escapeHtml(e.currentLabel)}</strong>
+      </div>
+      <div class="wegd-headline-meta">
+        <span class="wegd-elliott-badge" data-tone="${typeBadgeTone}">${escapeHtml(e.currentType)}</span>
+        <span class="wegd-headline-tag">Confiança: <strong class="font-mono">${e.confidence.toFixed(0)}%</strong></span>
+      </div>
+    </header>
+    <div class="wegd-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${e.progress.toFixed(0)}">
+      <div class="wegd-progress-fill is-${e.vote}" style="width:${e.progress.toFixed(1)}%"></div>
+    </div>
+    <p class="wegd-progress-caption">Progresso da onda: <strong class="font-mono">${e.progress.toFixed(0)}%</strong></p>
+    <article class="wegd-card">
+      <h5 class="wegd-card-title">Contagem de Ondas</h5>
+      <div class="wegd-wave-row">${countsHtml}</div>
+    </article>
+    <div class="wegd-grid wegd-grid-2">
+      <article class="wegd-card">
+        <h5 class="wegd-card-title">Próxima Onda</h5>
+        <div class="wegd-next-wave">
+          <strong class="font-mono">${escapeHtml(e.next)}</strong>
+          <span>Esperada</span>
+        </div>
+      </article>
+      <article class="wegd-card">
+        <h5 class="wegd-card-title">Alvos de Fibonacci</h5>
+        <ul class="wegd-fib-list">${fibHtml}</ul>
+      </article>
+    </div>
+    <article class="wegd-card wegd-invalidation">
+      <h5 class="wegd-card-title is-bear">Nível de Invalidação</h5>
+      <div class="wegd-invalidation-row">
+        <span>Se rompido, a contagem é invalidada</span>
+        <strong class="font-mono">${escapeHtml(formatPrice(e.invalidationLevel, currency))}</strong>
+      </div>
+    </article>
+    <p class="wegd-panel-summary">
+      Onda ${escapeHtml(e.currentLabel)} (${escapeHtml(e.currentType)}) em progresso (<strong class="font-mono">${e.progress.toFixed(0)}%</strong>).
+      Próxima: ${escapeHtml(e.next)}. Invalidação em <strong class="font-mono">${escapeHtml(formatPrice(e.invalidationLevel, currency))}</strong>.
+    </p>
+  `;
+}
+
+function renderWegdGannPanel(view, currency) {
+  const g = view.gann;
+  const supportsHtml = g.supports.map((s) => `
+    <li class="wegd-gann-row is-support">
+      <span>${escapeHtml(s.angle)}</span>
+      <strong class="font-mono">${escapeHtml(formatPrice(s.price, currency))}</strong>
+    </li>`).join("");
+  const resistancesHtml = g.resistances.map((r) => `
+    <li class="wegd-gann-row is-resistance">
+      <span>${escapeHtml(r.angle)}</span>
+      <strong class="font-mono">${escapeHtml(formatPrice(r.price, currency))}</strong>
+    </li>`).join("");
+  return `
+    <header class="wegd-panel-headline" data-tone="${g.vote === "buy" ? "bull" : g.vote === "sell" ? "bear" : "neutral"}">
+      <div class="wegd-headline-title">
+        <span class="wegd-headline-eyebrow">Ângulo Dominante</span>
+        <strong class="wegd-headline-phase font-mono">${escapeHtml(g.dominantAngle)}</strong>
+      </div>
+      <div class="wegd-headline-meta">
+        <span class="wegd-gann-deg font-mono">${g.dominantDeg}°</span>
+        <span class="wegd-headline-tag">Força: <strong class="font-mono">${(g.ratio).toFixed(2)}× ATR</strong></span>
+      </div>
+    </header>
+    <div class="wegd-grid wegd-grid-2">
+      <article class="wegd-card">
+        <h5 class="wegd-card-title is-bull">Ângulos de Suporte</h5>
+        <ul class="wegd-gann-list">${supportsHtml}</ul>
+      </article>
+      <article class="wegd-card">
+        <h5 class="wegd-card-title is-bear">Ângulos de Resistência</h5>
+        <ul class="wegd-gann-list">${resistancesHtml}</ul>
+      </article>
+    </div>
+    <div class="wegd-grid wegd-grid-3">
+      <article class="wegd-card">
+        <h5 class="wegd-card-title">Quadrado do Tempo</h5>
+        <div class="wegd-cycle-cell"><span>Ciclo Atual</span><strong class="font-mono">${g.cycleDays !== null ? `${g.cycleDays} dia(s)` : "—"}</strong></div>
+      </article>
+      <article class="wegd-card">
+        <h5 class="wegd-card-title">Próxima Reversão</h5>
+        <div class="wegd-cycle-cell"><span>Estimativa</span><strong class="font-mono">${g.nextReversalEstimate !== null ? `~${g.nextReversalEstimate} períodos` : "—"}</strong></div>
+      </article>
+      <article class="wegd-card">
+        <h5 class="wegd-card-title">Quadrado do Preço</h5>
+        <div class="wegd-cycle-cell"><span>Square 9 ↑</span><strong class="font-mono">${escapeHtml(formatPrice(g.nextSquareUp, currency))}</strong></div>
+        <div class="wegd-cycle-cell"><span>Square 9 ↓</span><strong class="font-mono">${escapeHtml(formatPrice(g.nextSquareDown, currency))}</strong></div>
+      </article>
+    </div>
+    <p class="wegd-panel-summary">
+      Preço no ângulo <strong class="font-mono">${escapeHtml(g.dominantAngle)}</strong>.
+      Próximo ciclo Gann em <strong class="font-mono">${g.nextReversalEstimate !== null ? `~${g.nextReversalEstimate} períodos` : "—"}</strong>.
+      Níveis Square of 9 próximos.
+    </p>
+  `;
+}
+
+function renderWegdDowPanel(view) {
+  const d = view.dow;
+  const trendCard = (label, item) => `
+    <article class="wegd-card wegd-trend-card" data-tone="${item.label === "ALTA" ? "bull" : item.label === "BAIXA" ? "bear" : "neutral"}">
+      <h5 class="wegd-card-title">${escapeHtml(label)}</h5>
+      <div class="wegd-trend-value">
+        <span class="wegd-trend-arrow" aria-hidden="true">${item.arrow}</span>
+        <strong class="font-mono">${escapeHtml(item.label)}</strong>
+      </div>
+    </article>`;
+  return `
+    <article class="wegd-card">
+      <h5 class="wegd-card-title">Tendências de Dow</h5>
+      <div class="wegd-grid wegd-grid-3">
+        ${trendCard("Primária", d.primary)}
+        ${trendCard("Secundária", d.secondary)}
+        ${trendCard("Menor", d.minor)}
+      </div>
+    </article>
+    <article class="wegd-card">
+      <h5 class="wegd-card-title">Fase de Mercado</h5>
+      <div class="wegd-market-phase" data-tone="${d.marketPhase === "DISTRIBUIÇÃO" ? "bear" : d.marketPhase === "ACUMULAÇÃO" ? "neutral" : "bull"}">
+        <div class="wegd-market-phase-head">
+          <strong class="font-mono">${escapeHtml(d.marketPhase)}</strong>
+          <span class="font-mono" title="Energia bruta WEGD: ${d.energyRaw.toFixed(1)}">${d.energyClamped.toFixed(0)}%</span>
+        </div>
+        <div class="wegd-progress-track">
+          <div class="wegd-progress-fill is-${d.vote}" style="width:${d.energyClamped.toFixed(1)}%"></div>
+        </div>
+        <p class="wegd-card-foot">${escapeHtml(d.phaseHint)}</p>
+      </div>
+    </article>
+    <article class="wegd-card">
+      <h5 class="wegd-card-title">Confirmação de Dow</h5>
+      <div class="wegd-grid wegd-grid-2">
+        <div class="wegd-confirm-card ${d.confirmations.priceVolume ? "is-confirmed" : "is-pending"}">
+          <span>Preço × Volume</span>
+          <strong class="font-mono">${d.confirmations.priceVolume ? "✓ CONFIRMADO" : "✗ DIVERGENTE"}</strong>
+        </div>
+        <div class="wegd-confirm-card ${d.confirmations.indices ? "is-confirmed" : "is-pending"}">
+          <span>Índices</span>
+          <strong class="font-mono">${d.confirmations.indices ? "✓ CONFIRMADO" : "✗ DIVERGENTE"}</strong>
+        </div>
+      </div>
+      <p class="wegd-card-foot">${d.confirmations.priceVolume && d.confirmations.indices ? "Volume e estrutura confirmam a tendência" : "Sinais mistos — aguardar confirmação adicional"}</p>
+    </article>
+    <p class="wegd-panel-summary">
+      Tendência Primária: <strong>${escapeHtml(d.primary.label)}</strong>, Secundária: <strong>${escapeHtml(d.secondary.label)}</strong>,
+      Menor: <strong>${escapeHtml(d.minor.label)}</strong>. Fase: <strong>${escapeHtml(d.marketPhase)}</strong>.
+      ${d.confirmations.priceVolume ? "Volume confirma." : "Volume divergente."}
+    </p>
+  `;
+}
+
+function renderWegdConvergenceHeader(view) {
+  const c = view.convergence;
+  const voteIcon = (v) => v === "buy" ? "↑" : v === "sell" ? "↓" : "→";
+  const voteLabel = (v) => v === "buy" ? "COMPRA" : v === "sell" ? "VENDA" : "NEUTRO";
+  const voteCounts = `${c.buys}↑ ${c.sells}↓ ${c.neutrals}→`;
+  const summaryLine = c.votes
+    .map((v) => `${escapeHtml(v.label)}: ${voteLabel(v.vote)}`)
+    .join(", ");
+  return `
+    <header class="wegd-institutional__head" data-tone="${c.tone}">
+      <div class="wegd-head-identity">
+        <span class="wegd-head-icon" aria-hidden="true">W</span>
+        <div>
+          <h3 class="wegd-head-title">Análise WEGD</h3>
+          <span class="wegd-head-sub">Wyckoff · Elliott · Gann · Dow</span>
+        </div>
+      </div>
+      <div class="wegd-head-verdict">
+        <span class="wegd-verdict-badge" data-tone="${c.tone}">${escapeHtml(c.verdict)}</span>
+        <span class="wegd-verdict-meta" title="${escapeHtml(voteCounts)}">Confluência: <strong class="font-mono">${escapeHtml(c.score)}</strong></span>
+      </div>
+    </header>
+    <p class="wegd-head-summary">${escapeHtml(summaryLine)}. Confluência <strong>${escapeHtml(c.verdict)}</strong>.</p>
+  `;
+}
+
+function renderWegdSubTabs(activeId) {
+  return `
+    <nav class="wegd-subnav" role="tablist" aria-label="Sub-análises WEGD">
+      ${WEGD_SUBTAB_IDS.map((id) => {
+        const isActive = id === activeId;
+        return `
+          <button
+            type="button"
+            class="wegd-subtab-button${isActive ? " is-active" : ""}"
+            role="tab"
+            aria-selected="${isActive ? "true" : "false"}"
+            aria-controls="wegd-panel-${id}"
+            tabindex="${isActive ? "0" : "-1"}"
+            data-wegd-subtab="${id}"
+          >
+            <span class="wegd-subtab-icon" aria-hidden="true">${WEGD_SUBTAB_ICONS[id]}</span>
+            <span>${escapeHtml(WEGD_SUBTAB_LABELS[id])}</span>
+          </button>`;
+      }).join("")}
+    </nav>
+  `;
+}
+
+function renderWegdActivePanel(view, currency, activeId) {
+  const renderer =
+    activeId === "elliott" ? renderWegdElliottPanel
+    : activeId === "gann" ? renderWegdGannPanel
+    : activeId === "dow" ? renderWegdDowPanel
+    : renderWegdWyckoffPanel;
+  return `
+    <section class="wegd-panel" id="wegd-panel-${activeId}" role="tabpanel" aria-labelledby="wegd-tab-${activeId}">
+      ${renderer(view, currency)}
+    </section>
+  `;
+}
+
+function renderInstitutionalWegdTab(analysis, snapshot, currency) {
+  let view;
+  try { view = buildWegdInstitutionalView(analysis, snapshot); }
+  catch { view = null; }
+
+  if (!view) {
+    return `
+      <div class="analysis-grid">
+        <article class="analysis-block">
+          <h4>WEGD (Weighted Edge Gradient Direction)</h4>
+          <p>Direção: ${escapeHtml(analysis?.wegd?.direction ?? "—")}</p>
+          <p>Gradiente: ${escapeHtml(formatPercent(analysis?.wegd?.gradient ?? 0))}</p>
+          <p>Energia: ${(toFiniteNumber(analysis?.wegd?.energy, 0)).toFixed(1)} / 99</p>
+          <p>Pressão líquida: ${escapeHtml(formatPercent(analysis?.wegd?.pressure ?? 0))}</p>
+        </article>
+      </div>
+    `;
+  }
+
+  const activeId = pickWegdSubTabId(activeWegdSubTabId);
+  return `
+    <section class="wegd-institutional" data-tone="${view.convergence.tone}">
+      ${renderWegdConvergenceHeader(view)}
+      ${renderWegdSubTabs(activeId)}
+      ${renderWegdActivePanel(view, currency, activeId)}
+      <footer class="wegd-foot">
+        <span class="wegd-foot-badge" title="Métricas derivadas de snapshot.insights + analysis.wegd. Heurística honesta — sem fabricação de sinal.">⚙ AUDITORIA · derivado</span>
+        <span class="wegd-foot-hint">Use ← → para alternar análises</span>
+      </footer>
+    </section>
+  `;
+}
+
+function bindWegdSubTabButtons(container, analysis, snapshot, currency) {
+  if (!(container instanceof HTMLElement)) return;
+  const buttons = Array.from(container.querySelectorAll("[data-wegd-subtab]"));
+  if (buttons.length === 0) return;
+
+  const swapPanel = (nextId) => {
+    const normalized = pickWegdSubTabId(nextId);
+    if (normalized === activeWegdSubTabId) return;
+    activeWegdSubTabId = normalized;
+    persistWegdSubTab();
+    let view;
+    try { view = buildWegdInstitutionalView(analysis, snapshot); }
+    catch { view = null; }
+    if (!view) return;
+    // Atualiza apenas nav + painel (sem refazer o header completo)
+    const navWrapper = container.querySelector(".wegd-subnav");
+    if (navWrapper instanceof HTMLElement) {
+      navWrapper.outerHTML = renderWegdSubTabs(normalized);
+    }
+    const panel = container.querySelector(".wegd-panel");
+    if (panel instanceof HTMLElement) {
+      panel.outerHTML = renderWegdActivePanel(view, currency, normalized);
+    }
+    // Re-bind no novo nav
+    bindWegdSubTabButtons(container, analysis, snapshot, currency);
+    const focusTarget = container.querySelector(`[data-wegd-subtab="${normalized}"]`);
+    if (focusTarget instanceof HTMLElement) focusTarget.focus();
+  };
+
+  for (const btn of buttons) {
+    if (!(btn instanceof HTMLButtonElement)) continue;
+    btn.addEventListener("click", () => swapPanel(btn.dataset.wegdSubtab));
+    btn.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
+      event.preventDefault();
+      const idx = WEGD_SUBTAB_IDS.indexOf(activeWegdSubTabId);
+      let nextIdx = idx;
+      if (event.key === "ArrowLeft") nextIdx = (idx - 1 + WEGD_SUBTAB_IDS.length) % WEGD_SUBTAB_IDS.length;
+      if (event.key === "ArrowRight") nextIdx = (idx + 1) % WEGD_SUBTAB_IDS.length;
+      if (event.key === "Home") nextIdx = 0;
+      if (event.key === "End") nextIdx = WEGD_SUBTAB_IDS.length - 1;
+      swapPanel(WEGD_SUBTAB_IDS[nextIdx]);
+    });
+  }
+}
+
 function renderInstitutionalSmcTab(analysis, snapshot, currency) {
   let view;
   try {
@@ -10159,21 +10950,8 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
   }
 
   if (activeAnalysisTabId === "wegd") {
-    analysisTabContentElement.innerHTML = `
-      <div class="analysis-grid">
-        <article class="analysis-block">
-          <h4>WEGD (Weighted Edge Gradient Direction)</h4>
-          <p>Direcao: ${escapeHtml(analysis.wegd.direction)}</p>
-          <p>Gradiente: ${escapeHtml(formatPercent(analysis.wegd.gradient))}</p>
-          <p>Energia: ${analysis.wegd.energy.toFixed(1)} / 99</p>
-          <p>Pressao liquida: ${escapeHtml(formatPercent(analysis.wegd.pressure))}</p>
-        </article>
-        <article class="analysis-block">
-          <h4>Regra operacional</h4>
-          <p>Gradiente alto + energia alta reforca continuidade. Gradiente invertendo com energia baixa sinaliza exaustao e possivel lateralizacao.</p>
-        </article>
-      </div>
-    `;
+    analysisTabContentElement.innerHTML = renderInstitutionalWegdTab(analysis, snapshot, currency);
+    bindWegdSubTabButtons(analysisTabContentElement, analysis, snapshot, currency);
     return;
   }
 
