@@ -8456,6 +8456,432 @@ function renderAnalysisTabs() {
   }
 }
 
+// =============================================================================
+// ADR-074 — Dashboard Probabilistico Quantitativo
+// Helpers honestos (sem fabricar win rate; graceful degradation; bootstrap MC).
+// =============================================================================
+
+const PROBABILISTIC_MIN_RETURNS_FOR_STATS = 30;
+const PROBABILISTIC_TRADING_DAYS_PER_YEAR = 252;
+const PROBABILISTIC_MONTE_CARLO_SIMULATIONS = 10000;
+const PROBABILISTIC_MONTE_CARLO_CONFIDENCE = 0.9;
+const PROBABILISTIC_MONTH_LABELS = [
+  "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+  "Jul", "Ago", "Set", "Out", "Nov", "Dez",
+];
+
+function computeProbabilisticReturnsSeries(points) {
+  if (!Array.isArray(points) || points.length < 2) {
+    return [];
+  }
+  const returns = [];
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = toFiniteNumber(points[index - 1]?.close, Number.NaN);
+    const current = toFiniteNumber(points[index]?.close, Number.NaN);
+    if (!Number.isFinite(previous) || !Number.isFinite(current) || previous <= 0 || current <= 0) {
+      continue;
+    }
+    returns.push(Math.log(current / previous));
+  }
+  return returns;
+}
+
+function computeProbabilisticHistoricalStats(returns) {
+  if (!Array.isArray(returns) || returns.length < PROBABILISTIC_MIN_RETURNS_FOR_STATS) {
+    return {
+      sample: returns?.length ?? 0,
+      ready: false,
+      cumulativeReturnPercent: null,
+      annualizedVolatilityPercent: null,
+      sharpeRatio: null,
+      maxDrawdownPercent: null,
+    };
+  }
+  const sumReturns = returns.reduce((acc, value) => acc + value, 0);
+  const meanReturn = sumReturns / returns.length;
+  const variance = returns.reduce((acc, value) => acc + (value - meanReturn) ** 2, 0) / Math.max(returns.length - 1, 1);
+  const stdDev = Math.sqrt(variance);
+  const annualizedVolatility = stdDev * Math.sqrt(PROBABILISTIC_TRADING_DAYS_PER_YEAR);
+  const annualizedReturn = meanReturn * PROBABILISTIC_TRADING_DAYS_PER_YEAR;
+  const sharpe = annualizedVolatility > 0 ? annualizedReturn / annualizedVolatility : 0;
+
+  // Max drawdown via curva de equity sintetica.
+  let equity = 1;
+  let peak = 1;
+  let maxDrawdown = 0;
+  for (const value of returns) {
+    equity *= Math.exp(value);
+    if (equity > peak) {
+      peak = equity;
+    }
+    const drawdown = (equity - peak) / peak;
+    if (drawdown < maxDrawdown) {
+      maxDrawdown = drawdown;
+    }
+  }
+
+  return {
+    sample: returns.length,
+    ready: true,
+    cumulativeReturnPercent: roundNumber((Math.exp(sumReturns) - 1) * 100, 2),
+    annualizedVolatilityPercent: roundNumber(annualizedVolatility * 100, 2),
+    sharpeRatio: roundNumber(sharpe, 2),
+    maxDrawdownPercent: roundNumber(maxDrawdown * 100, 2),
+  };
+}
+
+function computeProbabilisticEmpiricalPercentile(sortedValues, percentile) {
+  if (!Array.isArray(sortedValues) || sortedValues.length === 0) {
+    return null;
+  }
+  const clamped = clampNumber(percentile, 0, 1);
+  const rank = clamped * (sortedValues.length - 1);
+  const lowerIndex = Math.floor(rank);
+  const upperIndex = Math.ceil(rank);
+  const weight = rank - lowerIndex;
+  return sortedValues[lowerIndex] * (1 - weight) + sortedValues[upperIndex] * weight;
+}
+
+function computeProbabilisticRiskMetrics(returns, snapshot) {
+  if (!Array.isArray(returns) || returns.length < PROBABILISTIC_MIN_RETURNS_FOR_STATS) {
+    return {
+      ready: false,
+      varPercent: null,
+      expectedShortfallPercent: null,
+      betaLabel: "n/d",
+      correlationLabel: "n/d",
+      benchmarkAvailable: false,
+    };
+  }
+  const sorted = [...returns].sort((left, right) => left - right);
+  const varValue = computeProbabilisticEmpiricalPercentile(sorted, 0.05);
+  const tail = sorted.filter((value) => value <= varValue);
+  const expectedShortfall = tail.length > 0
+    ? tail.reduce((acc, value) => acc + value, 0) / tail.length
+    : varValue;
+
+  // Beta/Correlacao sao omitidos (n/d) porque nao temos serie de benchmark
+  // confiavel no snapshot atual. Graceful degradation honesto em vez de
+  // fabricar ruido.
+  const benchmarkAvailable = false;
+
+  return {
+    ready: true,
+    varPercent: roundNumber(varValue * 100, 2),
+    expectedShortfallPercent: roundNumber(expectedShortfall * 100, 2),
+    betaLabel: benchmarkAvailable ? "—" : "n/d",
+    correlationLabel: benchmarkAvailable ? "—" : "n/d",
+    benchmarkAvailable,
+  };
+}
+
+function runProbabilisticMonteCarloProjection({ lastClose, returns, simulations = PROBABILISTIC_MONTE_CARLO_SIMULATIONS, horizonOverride = null }) {
+  const safeLastClose = toFiniteNumber(lastClose, Number.NaN);
+  if (!Number.isFinite(safeLastClose) || safeLastClose <= 0 || !Array.isArray(returns) || returns.length < PROBABILISTIC_MIN_RETURNS_FOR_STATS) {
+    return {
+      ready: false,
+      simulations: 0,
+      horizon: 0,
+      lastClose: Number.isFinite(safeLastClose) ? safeLastClose : null,
+      bullPrice: null,
+      basePrice: null,
+      bearPrice: null,
+      confidenceLevel: PROBABILISTIC_MONTE_CARLO_CONFIDENCE,
+    };
+  }
+  const horizon = Number.isFinite(horizonOverride) && horizonOverride > 0
+    ? Math.floor(horizonOverride)
+    : Math.max(8, Math.floor(returns.length * 0.25));
+  const finalPrices = new Array(simulations);
+  const returnsLength = returns.length;
+  for (let index = 0; index < simulations; index += 1) {
+    let price = safeLastClose;
+    for (let step = 0; step < horizon; step += 1) {
+      const sampledReturn = returns[Math.floor(Math.random() * returnsLength)];
+      price *= Math.exp(sampledReturn);
+    }
+    finalPrices[index] = price;
+  }
+  finalPrices.sort((left, right) => left - right);
+  return {
+    ready: true,
+    simulations,
+    horizon,
+    lastClose: safeLastClose,
+    bearPrice: roundNumber(computeProbabilisticEmpiricalPercentile(finalPrices, 0.05), 5),
+    basePrice: roundNumber(computeProbabilisticEmpiricalPercentile(finalPrices, 0.5), 5),
+    bullPrice: roundNumber(computeProbabilisticEmpiricalPercentile(finalPrices, 0.95), 5),
+    confidenceLevel: PROBABILISTIC_MONTE_CARLO_CONFIDENCE,
+  };
+}
+
+function computeProbabilisticMonthlySeasonality(points) {
+  const buckets = Array.from({ length: 12 }, () => ({ returns: [], wins: 0, total: 0 }));
+  if (!Array.isArray(points) || points.length === 0) {
+    return {
+      months: PROBABILISTIC_MONTH_LABELS.map((label, index) => ({
+        label,
+        index,
+        ready: false,
+        medianReturnPercent: null,
+        winRatePercent: null,
+        sample: 0,
+      })),
+      currentMonthIndex: new Date().getMonth(),
+    };
+  }
+  for (const point of points) {
+    const open = toFiniteNumber(point?.open, Number.NaN);
+    const close = toFiniteNumber(point?.close, Number.NaN);
+    const timestamp = typeof point?.timestamp === "string" ? Date.parse(point.timestamp) : Number.NaN;
+    if (!Number.isFinite(open) || !Number.isFinite(close) || open <= 0 || close <= 0 || !Number.isFinite(timestamp)) {
+      continue;
+    }
+    const monthIndex = new Date(timestamp).getUTCMonth();
+    const change = (close - open) / open;
+    buckets[monthIndex].returns.push(change);
+    buckets[monthIndex].total += 1;
+    if (change > 0) {
+      buckets[monthIndex].wins += 1;
+    }
+  }
+  return {
+    months: buckets.map((bucket, index) => {
+      const sorted = [...bucket.returns].sort((left, right) => left - right);
+      const median = sorted.length === 0
+        ? null
+        : sorted.length % 2 === 0
+          ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+          : sorted[Math.floor(sorted.length / 2)];
+      return {
+        label: PROBABILISTIC_MONTH_LABELS[index],
+        index,
+        ready: bucket.total > 0,
+        medianReturnPercent: median === null ? null : roundNumber(median * 100, 2),
+        winRatePercent: bucket.total > 0 ? roundNumber((bucket.wins / bucket.total) * 100, 0) : null,
+        sample: bucket.total,
+      };
+    }),
+    currentMonthIndex: new Date().getUTCMonth(),
+  };
+}
+
+function formatProbabilisticPercent(value, { signed = false, fractionDigits = 2 } = {}) {
+  if (!Number.isFinite(value)) {
+    return "—";
+  }
+  const sign = signed && value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(fractionDigits)}%`;
+}
+
+function classifyProbabilisticTone(value, { invert = false } = {}) {
+  if (!Number.isFinite(value) || value === 0) {
+    return "neutral";
+  }
+  const positive = invert ? value < 0 : value > 0;
+  return positive ? "bull" : "bear";
+}
+
+function renderInstitutionalProbabilisticTab(analysis, snapshot, currency) {
+  const points = Array.isArray(snapshot?.points) ? snapshot.points : [];
+  const returns = computeProbabilisticReturnsSeries(points);
+  const stats = computeProbabilisticHistoricalStats(returns);
+  const risk = computeProbabilisticRiskMetrics(returns, snapshot);
+  const monteCarlo = runProbabilisticMonteCarloProjection({
+    lastClose: toFiniteNumber(snapshot?.live?.price ?? points[points.length - 1]?.close, Number.NaN),
+    returns,
+  });
+  const seasonality = computeProbabilisticMonthlySeasonality(points);
+
+  const ghostBackend = typeof getBinaryOptionsGhostBackendStats === "function"
+    ? getBinaryOptionsGhostBackendStats()
+    : { winRate: 0, resolvedTrades: 0, hasSnapshot: false };
+  const overallReady = ghostBackend.hasSnapshot && ghostBackend.resolvedTrades >= 5;
+  const overallWinRate = overallReady ? ghostBackend.winRate.toFixed(0) : "—";
+  const overallSample = overallReady
+    ? `${ghostBackend.resolvedTrades} trades auditados`
+    : `Aquecendo (${ghostBackend.resolvedTrades}/5)`;
+
+  const buyProbability = toFiniteNumber(analysis?.buyProbability, 50);
+  const sellProbability = toFiniteNumber(analysis?.sellProbability, 50);
+  const neutralProbability = toFiniteNumber(analysis?.neutralProbability, 0);
+  const directionalEdge = roundNumber(buyProbability - sellProbability, 1);
+
+  const scenarios = analysis?.scenarios ?? {};
+  const buyScenario = scenarios.buy ?? null;
+  const sellScenario = scenarios.sell ?? null;
+  const equilibriumPrice = toFiniteNumber(analysis?.context?.equilibriumPrice, Number.NaN);
+
+  const monteCarloSegments = (() => {
+    if (!monteCarlo.ready) {
+      return { bearPercent: 33.33, basePercent: 33.34, bullPercent: 33.33 };
+    }
+    const range = Math.max(monteCarlo.bullPrice - monteCarlo.bearPrice, 1e-9);
+    const bearWidth = ((monteCarlo.basePrice - monteCarlo.bearPrice) / range) * 100;
+    return {
+      bearPercent: clampNumber(bearWidth, 5, 95),
+      basePercent: 0,
+      bullPercent: clampNumber(100 - bearWidth, 5, 95),
+    };
+  })();
+
+  const statRetCls = stats.ready ? classifyProbabilisticTone(stats.cumulativeReturnPercent) : "neutral";
+  const statSharpeCls = stats.ready ? classifyProbabilisticTone(stats.sharpeRatio) : "neutral";
+  const statDrawdownCls = stats.ready ? "bear" : "neutral";
+
+  const monteCarloHeader = monteCarlo.ready
+    ? `Horizonte ${monteCarlo.horizon} periodos • ${monteCarlo.simulations.toLocaleString("pt-BR")} simulacoes`
+    : `Aquecendo (${returns.length}/${PROBABILISTIC_MIN_RETURNS_FOR_STATS})`;
+
+  return `
+    <section class="prob-dashboard" aria-label="Dashboard Probabilistico Quantitativo">
+      <header class="prob-kpi-row">
+        <article class="prob-kpi-card" data-tone="neutral">
+          <span class="prob-kpi-icon" aria-hidden="true">📊</span>
+          <strong id="prob-winrate-overall">${overallWinRate}${overallReady ? "%" : ""}</strong>
+          <span class="prob-kpi-label">Win Rate Auditado</span>
+          <small class="prob-kpi-foot">${escapeHtml(overallSample)}</small>
+        </article>
+        <article class="prob-kpi-card" data-tone="${buyProbability >= sellProbability ? "bull" : "neutral"}">
+          <span class="prob-kpi-icon" aria-hidden="true">↗</span>
+          <strong id="prob-winrate-long">${buyProbability.toFixed(0)}%</strong>
+          <span class="prob-kpi-label">Prob. Direcional Long</span>
+          <small class="prob-kpi-foot">Edge ${directionalEdge >= 0 ? "+" : ""}${directionalEdge} p.p.</small>
+        </article>
+        <article class="prob-kpi-card" data-tone="${sellProbability > buyProbability ? "bear" : "neutral"}">
+          <span class="prob-kpi-icon" aria-hidden="true">↘</span>
+          <strong id="prob-winrate-short">${sellProbability.toFixed(0)}%</strong>
+          <span class="prob-kpi-label">Prob. Direcional Short</span>
+          <small class="prob-kpi-foot">Neutro ${neutralProbability.toFixed(0)}%</small>
+        </article>
+      </header>
+
+      <article class="prob-card">
+        <header class="prob-card__head">
+          <h4>Estatisticas Historicas</h4>
+          <span class="prob-card__hint">${stats.ready ? `${stats.sample} periodos` : `Aquecendo (${returns.length}/${PROBABILISTIC_MIN_RETURNS_FOR_STATS})`}</span>
+        </header>
+        <div class="prob-stats-grid">
+          <div class="prob-stats-cell" data-tone="${statRetCls}" title="Retorno cumulativo (log) sobre a janela disponivel">
+            <strong id="prob-stats-return">${stats.ready ? formatProbabilisticPercent(stats.cumulativeReturnPercent, { signed: true }) : "—"}</strong>
+            <span>Retorno</span>
+          </div>
+          <div class="prob-stats-cell" data-tone="neutral" title="Volatilidade anualizada (desvio padrao * sqrt(252))">
+            <strong id="prob-stats-vol">${stats.ready ? formatProbabilisticPercent(stats.annualizedVolatilityPercent) : "—"}</strong>
+            <span>Volatilidade</span>
+          </div>
+          <div class="prob-stats-cell" data-tone="${statSharpeCls}" title="Sharpe Ratio anualizado (rf=0)">
+            <strong id="prob-stats-sharpe">${stats.ready ? stats.sharpeRatio.toFixed(2) : "—"}</strong>
+            <span>Sharpe Ratio</span>
+          </div>
+          <div class="prob-stats-cell" data-tone="${statDrawdownCls}" title="Maior queda peak-to-trough na janela">
+            <strong id="prob-stats-drawdown">${stats.ready ? formatProbabilisticPercent(stats.maxDrawdownPercent) : "—"}</strong>
+            <span>Max Drawdown</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="prob-card">
+        <header class="prob-card__head">
+          <h4>Simulacao Monte Carlo</h4>
+          <span class="prob-card__hint">${escapeHtml(monteCarloHeader)}</span>
+        </header>
+        <div class="prob-mc-bar" role="img" aria-label="Distribuicao Monte Carlo P5/P50/P95">
+          <div class="prob-mc-bar__track">
+            <div class="prob-mc-bar__segment prob-mc-bar__segment--bear" style="width: ${monteCarloSegments.bearPercent}%"></div>
+            <div class="prob-mc-bar__segment prob-mc-bar__segment--bull" style="width: ${monteCarloSegments.bullPercent}%"></div>
+            <div class="prob-mc-bar__marker prob-mc-bar__marker--bear" style="left: 0%">
+              <span id="prob-mc-bear">${monteCarlo.ready ? formatPrice(monteCarlo.bearPrice, currency) : "—"}</span>
+            </div>
+            <div class="prob-mc-bar__marker prob-mc-bar__marker--base" style="left: ${monteCarloSegments.bearPercent}%">
+              <span id="prob-mc-base">${monteCarlo.ready ? formatPrice(monteCarlo.basePrice, currency) : "—"}</span>
+            </div>
+            <div class="prob-mc-bar__marker prob-mc-bar__marker--bull" style="left: 100%">
+              <span id="prob-mc-bull">${monteCarlo.ready ? formatPrice(monteCarlo.bullPrice, currency) : "—"}</span>
+            </div>
+          </div>
+          <p class="prob-mc-bar__legend">Nivel de confianca: <strong>${(monteCarlo.confidenceLevel * 100).toFixed(0)}%</strong></p>
+        </div>
+      </article>
+
+      <article class="prob-card">
+        <header class="prob-card__head">
+          <h4>Cenarios Probabilisticos</h4>
+          <span class="prob-card__hint">Derivado da estrutura tecnica</span>
+        </header>
+        <div class="prob-scenario-rows">
+          <div class="prob-scenario-row" data-tone="bull">
+            <header><span>Alta (Bullish)</span><strong id="prob-scenario-bull-prob">${buyProbability.toFixed(0)}%</strong></header>
+            <div class="prob-scenario-track"><div class="prob-scenario-fill prob-scenario-fill--bull" style="width: ${clampNumber(buyProbability, 0, 100)}%"><span id="prob-scenario-bull-target">Alvo: ${buyScenario ? escapeHtml(formatPrice(buyScenario.targets?.[0], currency)) : "—"}</span></div></div>
+            <small>Cenario otimista baseado em volatilidade e tendencia recente.</small>
+          </div>
+          <div class="prob-scenario-row" data-tone="neutral">
+            <header><span>Neutro (Base)</span><strong id="prob-scenario-base-prob">${neutralProbability.toFixed(0)}%</strong></header>
+            <div class="prob-scenario-track"><div class="prob-scenario-fill prob-scenario-fill--neutral" style="width: ${clampNumber(neutralProbability, 0, 100)}%"><span id="prob-scenario-base-target">Alvo: ${Number.isFinite(equilibriumPrice) ? escapeHtml(formatPrice(equilibriumPrice, currency)) : "—"}</span></div></div>
+            <small>Cenario base: mediana da distribuicao.</small>
+          </div>
+          <div class="prob-scenario-row" data-tone="bear">
+            <header><span>Baixa (Bearish)</span><strong id="prob-scenario-bear-prob">${sellProbability.toFixed(0)}%</strong></header>
+            <div class="prob-scenario-track"><div class="prob-scenario-fill prob-scenario-fill--bear" style="width: ${clampNumber(sellProbability, 0, 100)}%"><span id="prob-scenario-bear-target">Alvo: ${sellScenario ? escapeHtml(formatPrice(sellScenario.targets?.[0], currency)) : "—"}</span></div></div>
+            <small>Cenario pessimista baseado em drawdown e pressao vendedora.</small>
+          </div>
+        </div>
+      </article>
+
+      <article class="prob-card">
+        <header class="prob-card__head">
+          <h4>Sazonalidade</h4>
+          <span class="prob-card__hint">${stats.sample > 0 ? "Mediana Open->Close por mes (janela disponivel)" : "Sem dados de candles"}</span>
+        </header>
+        <div class="prob-season-grid">
+          ${seasonality.months.map((month) => {
+            const tone = !month.ready
+              ? "empty"
+              : month.medianReturnPercent > 0
+                ? "bull"
+                : month.medianReturnPercent < 0
+                  ? "bear"
+                  : "neutral";
+            const isCurrent = month.index === seasonality.currentMonthIndex;
+            return `
+              <div class="prob-season-cell${isCurrent ? " prob-season-cell--current" : ""}" data-tone="${tone}" title="${month.ready ? `${month.sample} candles em ${month.label}` : `Sem amostras em ${month.label}`}">
+                <strong>${month.label}</strong>
+                <span class="prob-season-cell__value" id="prob-season-${month.index}-return">${month.ready ? formatProbabilisticPercent(month.medianReturnPercent, { signed: true }) : "—"}</span>
+                <small id="prob-season-${month.index}-winrate">${month.ready ? `${month.winRatePercent}% win` : "—"}</small>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </article>
+
+      <article class="prob-card">
+        <header class="prob-card__head">
+          <h4>Metricas de Risco</h4>
+          <span class="prob-card__hint">${risk.ready ? "Distribuicao empirica (sem premissa gaussiana)" : "Aquecendo"}</span>
+        </header>
+        <div class="prob-risk-grid">
+          <div class="prob-risk-cell" data-tone="bear" title="Value-at-Risk 95% (perda diaria esperada nao excedida em 95% dos dias)">
+            <strong id="prob-var-95">${risk.ready ? formatProbabilisticPercent(risk.varPercent) : "—"}</strong>
+            <span>VaR 95%</span>
+          </div>
+          <div class="prob-risk-cell" data-tone="bear" title="Expected Shortfall: media das perdas alem do VaR 95%">
+            <strong id="prob-expected-shortfall">${risk.ready ? formatProbabilisticPercent(risk.expectedShortfallPercent) : "—"}</strong>
+            <span>Expected Shortfall</span>
+          </div>
+          <div class="prob-risk-cell" data-tone="neutral" title="Beta vs benchmark (indisponivel sem serie de referencia)">
+            <strong id="prob-beta">${escapeHtml(risk.betaLabel)}</strong>
+            <span>Beta</span>
+          </div>
+          <div class="prob-risk-cell" data-tone="neutral" title="Correlacao vs benchmark (indisponivel sem serie de referencia)">
+            <strong id="prob-correlation">${escapeHtml(risk.correlationLabel)}</strong>
+            <span>Correlacao</span>
+          </div>
+        </div>
+      </article>
+    </section>
+  `;
+}
+
 function buildScenarioHtml(label, scenario, currency) {
   const riskRewardLabel = typeof scenario.riskReward === "number"
     ? `${scenario.riskReward.toFixed(2)}:1`
@@ -10956,32 +11382,8 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
   }
 
   if (activeAnalysisTabId === "probabilistica") {
-    analysisTabContentElement.innerHTML = `
-      <div class="analysis-block">
-        <h4>Cenarios probabilisticos</h4>
-        <div class="analysis-probability-rows">
-          <div class="analysis-probability-row">
-            <span>Compra</span>
-            <div class="analysis-probability-track"><div class="analysis-probability-fill buy" style="width: ${analysis.buyProbability.toFixed(1)}%"></div></div>
-            <strong>${analysis.buyProbability.toFixed(1)}%</strong>
-          </div>
-          <div class="analysis-probability-row">
-            <span>Venda</span>
-            <div class="analysis-probability-track"><div class="analysis-probability-fill sell" style="width: ${analysis.sellProbability.toFixed(1)}%"></div></div>
-            <strong>${analysis.sellProbability.toFixed(1)}%</strong>
-          </div>
-          <div class="analysis-probability-row">
-            <span>Neutro</span>
-            <div class="analysis-probability-track"><div class="analysis-probability-fill neutral" style="width: ${analysis.neutralProbability.toFixed(1)}%"></div></div>
-            <strong>${analysis.neutralProbability.toFixed(1)}%</strong>
-          </div>
-        </div>
-      </div>
-      <div class="analysis-grid">
-        ${buildScenarioHtml("Cenario compra", analysis.scenarios.buy, currency)}
-        ${buildScenarioHtml("Cenario venda", analysis.scenarios.sell, currency)}
-      </div>
-    `;
+    // ADR-074 — Dashboard Probabilistico Quantitativo Institucional.
+    analysisTabContentElement.innerHTML = renderInstitutionalProbabilisticTab(analysis, snapshot, currency);
     return;
   }
 
