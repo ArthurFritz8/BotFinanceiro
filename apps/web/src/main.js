@@ -11864,6 +11864,27 @@ function queuePendingChartLoadRequest(options = {}) {
 const manualMarketAnalysisCounter = createCounter();
 const MANUAL_ANALYSIS_MIN_LOADING_MS = 220;
 const MANUAL_ANALYSIS_INVALID_FEEDBACK_MS = 360;
+// Fases HONESTAS (nao "efeito laboratorio"): so aparecem se o pipeline
+// real ultrapassar o threshold. Backend rapido => so fase 1 (ou nem aparece).
+// Backend lento (provider stale, fallback de broker) => o usuario ve a sequencia
+// inteira contando uma historia verdadeira do que esta acontecendo.
+const MANUAL_ANALYSIS_PHASES = [
+  {
+    key: "snapshot",
+    label: "Sincronizando snapshot fresh do livro institucional...",
+    minElapsedMs: 0,
+  },
+  {
+    key: "analysis",
+    label: "Mapeando zonas SMC e padroes harmonicos...",
+    minElapsedMs: 600,
+  },
+  {
+    key: "render",
+    label: "Auditando confluencia e Ghost Tracker...",
+    minElapsedMs: 1400,
+  },
+];
 
 let pendingFreshFetchScope = false;
 
@@ -11892,7 +11913,7 @@ function setManualAnalysisButtonState(state) {
     chartAnalyzeMarketButton.disabled = true;
 
     if (labelElement instanceof HTMLElement) {
-      labelElement.textContent = "PROCESSANDO MOTOR INSTITUCIONAL...";
+      labelElement.textContent = MANUAL_ANALYSIS_PHASES[0].label;
     }
 
     return;
@@ -11901,10 +11922,38 @@ function setManualAnalysisButtonState(state) {
   chartAnalyzeMarketButton.removeAttribute("aria-busy");
   chartAnalyzeMarketButton.removeAttribute("aria-disabled");
   chartAnalyzeMarketButton.disabled = false;
+  delete chartAnalyzeMarketButton.dataset.phase;
 
   if (labelElement instanceof HTMLElement) {
     labelElement.textContent = "ANALISAR MERCADO";
   }
+}
+
+function setManualAnalysisPhase(phaseIndex) {
+  if (!(chartAnalyzeMarketButton instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  const phase = MANUAL_ANALYSIS_PHASES[phaseIndex];
+  if (!phase) {
+    return;
+  }
+
+  if (chartAnalyzeMarketButton.dataset.state !== "loading") {
+    return;
+  }
+
+  chartAnalyzeMarketButton.dataset.phase = phase.key;
+
+  const labelElement = chartAnalyzeMarketButton.querySelector(
+    ".chart-analyze-market-button__label",
+  );
+
+  if (labelElement instanceof HTMLElement) {
+    labelElement.textContent = phase.label;
+  }
+
+  manualMarketAnalysisCounter.increment(`phase:${phase.key}`);
 }
 
 function flashManualAnalysisInvalid(message) {
@@ -11946,9 +11995,22 @@ async function runManualMarketAnalysis(options = {}) {
   );
 
   setManualAnalysisButtonState("loading");
+  setManualAnalysisPhase(0);
   updateChartLiveStatus(LIVE_STATUS.RECONNECTING, {
     title: "Sincronizando Intelligence Desk com snapshot fresh",
   });
+
+  // Fases honestas: agendamos os timers, mas eles SO disparam se o pipeline
+  // real ainda estiver rodando quando o threshold for atingido. Backend rapido
+  // => timers cancelados no finally, usuario nem ve as fases extras.
+  const phaseTimers = [];
+  for (let i = 1; i < MANUAL_ANALYSIS_PHASES.length; i++) {
+    const targetPhase = MANUAL_ANALYSIS_PHASES[i];
+    const timer = window.setTimeout(() => {
+      setManualAnalysisPhase(i);
+    }, targetPhase.minElapsedMs);
+    phaseTimers.push(timer);
+  }
 
   const startedAt =
     typeof performance !== "undefined" && typeof performance.now === "function"
@@ -11975,6 +12037,9 @@ async function runManualMarketAnalysis(options = {}) {
       setChartStatus("Falha ao rodar analise institucional.", "error");
     }
   } finally {
+    for (const timer of phaseTimers) {
+      window.clearTimeout(timer);
+    }
     pendingFreshFetchScope = false;
     const now =
       typeof performance !== "undefined" && typeof performance.now === "function"
