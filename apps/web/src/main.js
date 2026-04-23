@@ -9326,13 +9326,64 @@ function renderInstitutionalTechnicalTab(analysis, snapshot, currency) {
   `;
 }
 
+// Ratios de Scott Carney (Harmonic Trading Vol.1/2). Tolerancia ±0.04 padrao
+// institucional. Backend hoje so resolve a razao dominante (XD); demais legs
+// ficam "pending" honestos ate fase 2 (ADR-072 backend XABCD pivots).
+const HARMONIC_RATIO_TOLERANCE = 0.04;
 const HARMONIC_PATTERN_DEFINITIONS = [
-  { id: "gartley", name: "Gartley", icon: "▲", idealD: 0.786, prznLabel: "0.786 XA", stopBufferRatio: 1.04 },
-  { id: "bat", name: "Bat (Morcego)", icon: "🦇", idealD: 0.886, prznLabel: "0.886 XA", stopBufferRatio: 1.03 },
-  { id: "butterfly", name: "Butterfly (Borboleta)", icon: "🦋", idealD: 1.27, prznLabel: "1.272 XA", stopBufferRatio: 1.05 },
-  { id: "crab", name: "Crab (Caranguejo)", icon: "🦀", idealD: 1.618, prznLabel: "1.618 XA", stopBufferRatio: 1.06 },
-  { id: "shark", name: "Shark (Tubarao)", icon: "🦈", idealD: 0.886, prznLabel: "0.886-1.13 XA", stopBufferRatio: 1.05 },
+  {
+    id: "gartley",
+    name: "Gartley",
+    icon: "▲",
+    idealD: 0.786,
+    prznLabel: "0.786 XA",
+    stopBufferRatio: 1.04,
+    ratios: { XB: 0.618, AC: 0.618, BD: 1.272, XD: 0.786 },
+    ratiosLabel: { XB: "0.618", AC: "0.382 - 0.886", BD: "1.13 - 1.618", XD: "0.786" },
+  },
+  {
+    id: "bat",
+    name: "Bat (Morcego)",
+    icon: "🦇",
+    idealD: 0.886,
+    prznLabel: "0.886 XA",
+    stopBufferRatio: 1.03,
+    ratios: { XB: 0.5, AC: 0.618, BD: 2.0, XD: 0.886 },
+    ratiosLabel: { XB: "0.382 - 0.5", AC: "0.382 - 0.886", BD: "1.618 - 2.618", XD: "0.886" },
+  },
+  {
+    id: "butterfly",
+    name: "Butterfly (Borboleta)",
+    icon: "🦋",
+    idealD: 1.27,
+    prznLabel: "1.272 XA",
+    stopBufferRatio: 1.05,
+    ratios: { XB: 0.786, AC: 0.618, BD: 1.92, XD: 1.272 },
+    ratiosLabel: { XB: "0.786", AC: "0.382 - 0.886", BD: "1.618 - 2.24", XD: "1.272" },
+  },
+  {
+    id: "crab",
+    name: "Crab (Caranguejo)",
+    icon: "🦀",
+    idealD: 1.618,
+    prznLabel: "1.618 XA",
+    stopBufferRatio: 1.06,
+    ratios: { XB: 0.5, AC: 0.618, BD: 2.92, XD: 1.618 },
+    ratiosLabel: { XB: "0.382 - 0.618", AC: "0.382 - 0.886", BD: "2.24 - 3.618", XD: "1.618" },
+  },
+  {
+    id: "shark",
+    name: "Shark (Tubarao)",
+    icon: "🦈",
+    idealD: 1.0,
+    prznLabel: "0.886 - 1.13 XA",
+    stopBufferRatio: 1.05,
+    ratios: { XB: 0.5, AC: 1.375, BD: 1.92, XD: 1.0 },
+    ratiosLabel: { XB: "0.382 - 0.618", AC: "1.13 - 1.618", BD: "1.618 - 2.24", XD: "0.886 - 1.13" },
+  },
 ];
+
+const FIBONACCI_AUXILIARY_LEVELS = [0.236, 0.382, 0.5, 0.618, 0.786, 1.0, 1.272, 1.618];
 
 function classifyHarmonicState(distance) {
   if (distance <= 0.04) return { label: "Formado", tone: "ok" };
@@ -9344,6 +9395,7 @@ function classifyHarmonicState(distance) {
 function buildHarmonicGeometryScanner(analysis, currency) {
   const zonePos = Number(analysis?.context?.zonePositionPercent ?? 50) / 100;
   const baseConfidence = Number(analysis?.harmonic?.confidence ?? 0);
+  const dominantRatio = Number(analysis?.harmonic?.ratio ?? NaN);
   const tone = analysis?.signal?.tone;
   const support = Number(analysis?.context?.supportLevel ?? 0);
   const resistance = Number(analysis?.context?.resistanceLevel ?? 0);
@@ -9358,11 +9410,31 @@ function buildHarmonicGeometryScanner(analysis, currency) {
     const blendedConfidence = clampNumber(Math.round((score * 0.6) + (baseConfidence * 0.4)), 0, 99);
     const state = classifyHarmonicState(normalizedDist);
     const showLevels = blendedConfidence >= 70 && (isBuy || tone === "sell");
+
+    // Validacao honesta: backend so resolve a razao dominante = leg XD.
+    // Demais legs ficam "pending" ate ADR-072 fase 2 fornecer pivos XABCD reais.
+    const xdActual = Number.isFinite(dominantRatio) ? dominantRatio : null;
+    const xdValid = xdActual !== null
+      ? Math.abs(xdActual - def.ratios.XD) <= HARMONIC_RATIO_TOLERANCE
+      : null;
+    const ratiosValidation = {
+      XB: { expected: def.ratios.XB, expectedLabel: def.ratiosLabel.XB, actual: null, status: "pending" },
+      AC: { expected: def.ratios.AC, expectedLabel: def.ratiosLabel.AC, actual: null, status: "pending" },
+      BD: { expected: def.ratios.BD, expectedLabel: def.ratiosLabel.BD, actual: null, status: "pending" },
+      XD: {
+        expected: def.ratios.XD,
+        expectedLabel: def.ratiosLabel.XD,
+        actual: xdActual,
+        status: xdValid === null ? "pending" : xdValid ? "ok" : "invalid",
+      },
+    };
+
     return {
       ...def,
       score,
       confidence: blendedConfidence,
       state,
+      ratiosValidation,
       przLow: showLevels ? (isBuy ? support : resistance) : null,
       przHigh: showLevels ? (isBuy ? support * 1.001 : resistance * 0.999) : null,
       target1: showLevels ? tp1 : null,
@@ -9374,11 +9446,59 @@ function buildHarmonicGeometryScanner(analysis, currency) {
 
   patterns.sort((left, right) => right.confidence - left.confidence);
 
+  // Confluencia cross-pattern: PRZs proximos (delta < 0.3% do range) reforcam o setup
+  const range = Math.max(0.0001, Math.abs(resistance - support));
+  const activePrzs = patterns.filter((p) => p.przLow !== null).map((p) => p.przLow);
+  let confluenceCount = 0;
+  if (activePrzs.length >= 2) {
+    for (let i = 0; i < activePrzs.length; i += 1) {
+      for (let j = i + 1; j < activePrzs.length; j += 1) {
+        if (Math.abs(activePrzs[i] - activePrzs[j]) / range < 0.003) {
+          confluenceCount += 1;
+        }
+      }
+    }
+  }
+
   return {
     patterns,
     bestPattern: patterns[0] ?? null,
     tone,
+    confluenceCount,
+    backendXabcdAvailable: false, // ADR-072 fase 2 ativara isto
   };
+}
+
+function buildFibonacciAuxiliaryLevels(analysis, currency) {
+  const high = Number(analysis?.context?.rangeHigh ?? 0);
+  const low = Number(analysis?.context?.rangeLow ?? 0);
+  const current = Number(analysis?.context?.equilibriumPrice ?? (high + low) / 2);
+  if (!(high > 0) || !(low > 0) || high <= low) {
+    return { levels: [], currency, current: null, range: null };
+  }
+  const range = high - low;
+  // Por convencao, retracao a partir da maxima recente (high - range*ratio).
+  // Niveis > 1.0 viram extensoes (projecao alem do range).
+  const levels = FIBONACCI_AUXILIARY_LEVELS.map((ratio) => {
+    const price = high - range * ratio;
+    const isSupport = current > price;
+    return {
+      ratio,
+      ratioLabel: `${(ratio * 100).toFixed(1)}%`,
+      price,
+      role: isSupport ? "SUPORTE" : "RESISTENCIA",
+      distancePct: ((current - price) / current) * 100,
+    };
+  });
+  // Marca o nivel mais proximo do preco atual
+  let nearestIdx = 0;
+  let nearestDelta = Infinity;
+  for (let i = 0; i < levels.length; i += 1) {
+    const d = Math.abs(levels[i].price - current);
+    if (d < nearestDelta) { nearestDelta = d; nearestIdx = i; }
+  }
+  if (levels[nearestIdx]) levels[nearestIdx].nearest = true;
+  return { levels, currency, current, range };
 }
 
 function renderHarmonicScanner(scanner) {
@@ -9386,37 +9506,124 @@ function renderHarmonicScanner(scanner) {
     return "";
   }
 
+  const renderRatioCell = (legKey, leg) => {
+    const expectedTitle = `Esperado: ${leg.expectedLabel} (alvo ${leg.expected.toFixed(3)} ±${HARMONIC_RATIO_TOLERANCE})`;
+    let actualText;
+    let icon;
+    let iconLabel;
+    if (leg.status === "ok") {
+      actualText = leg.actual.toFixed(3);
+      icon = "✓"; iconLabel = "valido";
+    } else if (leg.status === "invalid") {
+      actualText = leg.actual.toFixed(3);
+      icon = "✕"; iconLabel = "invalidado";
+    } else {
+      actualText = "—";
+      icon = "•"; iconLabel = "pendente";
+    }
+    const pendingHint = leg.status === "pending"
+      ? ' title="Pivos XABCD individuais ainda nao expostos pelo backend (ADR-072 fase 2)."'
+      : "";
+    return `
+      <div class="harmonic-ratio harmonic-ratio--${leg.status}"${pendingHint}>
+        <span class="harmonic-ratio__leg">${legKey}</span>
+        <span class="harmonic-ratio__expected" title="${escapeHtml(expectedTitle)}">esp ${escapeHtml(leg.expectedLabel)}</span>
+        <span class="harmonic-ratio__actual">${escapeHtml(actualText)}</span>
+        <span class="harmonic-ratio__icon" aria-label="${iconLabel}">${icon}</span>
+      </div>
+    `;
+  };
+
   const cards = scanner.patterns.map((pattern) => {
     const fmt = (value) => (typeof value === "number" && Number.isFinite(value)
       ? formatPrice(value, pattern.currency)
       : "—");
-    const levels = pattern.target1 !== null
-      ? `<div class="harmonic-levels">
-          <span><strong>PRZ:</strong> ${escapeHtml(pattern.prznLabel)} (${escapeHtml(fmt(pattern.przLow))})</span>
-          <span><strong>Alvos:</strong> ${escapeHtml(fmt(pattern.target1))} → ${escapeHtml(fmt(pattern.target2))}</span>
-          <span><strong>Stop:</strong> ${escapeHtml(fmt(pattern.stopLevel))}</span>
-        </div>`
-      : `<div class="harmonic-levels harmonic-levels--locked"><small>PRZ + alvos liberados acima de 70% de confianca.</small></div>`;
+    const ratiosGrid = `
+      <div class="harmonic-card__ratios" role="group" aria-label="Validacao Fibonacci ${escapeHtml(pattern.name)}">
+        ${renderRatioCell("XB", pattern.ratiosValidation.XB)}
+        ${renderRatioCell("AC", pattern.ratiosValidation.AC)}
+        ${renderRatioCell("BD", pattern.ratiosValidation.BD)}
+        ${renderRatioCell("XD", pattern.ratiosValidation.XD)}
+      </div>
+    `;
+    const execution = pattern.target1 !== null
+      ? `
+        <div class="harmonic-card__execution">
+          <article class="harmonic-exec harmonic-exec--prz" title="Potential Reversal Zone (${escapeHtml(pattern.prznLabel)})">
+            <span class="harmonic-exec__label">PRZ</span>
+            <span class="harmonic-exec__value">${escapeHtml(fmt(pattern.przLow))}<span class="harmonic-exec__suffix">/ ${escapeHtml(fmt(pattern.przHigh))}</span></span>
+            <small>${escapeHtml(pattern.prznLabel)}</small>
+          </article>
+          <article class="harmonic-exec harmonic-exec--target">
+            <span class="harmonic-exec__label">Alvos</span>
+            <span class="harmonic-exec__value">${escapeHtml(fmt(pattern.target1))}</span>
+            <small>TP2 ${escapeHtml(fmt(pattern.target2))}</small>
+          </article>
+          <article class="harmonic-exec harmonic-exec--stop">
+            <span class="harmonic-exec__label">Stop</span>
+            <span class="harmonic-exec__value">${escapeHtml(fmt(pattern.stopLevel))}</span>
+            <small>invalidacao</small>
+          </article>
+        </div>
+      `
+      : `<div class="harmonic-card__execution harmonic-card__execution--locked"><small>PRZ + alvos liberados acima de 70% de confianca harmonica.</small></div>`;
     return `
-      <article class="harmonic-card" data-tone="${pattern.state.tone}">
+      <article class="harmonic-card" data-tone="${pattern.state.tone}" role="listitem">
         <header class="harmonic-card__header">
           <span class="harmonic-card__name"><span aria-hidden="true">${pattern.icon}</span> ${escapeHtml(pattern.name)}</span>
           <span class="harmonic-card__state harmonic-card__state--${pattern.state.tone}">${escapeHtml(pattern.state.label)}</span>
         </header>
-        <div class="harmonic-card__progress" role="progressbar" aria-valuenow="${pattern.confidence}" aria-valuemin="0" aria-valuemax="100">
+        <div class="harmonic-card__progress" role="progressbar" aria-valuenow="${pattern.confidence}" aria-valuemin="0" aria-valuemax="100" aria-label="Confianca ${escapeHtml(pattern.name)}">
           <div class="harmonic-card__progress-bar" style="width:${pattern.confidence}%"></div>
         </div>
         <small class="harmonic-card__progress-label">Convergencia Fibonacci: ${pattern.confidence}%</small>
-        ${levels}
+        ${ratiosGrid}
+        ${execution}
       </article>
     `;
   }).join("");
 
+  const confluenceBadge = scanner.confluenceCount > 0
+    ? `<span class="harmonic-confluence-badge" title="PRZs proximos (<0.3% do range) reforcam o setup (ICT PRZ overlap).">🎯 Confluencia ${scanner.confluenceCount}x</span>`
+    : "";
+  const xabcdHint = scanner.backendXabcdAvailable
+    ? ""
+    : `<small class="harmonic-scanner__hint">Backend resolve apenas a razao dominante (XD). Legs XB/AC/BD ficam pendentes ate ADR-072 fase 2 expor pivos XABCD individuais.</small>`;
+
   return `
     <div class="analysis-block">
-      <h4>Scanner geometrico XABCD</h4>
-      <small>Estado por padrao calculado a partir da posicao no range, ratio dominante e confianca harmonica agregada.</small>
-      <div class="harmonic-scanner">${cards}</div>
+      <header class="harmonic-scanner__header">
+        <h4>Scanner geometrico XABCD</h4>
+        ${confluenceBadge}
+      </header>
+      <small>Estado calculado a partir da posicao no range, razao dominante e confianca harmonica agregada. Tolerancia de validacao ±${HARMONIC_RATIO_TOLERANCE}.</small>
+      ${xabcdHint}
+      <div class="harmonic-scanner" role="list" aria-live="polite">${cards}</div>
+    </div>
+  `;
+}
+
+function renderFibonacciAuxiliary(fib) {
+  if (!fib || !Array.isArray(fib.levels) || fib.levels.length === 0) {
+    return "";
+  }
+  const rows = fib.levels.map((lvl) => {
+    const tone = lvl.role === "SUPORTE" ? "ok" : "warning";
+    const nearestBadge = lvl.nearest ? ' <span class="fib-row__nearest" title="Nivel mais proximo do preco atual">📍 PROXIMO</span>' : "";
+    const distance = Number.isFinite(lvl.distancePct) ? ` (${lvl.distancePct >= 0 ? "+" : ""}${lvl.distancePct.toFixed(2)}%)` : "";
+    return `
+      <li class="fib-row" data-tone="${tone}" role="listitem">
+        <span class="fib-row__ratio">${escapeHtml(lvl.ratioLabel)}${nearestBadge}</span>
+        <span class="fib-row__price">${escapeHtml(formatPrice(lvl.price, fib.currency))}</span>
+        <span class="fib-row__role fib-row__role--${tone}">${escapeHtml(lvl.role)}${distance}</span>
+      </li>
+    `;
+  }).join("");
+  return `
+    <div class="analysis-block">
+      <h4>Niveis de Fibonacci (auxiliares)</h4>
+      <small>Retracoes 23.6% a 78.6% e extensoes 127.2% / 161.8% sobre o range high-low atual. Classificacao Suporte/Resistencia derivada do preco corrente vs nivel.</small>
+      <ul class="fib-levels" role="list">${rows}</ul>
     </div>
   `;
 }
@@ -9930,9 +10137,11 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
 
   if (activeAnalysisTabId === "harmonicos") {
     const scanner = buildHarmonicGeometryScanner(analysis, currency);
+    const fib = buildFibonacciAuxiliaryLevels(analysis, currency);
 
     analysisTabContentElement.innerHTML = `
       ${renderHarmonicScanner(scanner)}
+      ${renderFibonacciAuxiliary(fib)}
       <div class="analysis-grid">
         <article class="analysis-block">
           <h4>Leitura harmonica agregada</h4>
@@ -9942,7 +10151,7 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
         </article>
         <article class="analysis-block">
           <h4>Como interpretar</h4>
-          <p>Use padrao harmonico apenas com confirmacao de candle e volume. Sem confirmacao, tratar como contexto e nao gatilho. PRZ + Stop + Alvos abaixo so sao acionados acima de 70% de confianca.</p>
+          <p>Use padrao harmonico apenas com confirmacao de candle e volume. Sem confirmacao, tratar como contexto e nao gatilho. PRZ + Stop + Alvos so sao acionados acima de 70% de confianca.</p>
         </article>
       </div>
     `;
