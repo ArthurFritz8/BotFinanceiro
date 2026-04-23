@@ -1,0 +1,412 @@
+<!--
+  ============================================================
+  Aba "Técnica" — Velocímetro de Confluência Institucional
+  Drop-in HTML/Tailwind + SVG. Sem dependência externa.
+  IDs estáveis (namespace "tech-") para animação JS futura.
+  Padrão: ADR-070 a registrar (peer-review do prompt Gemini).
+  ============================================================
+  Plug em: apps/web/src/main.js  ->  if (activeAnalysisTabId === "tecnica")
+  Mapeamento de dados sugerido (a fazer no JS):
+    --gauge-deg          : (-90deg ... +90deg)  derivado do score 0..100
+    #tech-gauge-score    : score numérico (binary: momentumStrength*100, spot: signal.confidence)
+    #tech-gauge-bias     : "Viés de Alta" / "Viés de Baixa" / "Neutro"
+    #tech-mtf-{tf}       : "bull" | "bear" | "neutral" via dataset.bias
+    #tech-smc-pro/-neu/-con : contagem de gatilhos SMC
+    #tech-hft-pro/-neu/-con : contagem de gatilhos HFT
+    #tech-consensus-buy/-neu/-sell : porcentagens da barra de consenso
+    #tech-spark-{0..9}   : altura do micro-histórico (CSS var --bar-h)
+-->
+
+<section
+  class="technical-institutional"
+  data-section="technical-gauge"
+  data-tone="neutral"
+  id="tech-root"
+  aria-label="Análise técnica institucional"
+  style="--gauge-deg: 0deg;"
+>
+  <!-- Cabeçalho com badge AO VIVO -->
+  <header class="tech-header flex items-center justify-between flex-wrap gap-2 mb-3">
+    <div class="flex items-center gap-2">
+      <h3 class="text-base md:text-lg font-semibold text-white tracking-tight">
+        Velocímetro de Confluência Institucional
+      </h3>
+      <span class="text-xs text-gray-400">SMC · HFT · Geometria · Indicadores</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <span
+        id="tech-live-badge"
+        class="tech-live-badge inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30"
+        aria-live="polite"
+      >
+        <span class="tech-live-dot"></span>
+        Ao vivo
+      </span>
+      <span id="tech-updated-at" class="text-[11px] text-gray-500">atualizado agora</span>
+    </div>
+  </header>
+
+  <!-- Linha 1: Velocímetro + Heatmap MTF -->
+  <div class="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4 mb-4">
+    <!-- Velocímetro (SVG real, responsivo, imprimível) -->
+    <article class="analysis-block tech-gauge-card p-4 flex flex-col items-center">
+      <svg
+        class="tech-gauge-svg"
+        viewBox="0 0 220 130"
+        preserveAspectRatio="xMidYMid meet"
+        role="meter"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="50"
+        aria-label="Score de confluência institucional"
+        id="tech-gauge"
+      >
+        <defs>
+          <linearGradient id="tech-gauge-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%"   stop-color="#ef4444"/>
+            <stop offset="50%"  stop-color="#a3a3a3"/>
+            <stop offset="100%" stop-color="#22c55e"/>
+          </linearGradient>
+          <filter id="tech-needle-shadow" x="-50%" y="-50%" width="200%" height="200%">
+            <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-opacity="0.55"/>
+          </filter>
+        </defs>
+        <!-- Trilho de fundo -->
+        <path
+          d="M 20 110 A 90 90 0 0 1 200 110"
+          fill="none"
+          stroke="rgba(255,255,255,0.06)"
+          stroke-width="20"
+          stroke-linecap="round"
+        />
+        <!-- Arco gradiente -->
+        <path
+          d="M 20 110 A 90 90 0 0 1 200 110"
+          fill="none"
+          stroke="url(#tech-gauge-grad)"
+          stroke-width="18"
+          stroke-linecap="round"
+        />
+        <!-- Marcadores -->
+        <text x="20"  y="125" font-size="9" fill="#fca5a5" text-anchor="middle">Venda</text>
+        <text x="110" y="20"  font-size="9" fill="#a3a3a3" text-anchor="middle">Neutro</text>
+        <text x="200" y="125" font-size="9" fill="#86efac" text-anchor="middle">Compra</text>
+        <!-- Ponteiro: pivota no ponto (110,110); rotação via CSS var --gauge-deg -->
+        <g class="tech-needle" transform="rotate(0 110 110)">
+          <line x1="110" y1="110" x2="110" y2="35"
+                stroke="#f8fafc" stroke-width="2.5" stroke-linecap="round"
+                filter="url(#tech-needle-shadow)"/>
+          <circle cx="110" cy="110" r="6" fill="#f8fafc" stroke="#0f172a" stroke-width="1.5"/>
+        </g>
+      </svg>
+
+      <!-- Score central + label de viés -->
+      <div class="mt-2 flex flex-col items-center">
+        <div
+          class="tech-gauge-score text-3xl md:text-4xl font-bold text-white leading-none"
+          id="tech-gauge-score"
+          title="Score = 0,30·SMC + 0,20·HFT + 0,10·Harmônicos + 0,35·Ghost Tracker + 0,05·Sentimento"
+        >50</div>
+        <div class="text-xs text-gray-500 mt-1">/ 100 · Força de confluência</div>
+        <div
+          id="tech-gauge-bias"
+          class="mt-2 text-sm font-semibold text-gray-300"
+          aria-live="polite"
+        >Aguardando dados</div>
+        <p class="text-[11px] text-gray-500 mt-1 text-center max-w-[28ch]">
+          Viés baseado em algoritmos institucionais (SMC &amp; HFT) — indicadores clássicos
+          atuam como confirmação secundária.
+        </p>
+      </div>
+    </article>
+
+    <!-- Heatmap MTF (Multi-Timeframe) -->
+    <article class="analysis-block tech-mtf-card p-4">
+      <h4 class="text-sm font-semibold text-white mb-2">Alinhamento Multi-Timeframe</h4>
+      <ul class="tech-mtf-grid grid grid-cols-5 gap-2" role="list">
+        <li class="tech-mtf-cell" id="tech-mtf-m5"  data-bias="neutral">
+          <span class="tech-mtf-tf">M5</span><span class="tech-mtf-dot" aria-hidden="true"></span>
+        </li>
+        <li class="tech-mtf-cell" id="tech-mtf-m15" data-bias="neutral">
+          <span class="tech-mtf-tf">M15</span><span class="tech-mtf-dot" aria-hidden="true"></span>
+        </li>
+        <li class="tech-mtf-cell" id="tech-mtf-h1"  data-bias="neutral">
+          <span class="tech-mtf-tf">H1</span><span class="tech-mtf-dot" aria-hidden="true"></span>
+        </li>
+        <li class="tech-mtf-cell" id="tech-mtf-h4"  data-bias="neutral">
+          <span class="tech-mtf-tf">H4</span><span class="tech-mtf-dot" aria-hidden="true"></span>
+        </li>
+        <li class="tech-mtf-cell" id="tech-mtf-d1"  data-bias="neutral">
+          <span class="tech-mtf-tf">D1</span><span class="tech-mtf-dot" aria-hidden="true"></span>
+        </li>
+      </ul>
+      <p class="text-[11px] text-gray-500 mt-2">
+        Verde = bullish · Vermelho = bearish · Cinza = neutro. Alinhamento em ≥ 3 TFs reforça o setup.
+      </p>
+
+      <!-- Mini-histórico (sparkline em CSS puro) -->
+      <h5 class="text-xs font-semibold text-gray-400 mt-3 mb-1">Últimos 10 scores</h5>
+      <div class="tech-spark" role="img" aria-label="Histórico recente do score">
+        <span class="tech-spark-bar" id="tech-spark-0" style="--bar-h: 30%"></span>
+        <span class="tech-spark-bar" id="tech-spark-1" style="--bar-h: 45%"></span>
+        <span class="tech-spark-bar" id="tech-spark-2" style="--bar-h: 50%"></span>
+        <span class="tech-spark-bar" id="tech-spark-3" style="--bar-h: 40%"></span>
+        <span class="tech-spark-bar" id="tech-spark-4" style="--bar-h: 55%"></span>
+        <span class="tech-spark-bar" id="tech-spark-5" style="--bar-h: 60%"></span>
+        <span class="tech-spark-bar" id="tech-spark-6" style="--bar-h: 58%"></span>
+        <span class="tech-spark-bar" id="tech-spark-7" style="--bar-h: 65%"></span>
+        <span class="tech-spark-bar" id="tech-spark-8" style="--bar-h: 62%"></span>
+        <span class="tech-spark-bar" id="tech-spark-9" style="--bar-h: 70%"></span>
+      </div>
+    </article>
+  </div>
+
+  <!-- Linha 2: Painéis Sensores SMC + HFT -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+    <!-- Painel 1: SMC -->
+    <article class="analysis-block tech-sensor-card" data-tone="neutral" id="tech-sensor-smc">
+      <header class="flex items-center justify-between mb-3">
+        <h4 class="text-sm font-semibold text-white">Sensores de Liquidez (SMC)</h4>
+        <span class="text-[11px] text-gray-500">peso 30%</span>
+      </header>
+      <div class="tech-scoreboard grid grid-cols-3 gap-2 mb-3">
+        <div class="tech-score-cell tech-score-pro">
+          <span class="tech-score-num" id="tech-smc-pro">0</span>
+          <span class="tech-score-lbl">↑ a favor</span>
+        </div>
+        <div class="tech-score-cell tech-score-neu">
+          <span class="tech-score-num" id="tech-smc-neu">0</span>
+          <span class="tech-score-lbl">— neutro</span>
+        </div>
+        <div class="tech-score-cell tech-score-con">
+          <span class="tech-score-num" id="tech-smc-con">0</span>
+          <span class="tech-score-lbl">↓ contra</span>
+        </div>
+      </div>
+      <ul class="tech-signal-list" role="list">
+        <li id="tech-smc-item-ob"    data-state="neutral">
+          <span class="tech-signal-icon" aria-hidden="true">◧</span>
+          <span class="tech-signal-name">Order Block H1</span>
+          <span class="tech-signal-tag">aguardando</span>
+        </li>
+        <li id="tech-smc-item-fvg"   data-state="neutral">
+          <span class="tech-signal-icon" aria-hidden="true">▦</span>
+          <span class="tech-signal-name">FVG mitigado</span>
+          <span class="tech-signal-tag">aguardando</span>
+        </li>
+        <li id="tech-smc-item-sweep" data-state="neutral">
+          <span class="tech-signal-icon" aria-hidden="true">↯</span>
+          <span class="tech-signal-name">Sweep de topo/fundo</span>
+          <span class="tech-signal-tag">aguardando</span>
+        </li>
+      </ul>
+    </article>
+
+    <!-- Painel 2: HFT / Tick -->
+    <article class="analysis-block tech-sensor-card" data-tone="neutral" id="tech-sensor-hft">
+      <header class="flex items-center justify-between mb-3">
+        <h4 class="text-sm font-semibold text-white">Sensores de Exaustão (Tick / HFT)</h4>
+        <span class="text-[11px] text-gray-500">peso 20%</span>
+      </header>
+      <div class="tech-scoreboard grid grid-cols-3 gap-2 mb-3">
+        <div class="tech-score-cell tech-score-pro">
+          <span class="tech-score-num" id="tech-hft-pro">0</span>
+          <span class="tech-score-lbl">↑ a favor</span>
+        </div>
+        <div class="tech-score-cell tech-score-neu">
+          <span class="tech-score-num" id="tech-hft-neu">0</span>
+          <span class="tech-score-lbl">— neutro</span>
+        </div>
+        <div class="tech-score-cell tech-score-con">
+          <span class="tech-score-num" id="tech-hft-con">0</span>
+          <span class="tech-score-lbl">↓ contra</span>
+        </div>
+      </div>
+      <ul class="tech-signal-list" role="list">
+        <li id="tech-hft-item-kinetic" data-state="neutral">
+          <span class="tech-signal-icon" aria-hidden="true">⏱</span>
+          <span class="tech-signal-name">Desaceleração cinética</span>
+          <span class="tech-signal-tag">aguardando</span>
+        </li>
+        <li id="tech-hft-item-delta"   data-state="neutral">
+          <span class="tech-signal-icon" aria-hidden="true">Δ</span>
+          <span class="tech-signal-name">Divergência de delta</span>
+          <span class="tech-signal-tag">aguardando</span>
+        </li>
+        <li id="tech-hft-item-book"    data-state="neutral">
+          <span class="tech-signal-icon" aria-hidden="true">≣</span>
+          <span class="tech-signal-name">Pressão de order book</span>
+          <span class="tech-signal-tag">aguardando</span>
+        </li>
+      </ul>
+    </article>
+  </div>
+
+  <!-- Linha 3: Barra de Consenso Final -->
+  <article class="analysis-block tech-consensus-card p-4 mb-4">
+    <header class="flex items-center justify-between mb-2">
+      <h4 class="text-sm font-semibold text-white">Consenso final dos sinais</h4>
+      <span class="text-[11px] text-gray-500">SMC + HFT + Geometria + Indicadores</span>
+    </header>
+    <div class="tech-consensus-bar" role="img" aria-label="Distribuição do consenso">
+      <span class="tech-consensus-seg tech-consensus-sell" id="tech-consensus-sell" style="--seg: 33%"></span>
+      <span class="tech-consensus-seg tech-consensus-neu"  id="tech-consensus-neu"  style="--seg: 34%"></span>
+      <span class="tech-consensus-seg tech-consensus-buy"  id="tech-consensus-buy"  style="--seg: 33%"></span>
+    </div>
+    <div class="grid grid-cols-3 text-[11px] text-gray-400 mt-1">
+      <span class="text-rose-300">Venda · <strong id="tech-consensus-sell-pct">33%</strong></span>
+      <span class="text-center">Neutro · <strong id="tech-consensus-neu-pct">34%</strong></span>
+      <span class="text-right text-emerald-300">Compra · <strong id="tech-consensus-buy-pct">33%</strong></span>
+    </div>
+  </article>
+
+  <!-- Linha 4: Indicadores clássicos (accordion como nas screenshots) -->
+  <details class="analysis-block tech-classic-details" id="tech-classic">
+    <summary class="cursor-pointer select-none text-sm font-semibold text-gray-300 flex items-center justify-between">
+      <span>Indicadores clássicos (44) — confirmação secundária</span>
+      <span class="text-xs text-gray-500">Mostrar / Ocultar</span>
+    </summary>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+      <div>
+        <h5 class="text-xs font-semibold text-emerald-300 mb-1">Médias Móveis</h5>
+        <ul class="tech-classic-list" id="tech-classic-ma" role="list">
+          <li class="tech-classic-row"><span>—</span><span>aguardando dados</span><span class="tech-classic-tag">—</span></li>
+        </ul>
+      </div>
+      <div>
+        <h5 class="text-xs font-semibold text-emerald-300 mb-1">Osciladores</h5>
+        <ul class="tech-classic-list" id="tech-classic-osc" role="list">
+          <li class="tech-classic-row"><span>—</span><span>aguardando dados</span><span class="tech-classic-tag">—</span></li>
+        </ul>
+      </div>
+    </div>
+  </details>
+</section>
+
+<!--
+  ============================================================
+  CSS auxiliar — colar em styles.css (ou <style> escopado).
+  Compatível com a paleta atual de .analysis-block.
+  ============================================================
+
+  .technical-institutional { color: #e5e7eb; }
+
+  .tech-live-dot {
+    width: 6px; height: 6px; border-radius: 9999px;
+    background: #34d399; box-shadow: 0 0 0 0 rgba(52,211,153,.6);
+    animation: techPulse 1.6s ease-out infinite;
+  }
+  @keyframes techPulse {
+    0%   { box-shadow: 0 0 0 0 rgba(52,211,153,.55); }
+    70%  { box-shadow: 0 0 0 8px rgba(52,211,153,0); }
+    100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); }
+  }
+
+  .tech-gauge-svg { width: 100%; max-width: 360px; height: auto; display: block; }
+  .tech-needle {
+    transform: rotate(var(--gauge-deg, 0deg));
+    transform-origin: 110px 110px;
+    transform-box: view-box;
+    transition: transform 600ms cubic-bezier(.22,.61,.36,1);
+    will-change: transform;
+  }
+
+  .tech-mtf-cell {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    padding: 8px 4px; border-radius: 8px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+  .tech-mtf-tf { font-size: 10px; color: #9ca3af; letter-spacing: .04em; }
+  .tech-mtf-dot {
+    width: 14px; height: 14px; border-radius: 9999px;
+    background: #6b7280; box-shadow: inset 0 0 0 2px rgba(0,0,0,.25);
+    transition: background 300ms ease;
+  }
+  .tech-mtf-cell[data-bias="bull"]    .tech-mtf-dot { background: #22c55e; }
+  .tech-mtf-cell[data-bias="bear"]    .tech-mtf-dot { background: #ef4444; }
+  .tech-mtf-cell[data-bias="neutral"] .tech-mtf-dot { background: #6b7280; }
+
+  .tech-spark {
+    display: grid; grid-template-columns: repeat(10, 1fr); gap: 3px;
+    align-items: end; height: 36px;
+    padding: 4px; border-radius: 6px;
+    background: rgba(255,255,255,0.02);
+  }
+  .tech-spark-bar {
+    height: var(--bar-h, 20%);
+    background: linear-gradient(180deg, #34d399, #059669);
+    border-radius: 2px; min-height: 3px;
+    transition: height 300ms ease;
+  }
+
+  .tech-scoreboard .tech-score-cell {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 10px 4px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .tech-score-num { font-size: 22px; font-weight: 700; line-height: 1; color: #f9fafb; }
+  .tech-score-lbl { font-size: 10px; color: #9ca3af; letter-spacing: .03em; }
+  .tech-score-pro { background: rgba(34,197,94,.08);  border-color: rgba(34,197,94,.30); }
+  .tech-score-pro .tech-score-num { color: #86efac; }
+  .tech-score-neu { background: rgba(255,255,255,.03); }
+  .tech-score-con { background: rgba(239,68,68,.08);  border-color: rgba(239,68,68,.30); }
+  .tech-score-con .tech-score-num { color: #fca5a5; }
+
+  .tech-signal-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+  .tech-signal-list li {
+    display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 8px;
+    padding: 6px 8px; border-radius: 6px;
+    background: rgba(255,255,255,0.02);
+    border-left: 3px solid #6b7280;
+    font-size: 12px;
+  }
+  .tech-signal-list li[data-state="bull"]    { border-left-color: #22c55e; }
+  .tech-signal-list li[data-state="bear"]    { border-left-color: #ef4444; }
+  .tech-signal-list li[data-state="neutral"] { border-left-color: #6b7280; }
+  .tech-signal-icon { color: #9ca3af; text-align: center; font-size: 14px; }
+  .tech-signal-name { color: #e5e7eb; }
+  .tech-signal-tag {
+    font-size: 10px; padding: 2px 6px; border-radius: 9999px;
+    background: rgba(255,255,255,0.06); color: #d1d5db; text-transform: uppercase;
+    letter-spacing: .04em;
+  }
+  .tech-signal-list li[data-state="bull"] .tech-signal-tag { background: rgba(34,197,94,.15);  color: #86efac; }
+  .tech-signal-list li[data-state="bear"] .tech-signal-tag { background: rgba(239,68,68,.15);  color: #fca5a5; }
+
+  .tech-consensus-bar {
+    display: flex; height: 10px; border-radius: 9999px; overflow: hidden;
+    background: rgba(255,255,255,0.04);
+  }
+  .tech-consensus-seg { width: var(--seg, 33%); transition: width 400ms ease; }
+  .tech-consensus-sell { background: #ef4444; }
+  .tech-consensus-neu  { background: #6b7280; }
+  .tech-consensus-buy  { background: #22c55e; }
+
+  .tech-classic-details[open] > summary { margin-bottom: 6px; }
+  .tech-classic-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; }
+  .tech-classic-row {
+    display: grid; grid-template-columns: 1fr auto auto; gap: 8px;
+    padding: 4px 8px; border-radius: 4px;
+    background: rgba(255,255,255,0.02); font-size: 11px; color: #d1d5db;
+  }
+  .tech-classic-tag {
+    font-size: 9px; padding: 1px 5px; border-radius: 3px;
+    background: rgba(255,255,255,.06); text-transform: uppercase; letter-spacing: .05em;
+  }
+  .tech-classic-row[data-tag="buy"]  .tech-classic-tag { background: rgba(34,197,94,.18);  color: #86efac; }
+  .tech-classic-row[data-tag="sell"] .tech-classic-tag { background: rgba(239,68,68,.18);  color: #fca5a5; }
+
+  /* Acessibilidade — respeita reduced-motion */
+  @media (prefers-reduced-motion: reduce) {
+    .tech-needle, .tech-mtf-dot, .tech-spark-bar,
+    .tech-consensus-seg, .tech-live-dot { transition: none; animation: none; }
+  }
+
+  /* Print / PDF — preserva SVG, esconde animação */
+  @media print {
+    .technical-institutional { color: #000; }
+    .tech-live-badge, .tech-live-dot { display: none; }
+    .tech-needle { transition: none; }
+  }
+-->

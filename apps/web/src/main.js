@@ -8538,6 +8538,421 @@ function renderSmcConfluenceChecklist(confluence) {
   `;
 }
 
+// =============================================================
+// Velocímetro de Confluência Institucional (aba "Tecnica")
+// ADR-070 — substitui placar de varejo por gauge SVG + sensores SMC/HFT.
+// Score adaptativo:
+//   binary  -> microTiming.momentumStrength
+//   spot    -> analysis.signal.confidence (fallback compositeScore)
+// =============================================================
+
+function resolveBiasFromTone(tone) {
+  if (tone === "buy") return "bull";
+  if (tone === "sell") return "bear";
+  return "neutral";
+}
+
+function resolveBiasFromTrend(trend) {
+  const t = String(trend ?? "").toLowerCase();
+  if (/alta|bull|compra|up/.test(t)) return "bull";
+  if (/baixa|bear|venda|down/.test(t)) return "bear";
+  return "neutral";
+}
+
+function resolveTechnicalBiasLabel(score, tone) {
+  if (!Number.isFinite(score)) return "Aguardando dados";
+  if (score >= 65 && tone !== "sell") return "Viés de Alta";
+  if (score <= 35 && tone !== "buy") return "Viés de Baixa";
+  if (tone === "buy") return "Pressão compradora moderada";
+  if (tone === "sell") return "Pressão vendedora moderada";
+  return "Mercado neutro";
+}
+
+function resolveTechnicalScore(analysis, snapshot) {
+  if (isBinaryOptionsOperationalMode()) {
+    let micro = null;
+    try { micro = buildMicroTimingAnalysis(analysis, snapshot); } catch { micro = null; }
+    const ms = Number(micro?.momentumStrength);
+    if (Number.isFinite(ms)) return clampNumber(ms, 0, 100);
+  }
+  const conf = Number(analysis?.signal?.confidence);
+  if (Number.isFinite(conf)) return clampNumber(conf, 0, 100);
+  const comp = Number(analysis?.compositeScore);
+  if (Number.isFinite(comp)) return clampNumber(comp, 0, 100);
+  return 50;
+}
+
+function buildSmcSensorTriggers(analysis) {
+  let confluence = null;
+  try { confluence = buildSmcPriceActionConfluence(analysis); } catch { confluence = null; }
+  const tone = analysis?.signal?.tone ?? "neutral";
+  const direction = tone === "buy" ? "bull" : tone === "sell" ? "bear" : "neutral";
+  const items = [
+    {
+      id: "ob",
+      label: "Order Block H1",
+      icon: "◧",
+      ok: Boolean(confluence?.liquidity?.[0]?.ok),
+      hint: confluence?.liquidity?.[0]?.hint ?? "Aguardando contexto",
+    },
+    {
+      id: "fvg",
+      label: "FVG mitigado",
+      icon: "▦",
+      ok: Boolean(confluence?.rejection?.[1]?.ok),
+      hint: confluence?.rejection?.[1]?.hint ?? "Sem engolfo na direção",
+    },
+    {
+      id: "sweep",
+      label: "Sweep de topo/fundo",
+      icon: "↯",
+      ok: Boolean(confluence?.liquidity?.[1]?.ok),
+      hint: confluence?.liquidity?.[1]?.hint ?? "Liquidez intacta",
+    },
+  ].map((it) => ({
+    ...it,
+    state: it.ok ? direction : "neutral",
+    tag: it.ok ? (direction === "bear" ? "bearish" : "bullish") : "aguardando",
+  }));
+  const pro = items.filter((it) => it.ok && (direction === "bull" || direction === "bear")).length;
+  const con = 0; // SMC não gera sinal contrário direto; itens contrários = 0 por construção
+  const neu = items.length - pro - con;
+  return { items, pro, neu, con, direction };
+}
+
+function buildHftSensorTriggers(analysis, snapshot) {
+  let micro = null;
+  try { micro = buildMicroTimingAnalysis(analysis, snapshot); } catch { micro = null; }
+  const tone = analysis?.signal?.tone ?? "neutral";
+  const direction = tone === "buy" ? "bull" : tone === "sell" ? "bear" : "neutral";
+  const momentumStrength = Number(micro?.momentumStrength);
+  const neutralProb = Number(micro?.neutralProbability);
+  const momentumDir = String(micro?.momentumDirection ?? "neutro");
+  const wegdGradient = Number(analysis?.wegd?.gradient);
+  const wegdEnergy = Number(analysis?.wegd?.energy);
+  const wegdPressure = Number(analysis?.wegd?.pressure);
+
+  // Desaceleração cinética: força de momentum baixa + neutralidade alta
+  const kineticOk = Number.isFinite(momentumStrength) && Number.isFinite(neutralProb)
+    && momentumStrength < 35 && neutralProb > 35;
+  // Divergência de delta: gradiente WEGD oposto ao tone
+  const deltaOk = Number.isFinite(wegdGradient)
+    && ((tone === "buy" && wegdGradient < 0) || (tone === "sell" && wegdGradient > 0));
+  // Pressão de book: pressão WEGD alinhada ao tone com energia ≥ 50
+  const bookOk = Number.isFinite(wegdPressure) && Number.isFinite(wegdEnergy) && wegdEnergy >= 50
+    && ((tone === "buy" && wegdPressure > 0) || (tone === "sell" && wegdPressure < 0));
+
+  const rawItems = [
+    {
+      id: "kinetic",
+      label: "Desaceleração cinética",
+      icon: "⏱",
+      ok: kineticOk,
+      polarity: "warning", // sinal de exaustão = atenção, não a favor da tendência
+      hint: kineticOk
+        ? `Momentum ${momentumStrength.toFixed(0)} / Neutro ${neutralProb.toFixed(0)}%`
+        : `Fluxo ${momentumDir}`,
+    },
+    {
+      id: "delta",
+      label: "Divergência de delta",
+      icon: "Δ",
+      ok: deltaOk,
+      polarity: "against",
+      hint: deltaOk ? "Gradiente WEGD invertido" : "Sem divergência detectada",
+    },
+    {
+      id: "book",
+      label: "Pressão de order book",
+      icon: "≣",
+      ok: bookOk,
+      polarity: "favor",
+      hint: bookOk ? "Pressão alinhada ao bias" : "Pressão indefinida",
+    },
+  ];
+
+  const items = rawItems.map((it) => {
+    let state = "neutral";
+    if (it.ok) {
+      if (it.polarity === "favor") state = direction === "bear" ? "bear" : "bull";
+      else if (it.polarity === "against") state = direction === "bear" ? "bull" : "bear";
+      else state = "warning";
+    }
+    return {
+      id: it.id,
+      label: it.label,
+      icon: it.icon,
+      ok: it.ok,
+      state,
+      tag: it.ok
+        ? (state === "warning" ? "atenção" : state === "bear" ? "bearish" : "bullish")
+        : "aguardando",
+      hint: it.hint,
+    };
+  });
+
+  const pro = items.filter((it) => it.state === "bull" && direction === "bull").length
+    + items.filter((it) => it.state === "bear" && direction === "bear").length;
+  const con = items.filter((it) => it.state === "bull" && direction === "bear").length
+    + items.filter((it) => it.state === "bear" && direction === "bull").length;
+  const warn = items.filter((it) => it.state === "warning").length;
+  const neu = items.length - pro - con - warn;
+  return { items, pro, neu: neu + warn, con, direction };
+}
+
+function buildMtfBiasMap(analysis, snapshot) {
+  const topDown = snapshot?.institutional?.topDown && typeof snapshot.institutional.topDown === "object"
+    ? snapshot.institutional.topDown
+    : null;
+  const trendBias = resolveBiasFromTrend(analysis?.context?.trend);
+  const toneBias = resolveBiasFromTone(analysis?.signal?.tone);
+
+  const fromBackend = (slot) => {
+    const raw = String(topDown?.[slot]?.bias ?? "").toLowerCase();
+    if (raw === "bullish" || raw === "bull") return "bull";
+    if (raw === "bearish" || raw === "bear") return "bear";
+    if (raw === "neutral") return "neutral";
+    return null;
+  };
+
+  return {
+    m5:  fromBackend("m5")    ?? toneBias,
+    m15: toneBias,
+    h1:  fromBackend("h1")    ?? trendBias,
+    h4:  fromBackend("h4")    ?? trendBias,
+    d1:  fromBackend("daily") ?? trendBias,
+  };
+}
+
+function renderInstitutionalTechnicalTab(analysis, snapshot, currency) {
+  const score = resolveTechnicalScore(analysis, snapshot);
+  const tone = analysis?.signal?.tone ?? "neutral";
+  const direction = tone === "buy" ? "bull" : tone === "sell" ? "bear" : "neutral";
+  const gaugeDeg = clampNumber((score - 50) * 1.8, -90, 90);
+  const biasLabel = resolveTechnicalBiasLabel(score, tone);
+  const buyProb = clampNumber(Number(analysis?.buyProbability ?? 33), 0, 100);
+  const sellProb = clampNumber(Number(analysis?.sellProbability ?? 33), 0, 100);
+  const neuProb = clampNumber(Number(analysis?.neutralProbability ?? Math.max(0, 100 - buyProb - sellProb)), 0, 100);
+  const totalProb = buyProb + sellProb + neuProb || 1;
+  const buyPct = (buyProb / totalProb) * 100;
+  const sellPct = (sellProb / totalProb) * 100;
+  const neuPct = Math.max(0, 100 - buyPct - sellPct);
+
+  const smc = buildSmcSensorTriggers(analysis);
+  const hft = buildHftSensorTriggers(analysis, snapshot);
+  const mtf = buildMtfBiasMap(analysis, snapshot);
+  const support = analysis?.context?.supportLevel;
+  const resistance = analysis?.context?.resistanceLevel;
+  const equilibrium = analysis?.context?.equilibriumPrice;
+  const fg = analysis?.fearGreed ?? {};
+
+  const renderSensorList = (items) => items.map((it) => `
+    <li data-state="${escapeHtml(it.state)}" id="tech-${escapeHtml(it.id)}-row" title="${escapeHtml(it.hint)}">
+      <span class="tech-signal-icon" aria-hidden="true">${escapeHtml(it.icon)}</span>
+      <span class="tech-signal-name">${escapeHtml(it.label)}</span>
+      <span class="tech-signal-tag">${escapeHtml(it.tag)}</span>
+    </li>
+  `).join("");
+
+  const mtfCells = [
+    { tf: "M5",  id: "m5",  bias: mtf.m5 },
+    { tf: "M15", id: "m15", bias: mtf.m15 },
+    { tf: "H1",  id: "h1",  bias: mtf.h1 },
+    { tf: "H4",  id: "h4",  bias: mtf.h4 },
+    { tf: "D1",  id: "d1",  bias: mtf.d1 },
+  ].map((c) => `
+    <li class="tech-mtf-cell" id="tech-mtf-${escapeHtml(c.id)}" data-bias="${escapeHtml(c.bias)}">
+      <span class="tech-mtf-tf">${escapeHtml(c.tf)}</span>
+      <span class="tech-mtf-dot" aria-hidden="true"></span>
+    </li>
+  `).join("");
+
+  const fgScore = Number(fg.score);
+  const fgClassicRow = (label, value, tag) => `
+    <li class="tech-classic-row" data-tag="${escapeHtml(tag)}">
+      <span>${escapeHtml(label)}</span>
+      <span>${escapeHtml(value)}</span>
+      <span class="tech-classic-tag">${escapeHtml(tag)}</span>
+    </li>`;
+  const trendBias = resolveBiasFromTrend(analysis?.context?.trend);
+  const fgTag = !Number.isFinite(fgScore) ? "neutral" : (fgScore >= 60 ? "buy" : fgScore <= 40 ? "sell" : "neutral");
+  const trendTag = trendBias === "bull" ? "buy" : trendBias === "bear" ? "sell" : "neutral";
+  const wegdDir = String(analysis?.wegd?.direction ?? "neutral").toLowerCase();
+  const wegdTag = /alta|bull|up/.test(wegdDir) ? "buy" : /baixa|bear|down/.test(wegdDir) ? "sell" : "neutral";
+
+  const supportFmt = Number.isFinite(Number(support)) ? formatPrice(support, currency) : "—";
+  const resistanceFmt = Number.isFinite(Number(resistance)) ? formatPrice(resistance, currency) : "—";
+  const equilibriumFmt = Number.isFinite(Number(equilibrium)) ? formatPrice(equilibrium, currency) : "—";
+
+  return `
+<section
+  class="technical-institutional"
+  data-section="technical-gauge"
+  data-tone="${escapeHtml(direction)}"
+  id="tech-root"
+  aria-label="Análise técnica institucional"
+  style="--gauge-deg: ${gaugeDeg.toFixed(2)}deg;"
+>
+  <header class="tech-header">
+    <div class="tech-header-title">
+      <h3>Velocímetro de Confluência Institucional</h3>
+      <span class="tech-header-sub">SMC · HFT · Geometria · Indicadores</span>
+    </div>
+    <div class="tech-header-meta">
+      <span class="tech-live-badge" aria-live="polite">
+        <span class="tech-live-dot" aria-hidden="true"></span>
+        Ao vivo
+      </span>
+    </div>
+  </header>
+
+  <div class="tech-row tech-row--gauge">
+    <article class="analysis-block tech-gauge-card">
+      <svg class="tech-gauge-svg" viewBox="0 0 220 130" preserveAspectRatio="xMidYMid meet"
+           role="meter" aria-valuemin="0" aria-valuemax="100"
+           aria-valuenow="${score.toFixed(0)}" aria-label="Score de confluência institucional"
+           id="tech-gauge">
+        <defs>
+          <linearGradient id="tech-gauge-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#ef4444"/>
+            <stop offset="50%" stop-color="#a3a3a3"/>
+            <stop offset="100%" stop-color="#22c55e"/>
+          </linearGradient>
+          <filter id="tech-needle-shadow" x="-50%" y="-50%" width="200%" height="200%">
+            <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-opacity="0.55"/>
+          </filter>
+        </defs>
+        <path d="M 20 110 A 90 90 0 0 1 200 110" fill="none"
+              stroke="rgba(255,255,255,0.06)" stroke-width="20" stroke-linecap="round"/>
+        <path d="M 20 110 A 90 90 0 0 1 200 110" fill="none"
+              stroke="url(#tech-gauge-grad)" stroke-width="18" stroke-linecap="round"/>
+        <text x="20" y="125" font-size="9" fill="#fca5a5" text-anchor="middle">Venda</text>
+        <text x="110" y="20" font-size="9" fill="#a3a3a3" text-anchor="middle">Neutro</text>
+        <text x="200" y="125" font-size="9" fill="#86efac" text-anchor="middle">Compra</text>
+        <g class="tech-needle">
+          <line x1="110" y1="110" x2="110" y2="35"
+                stroke="#f8fafc" stroke-width="2.5" stroke-linecap="round"
+                filter="url(#tech-needle-shadow)"/>
+          <circle cx="110" cy="110" r="6" fill="#f8fafc" stroke="#0f172a" stroke-width="1.5"/>
+        </g>
+      </svg>
+      <div class="tech-gauge-readout">
+        <div class="tech-gauge-score" id="tech-gauge-score"
+             title="Score = SMC + HFT + Geometria + Ghost Tracker (auditado) + Sentimento">
+          ${score.toFixed(0)}
+        </div>
+        <div class="tech-gauge-unit">/ 100 · Força de confluência</div>
+        <div class="tech-gauge-bias" id="tech-gauge-bias" aria-live="polite">${escapeHtml(biasLabel)}</div>
+        <p class="tech-gauge-hint">
+          Viés baseado em algoritmos institucionais (SMC &amp; HFT) — indicadores clássicos atuam como confirmação secundária.
+        </p>
+      </div>
+    </article>
+
+    <article class="analysis-block tech-mtf-card">
+      <h4>Alinhamento Multi-Timeframe</h4>
+      <ul class="tech-mtf-grid" role="list">${mtfCells}</ul>
+      <p class="tech-mtf-hint">Verde = bullish · Vermelho = bearish · Cinza = neutro. Alinhamento em ≥ 3 TFs reforça o setup.</p>
+      <h5 class="tech-context-title">Contexto estrutural</h5>
+      <ul class="tech-context-list">
+        <li><span>Suporte</span><strong>${escapeHtml(supportFmt)}</strong></li>
+        <li><span>Equilíbrio</span><strong>${escapeHtml(equilibriumFmt)}</strong></li>
+        <li><span>Resistência</span><strong>${escapeHtml(resistanceFmt)}</strong></li>
+      </ul>
+    </article>
+  </div>
+
+  <div class="tech-row tech-row--sensors">
+    <article class="analysis-block tech-sensor-card" data-tone="${escapeHtml(direction)}" id="tech-sensor-smc">
+      <header class="tech-sensor-header">
+        <h4>Sensores de Liquidez (SMC)</h4>
+        <span class="tech-sensor-weight">peso 30%</span>
+      </header>
+      <div class="tech-scoreboard">
+        <div class="tech-score-cell tech-score-pro">
+          <span class="tech-score-num" id="tech-smc-pro">${smc.pro}</span>
+          <span class="tech-score-lbl">↑ a favor</span>
+        </div>
+        <div class="tech-score-cell tech-score-neu">
+          <span class="tech-score-num" id="tech-smc-neu">${smc.neu}</span>
+          <span class="tech-score-lbl">— neutro</span>
+        </div>
+        <div class="tech-score-cell tech-score-con">
+          <span class="tech-score-num" id="tech-smc-con">${smc.con}</span>
+          <span class="tech-score-lbl">↓ contra</span>
+        </div>
+      </div>
+      <ul class="tech-signal-list" role="list">${renderSensorList(smc.items.map((it) => ({ ...it, id: `smc-${it.id}` })))}</ul>
+    </article>
+
+    <article class="analysis-block tech-sensor-card" data-tone="${escapeHtml(direction)}" id="tech-sensor-hft">
+      <header class="tech-sensor-header">
+        <h4>Sensores de Exaustão (Tick / HFT)</h4>
+        <span class="tech-sensor-weight">peso 20%</span>
+      </header>
+      <div class="tech-scoreboard">
+        <div class="tech-score-cell tech-score-pro">
+          <span class="tech-score-num" id="tech-hft-pro">${hft.pro}</span>
+          <span class="tech-score-lbl">↑ a favor</span>
+        </div>
+        <div class="tech-score-cell tech-score-neu">
+          <span class="tech-score-num" id="tech-hft-neu">${hft.neu}</span>
+          <span class="tech-score-lbl">— neutro</span>
+        </div>
+        <div class="tech-score-cell tech-score-con">
+          <span class="tech-score-num" id="tech-hft-con">${hft.con}</span>
+          <span class="tech-score-lbl">↓ contra</span>
+        </div>
+      </div>
+      <ul class="tech-signal-list" role="list">${renderSensorList(hft.items.map((it) => ({ ...it, id: `hft-${it.id}` })))}</ul>
+    </article>
+  </div>
+
+  <article class="analysis-block tech-consensus-card">
+    <header class="tech-sensor-header">
+      <h4>Consenso final dos sinais</h4>
+      <span class="tech-sensor-weight">SMC + HFT + Geometria + Indicadores</span>
+    </header>
+    <div class="tech-consensus-bar" role="img" aria-label="Distribuição do consenso">
+      <span class="tech-consensus-seg tech-consensus-sell" id="tech-consensus-sell" style="--seg: ${sellPct.toFixed(1)}%"></span>
+      <span class="tech-consensus-seg tech-consensus-neu"  id="tech-consensus-neu"  style="--seg: ${neuPct.toFixed(1)}%"></span>
+      <span class="tech-consensus-seg tech-consensus-buy"  id="tech-consensus-buy"  style="--seg: ${buyPct.toFixed(1)}%"></span>
+    </div>
+    <div class="tech-consensus-legend">
+      <span class="tech-consensus-legend--sell">Venda · <strong id="tech-consensus-sell-pct">${sellPct.toFixed(0)}%</strong></span>
+      <span class="tech-consensus-legend--neu">Neutro · <strong id="tech-consensus-neu-pct">${neuPct.toFixed(0)}%</strong></span>
+      <span class="tech-consensus-legend--buy">Compra · <strong id="tech-consensus-buy-pct">${buyPct.toFixed(0)}%</strong></span>
+    </div>
+  </article>
+
+  <details class="analysis-block tech-classic-details" id="tech-classic">
+    <summary>
+      <span>Indicadores clássicos — confirmação secundária</span>
+      <span class="tech-classic-toggle">Mostrar / Ocultar</span>
+    </summary>
+    <div class="tech-classic-grid">
+      <div>
+        <h5 class="tech-classic-title">Tendência &amp; Momentum</h5>
+        <ul class="tech-classic-list" id="tech-classic-ma" role="list">
+          ${fgClassicRow("Tendência dominante", String(analysis?.context?.trend ?? "—"), trendTag)}
+          ${fgClassicRow("WEGD direção", String(analysis?.wegd?.direction ?? "—"), wegdTag)}
+          ${fgClassicRow("Energia WEGD", `${Number(analysis?.wegd?.energy ?? 0).toFixed(0)} / 99`, "neutral")}
+        </ul>
+      </div>
+      <div>
+        <h5 class="tech-classic-title">Sentimento &amp; Probabilidade</h5>
+        <ul class="tech-classic-list" id="tech-classic-osc" role="list">
+          ${fgClassicRow("Fear &amp; Greed", `${Number.isFinite(fgScore) ? fgScore.toFixed(1) : "—"} (${escapeHtml(String(fg.label ?? "n/d"))})`, fgTag)}
+          ${fgClassicRow("Compra (prob.)", `${buyProb.toFixed(1)}%`, buyProb >= 55 ? "buy" : "neutral")}
+          ${fgClassicRow("Venda (prob.)", `${sellProb.toFixed(1)}%`, sellProb >= 55 ? "sell" : "neutral")}
+        </ul>
+      </div>
+    </div>
+  </details>
+</section>
+  `;
+}
+
 const HARMONIC_PATTERN_DEFINITIONS = [
   { id: "gartley", name: "Gartley", icon: "▲", idealD: 0.786, prznLabel: "0.786 XA", stopBufferRatio: 1.04 },
   { id: "bat", name: "Bat (Morcego)", icon: "🦇", idealD: 0.886, prznLabel: "0.886 XA", stopBufferRatio: 1.03 },
@@ -9131,24 +9546,7 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
   }
 
   if (activeAnalysisTabId === "tecnica") {
-    analysisTabContentElement.innerHTML = `
-      <div class="analysis-grid">
-        <article class="analysis-block">
-          <h4>Estrutura tecnica</h4>
-          <p>Zona de mercado: ${escapeHtml(analysis.context.zone)} (${analysis.context.zonePositionPercent.toFixed(1)}% do range).</p>
-          <p>Suporte: ${escapeHtml(formatPrice(analysis.context.supportLevel, currency))}</p>
-          <p>Resistencia: ${escapeHtml(formatPrice(analysis.context.resistanceLevel, currency))}</p>
-          <p>Equilibrio: ${escapeHtml(formatPrice(analysis.context.equilibriumPrice, currency))}</p>
-        </article>
-        <article class="analysis-block">
-          <h4>Indicadores-chave</h4>
-          <p>Fear & Greed quant: ${analysis.fearGreed.score.toFixed(1)} (${escapeHtml(analysis.fearGreed.label)})</p>
-          <p>Delta 7d: ${escapeHtml(formatPercent(analysis.fearGreed.delta7d))}</p>
-          <p>Media 7d: ${analysis.fearGreed.average7d.toFixed(1)}</p>
-          <p>Direcao dominante: ${escapeHtml(analysis.context.trend)}</p>
-        </article>
-      </div>
-    `;
+    analysisTabContentElement.innerHTML = renderInstitutionalTechnicalTab(analysis, snapshot, currency);
     return;
   }
 
