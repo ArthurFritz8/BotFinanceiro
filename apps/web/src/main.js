@@ -15,6 +15,7 @@ import { setLiveStatus, getLiveStatusSnapshot, LIVE_STATUS } from "./shared/live
 import { initPushNotifications } from "./shared/push-notifications.js";
 import { initPaperTradingPanel } from "./shared/paper-trading-panel.js";
 import { initBacktestingPanel } from "./shared/backtesting-panel.js";
+import { bootstrapExecutiveReport, generateExecutiveReport } from "./executive-report.js";
 import "./styles.css";
 
 const chatForm = document.querySelector("#chat-form");
@@ -9753,6 +9754,15 @@ function renderDeepAnalysisPanelImmediate(snapshot) {
   renderAnalysisTabContent(analysis, snapshot, {
     microTiming: precomputedMicroTiming,
   });
+
+  // ADR-069: hidrata o Relatório Executivo (modal) com o snapshot mais recente.
+  generateExecutiveReport({
+    ...analysis,
+    microTiming: precomputedMicroTiming ?? analysis.microTiming,
+    asset: snapshot?.asset ?? snapshot?.symbol,
+    timeframe: snapshot?.timeframe,
+    snapshotAt: snapshot?.fetchedAt ?? Date.now(),
+  });
 }
 
 /**
@@ -17399,6 +17409,7 @@ setupMemecoinRadarPanel();
 initPushNotifications();
 initPaperTradingPanel();
 initBacktestingPanel();
+bootstrapExecutiveReport({ openTrigger: document.getElementById("btn-open-executive-report") });
 void (async () => {
   await initializeAuth();
 })();

@@ -796,6 +796,13 @@
             </p>
           </section>
 
+          <div class="analysis-report-launcher">
+            <button type="button" id="btn-open-executive-report" class="analysis-report-launcher__btn" aria-haspopup="dialog" aria-controls="executive-report-modal">
+              <svg viewBox="0 0 24 24" aria-hidden="true" width="16" height="16"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Zm0 7V3.5L19.5 9H14Z" fill="currentColor"/></svg>
+              <span>Abrir Relatório Executivo</span>
+            </button>
+          </div>
+
           <div id="analysis-signal-card" class="analysis-signal-card"></div>
 
           <p
@@ -1122,6 +1129,109 @@
         <p id="auth-status" class="auth-status">Conecte sua conta para liberar o desk.</p>
       </div>
     </section>
+
+    <!-- ============================================================
+         Relatório Executivo (Briefing Tático Institucional) — ADR-069
+         Modal full-screen, WebSocket-ready, print-aware.
+         ============================================================ -->
+    <dialog
+      id="executive-report-modal"
+      class="executive-report-modal"
+      aria-labelledby="executive-report-title"
+      aria-modal="true"
+    >
+      <article class="executive-report" data-ws-channel="deep-analysis">
+        <header class="executive-report__header">
+          <div class="executive-report__heading">
+            <svg class="executive-report__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Zm0 7V3.5L19.5 9H14Z" fill="currentColor"/>
+            </svg>
+            <div>
+              <h2 id="executive-report-title">Briefing Tático Institucional</h2>
+              <p class="executive-report__meta">
+                <span id="executive-report-asset">—</span>
+                <span class="executive-report__sep" aria-hidden="true">•</span>
+                <span id="executive-report-timeframe">—</span>
+                <span class="executive-report__sep" aria-hidden="true">•</span>
+                <time id="executive-report-timestamp" datetime="">—</time>
+                <span
+                  id="executive-report-live-badge"
+                  class="executive-report__live"
+                  data-state="idle"
+                  aria-live="polite"
+                >IDLE</span>
+              </p>
+            </div>
+          </div>
+          <div class="executive-report__actions" role="group" aria-label="Ações do relatório">
+            <button type="button" id="executive-report-copy" class="executive-report__btn">
+              <svg viewBox="0 0 24 24" aria-hidden="true" width="16" height="16"><path d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1Zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Zm0 16H8V7h11v14Z" fill="currentColor"/></svg>
+              <span data-role="label">Copiar Relatório</span>
+            </button>
+            <button type="button" id="executive-report-print" class="executive-report__btn">
+              <svg viewBox="0 0 24 24" aria-hidden="true" width="16" height="16"><path d="M19 8H5a3 3 0 0 0-3 3v6h4v4h12v-4h4v-6a3 3 0 0 0-3-3Zm-3 11H8v-5h8v5Zm3-7a1 1 0 1 1 0-2 1 1 0 0 1 0 2ZM18 3H6v4h12V3Z" fill="currentColor"/></svg>
+              <span>Exportar para PDF</span>
+            </button>
+            <button type="button" id="executive-report-close" class="executive-report__btn executive-report__btn--ghost" aria-label="Fechar relatório">
+              <svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18"><path d="M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4Z" fill="currentColor"/></svg>
+            </button>
+          </div>
+        </header>
+        <div class="executive-report__body" tabindex="0">
+          <section class="report-section" data-section="overview" id="report-section-overview">
+            <h3><span class="report-section__num">01</span>Visão Geral</h3>
+            <p id="report-overview-narrative" class="report-section__narrative">—</p>
+          </section>
+          <section class="report-section" data-section="mtf" id="report-section-mtf">
+            <h3><span class="report-section__num">02</span>Matriz Multi-Timeframe (MTF)</h3>
+            <div class="report-mtf-grid" id="report-mtf-grid" role="table" aria-label="Alinhamento Multi-Timeframe"></div>
+          </section>
+          <section class="report-section" data-section="smc" id="report-section-smc">
+            <h3><span class="report-section__num">03</span>Mapeamento Smart Money</h3>
+            <ul class="report-list" id="report-smc-list"></ul>
+          </section>
+          <section class="report-section" data-section="kinetic" id="report-section-kinetic">
+            <h3><span class="report-section__num">04</span>Exaustão Cinética e Volume Institucional</h3>
+            <div class="report-kpi-row" id="report-kinetic-kpis"></div>
+            <p class="report-section__narrative" id="report-kinetic-note">—</p>
+          </section>
+          <section class="report-section" data-section="harmonic" id="report-section-harmonic">
+            <h3><span class="report-section__num">05</span>Geometria e Padrões Harmônicos</h3>
+            <div class="report-kpi-row" id="report-harmonic-kpis"></div>
+            <p class="report-section__narrative" id="report-harmonic-note">—</p>
+          </section>
+          <section class="report-section" data-section="technical" id="report-section-technical">
+            <h3><span class="report-section__num">06</span>Confluência Técnica (Confirmação Secundária)</h3>
+            <ul class="report-list" id="report-technical-list"></ul>
+          </section>
+          <section class="report-section" data-section="ghost" id="report-section-ghost">
+            <h3><span class="report-section__num">07</span>Auditoria Probabilística — Ghost Tracker</h3>
+            <div class="report-ghost-card" id="report-ghost-card">
+              <span class="report-ghost-card__label">Win Rate Auditado</span>
+              <strong class="report-ghost-card__value" id="report-ghost-winrate">—</strong>
+              <span class="report-ghost-card__sample" id="report-ghost-sample">Aguardando trades resolvidos…</span>
+            </div>
+          </section>
+          <section class="report-section" data-section="plan" id="report-section-plan">
+            <h3><span class="report-section__num">08</span>Plano Tático de Operação</h3>
+            <ol class="report-plan" id="report-plan-steps"></ol>
+          </section>
+          <section class="report-section report-section--danger" data-section="risk" id="report-section-risk">
+            <h3><span class="report-section__num">09</span>Gestão de Risco Quantitativa</h3>
+            <div class="report-risk-grid" id="report-risk-grid"></div>
+            <p class="report-disclaimer">
+              Análise técnica educacional — não constitui recomendação de investimento (CVM 88/22).
+              Risco máximo sugerido por operação: <strong>1% do capital alocado</strong>.
+            </p>
+          </section>
+        </div>
+        <footer class="executive-report__footer">
+          <span>Report ID: <code id="executive-report-id">—</code></span>
+          <button type="button" id="executive-report-copy-bottom" class="executive-report__btn executive-report__btn--small">Copiar</button>
+          <button type="button" id="executive-report-print-bottom" class="executive-report__btn executive-report__btn--small">PDF</button>
+        </footer>
+      </article>
+    </dialog>
 
     <script type="module" src="/src/main.js"></script>
   </body>
