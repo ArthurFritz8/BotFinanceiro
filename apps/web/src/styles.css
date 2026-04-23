@@ -2708,6 +2708,185 @@ body.sidebar-collapsed .app-shell {
   margin-top: 0.56rem;
 }
 
+.analysis-trigger-narrative {
+  margin-top: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  background: linear-gradient(120deg, rgba(10, 24, 44, 0.7), rgba(8, 20, 38, 0.85));
+  border: 1px solid rgba(122, 166, 224, 0.3);
+  border-left-width: 3px;
+  border-radius: 10px;
+  color: #d6e4f5;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  letter-spacing: 0.005em;
+}
+
+.analysis-trigger-narrative[data-tone="buy"] {
+  border-left-color: #6ff0b8;
+  color: #d4f7e6;
+}
+
+.analysis-trigger-narrative[data-tone="sell"] {
+  border-left-color: #ff92a6;
+  color: #f7d4dc;
+}
+
+.analysis-trigger-narrative[data-tone="neutral"] {
+  border-left-color: #ffc860;
+}
+
+.analysis-ensemble-engine {
+  margin-top: 0.58rem;
+  padding: 0.7rem;
+  background: linear-gradient(135deg, rgba(10, 24, 44, 0.82), rgba(8, 20, 38, 0.92));
+  border: 1px solid rgba(122, 166, 224, 0.32);
+  border-radius: 14px;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.analysis-ensemble-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.analysis-ensemble-head h4 {
+  margin: 0 0 0.2rem 0;
+  color: #f0f7ff;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.analysis-ensemble-sub {
+  margin: 0;
+  color: #9bb9dc;
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.analysis-ensemble-mode {
+  flex-shrink: 0;
+  padding: 0.22rem 0.55rem;
+  background: rgba(6, 18, 33, 0.7);
+  border: 1px solid rgba(118, 166, 224, 0.35);
+  border-radius: 999px;
+  color: #cfe2ff;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.analysis-ensemble-mode[data-mode="binary"] {
+  border-color: rgba(255, 200, 96, 0.55);
+  color: #ffd98a;
+}
+
+.analysis-ensemble-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.analysis-ensemble-row {
+  display: grid;
+  gap: 0.22rem;
+  padding: 0.42rem 0.55rem;
+  background: rgba(6, 18, 33, 0.7);
+  border: 1px solid rgba(118, 166, 224, 0.22);
+  border-radius: 10px;
+  cursor: help;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.analysis-ensemble-row:hover {
+  border-color: rgba(118, 166, 224, 0.5);
+  background: rgba(8, 22, 40, 0.85);
+}
+
+.analysis-ensemble-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.analysis-ensemble-row-label {
+  color: #d6e4f5;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+}
+
+.analysis-ensemble-row-weight {
+  color: #f0f7ff;
+  font-size: 0.92rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.analysis-ensemble-bar {
+  position: relative;
+  width: 100%;
+  height: 6px;
+  background: rgba(118, 166, 224, 0.12);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.analysis-ensemble-bar-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #16d6b3 0%, #2cc8ff 60%, #6ff0b8 100%);
+  border-radius: 999px;
+  transition: width 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: 0 0 10px rgba(44, 200, 255, 0.35);
+}
+
+.analysis-ensemble-row[data-engine="ghost"] .analysis-ensemble-bar-fill {
+  background: linear-gradient(90deg, #ffc860 0%, #ff9a5a 100%);
+  box-shadow: 0 0 10px rgba(255, 200, 96, 0.35);
+}
+
+.analysis-ensemble-row[data-engine="smc"] .analysis-ensemble-bar-fill {
+  background: linear-gradient(90deg, #6ff0b8 0%, #16d6b3 100%);
+  box-shadow: 0 0 10px rgba(111, 240, 184, 0.35);
+}
+
+.analysis-ensemble-row[data-engine="harmonic"] .analysis-ensemble-bar-fill {
+  background: linear-gradient(90deg, #b385ff 0%, #6c63ff 100%);
+  box-shadow: 0 0 10px rgba(179, 133, 255, 0.35);
+}
+
+.analysis-ensemble-row[data-engine="macro"] .analysis-ensemble-bar-fill {
+  background: linear-gradient(90deg, #ff92a6 0%, #ff6b8a 100%);
+  box-shadow: 0 0 10px rgba(255, 146, 166, 0.35);
+}
+
+.analysis-ensemble-row-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.68rem;
+  color: #9bb9dc;
+}
+
+.analysis-ensemble-row-conf {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .analysis-ensemble-bar-fill,
+  .analysis-ensemble-row {
+    transition: none;
+  }
+}
+
 .institutional-summary {
   display: grid;
   gap: 0.58rem;

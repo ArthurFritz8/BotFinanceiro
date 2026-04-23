@@ -126,6 +126,10 @@ const intelligenceSyncOpsAvgElement = document.querySelector("#intelligence-sync
 const intelligenceSyncOpsRequestsElement = document.querySelector("#intelligence-sync-ops-requests");
 const intelligenceSyncOpsUpdatedElement = document.querySelector("#intelligence-sync-ops-updated");
 const analysisSignalCardElement = document.querySelector("#analysis-signal-card");
+const analysisTriggerNarrativeElement = document.querySelector("#analysis-trigger-narrative");
+const analysisEnsembleEngineElement = document.querySelector("#analysis-ensemble-engine");
+const analysisEnsembleListElement = document.querySelector("#analysis-ensemble-list");
+const analysisEnsembleModeElement = document.querySelector("#analysis-ensemble-mode");
 const analysisContextCardElement = document.querySelector("#analysis-context-card");
 const institutionalSummaryElement = document.querySelector("#institutional-summary");
 const institutionalConfluenceBadgeElement = document.querySelector("#institutional-confluence-badge");
@@ -9659,6 +9663,8 @@ function renderDeepAnalysisPanelImmediate(snapshot) {
       analysisContextCardElement.innerHTML = "";
     }
 
+    clearTriggerNarrative();
+    clearEnsembleEngine();
     clearInstitutionalSummary();
 
     if (analysisTabsElement instanceof HTMLElement) {
@@ -9714,6 +9720,12 @@ function renderDeepAnalysisPanelImmediate(snapshot) {
     `;
   }
 
+  renderTriggerNarrative(analysis);
+  renderEnsembleEngine(analysis, snapshot, {
+    microTiming: precomputedMicroTiming,
+    operationalMode: chartOperationalMode,
+  });
+
   if (analysisContextCardElement instanceof HTMLElement) {
     analysisContextCardElement.innerHTML = `
       <div class="analysis-context-grid">
@@ -9741,6 +9753,234 @@ function renderDeepAnalysisPanelImmediate(snapshot) {
   renderAnalysisTabContent(analysis, snapshot, {
     microTiming: precomputedMicroTiming,
   });
+}
+
+/**
+ * Narrativa institucional do gatilho: combina sweep de liquidez SMC, estrutura
+ * de mercado, zona Premium/Discount e nota de timing em uma frase humanizada.
+ * Sem string fixa: tudo deriva do snapshot real ja computado.
+ * WebSocket-ready: SSE/WS pode reescrever apenas textContent (sem reflow do DOM).
+ */
+function renderTriggerNarrative(analysis) {
+  if (!(analysisTriggerNarrativeElement instanceof HTMLElement)) {
+    return;
+  }
+
+  if (!analysis || typeof analysis !== "object") {
+    clearTriggerNarrative();
+    return;
+  }
+
+  const tone = typeof analysis.signal?.tone === "string" ? analysis.signal.tone : "neutral";
+  const zone = typeof analysis.context?.zone === "string" ? analysis.context.zone : "";
+  const sweep = typeof analysis.smc?.sweepRisk === "string" ? analysis.smc.sweepRisk.trim() : "";
+  const structure = typeof analysis.smc?.structure === "string" ? analysis.smc.structure.trim() : "";
+  const liquidity = typeof analysis.smc?.liquidity === "string" ? analysis.smc.liquidity.trim() : "";
+  const note = typeof analysis.timing?.note === "string" ? analysis.timing.note.trim() : "";
+
+  const parts = [];
+  if (sweep) parts.push(sweep);
+  if (structure) parts.push(structure);
+  if (liquidity && parts.length < 2) parts.push(liquidity);
+  if (note && parts.length < 3) parts.push(note);
+
+  if (parts.length === 0) {
+    clearTriggerNarrative();
+    return;
+  }
+
+  const zoneSuffix = zone ? ` Zona atual: ${zone}.` : "";
+  const narrative = `Gatilho: ${parts.slice(0, 2).join(" - ")}.${zoneSuffix}`;
+
+  if (analysisTriggerNarrativeElement.textContent !== narrative) {
+    analysisTriggerNarrativeElement.textContent = narrative;
+  }
+  analysisTriggerNarrativeElement.dataset.tone = tone;
+  analysisTriggerNarrativeElement.hidden = false;
+}
+
+function clearTriggerNarrative() {
+  if (!(analysisTriggerNarrativeElement instanceof HTMLElement)) return;
+  analysisTriggerNarrativeElement.textContent = "";
+  analysisTriggerNarrativeElement.hidden = true;
+  analysisTriggerNarrativeElement.removeAttribute("data-tone");
+}
+
+/**
+ * Pesos do Ensemble Engine (motor quantitativo).
+ *
+ * VETO ao anti-pattern de pesos fixos hardcoded (35/30/20/10/5): isso mente ao
+ * usuario. Em vez disso, derivamos o peso de cada motor do snapshot real e
+ * normalizamos a soma para 100%. O peso BASE de cada motor depende ainda do
+ * operationalMode:
+ *   - binary options: ghost+kinetic dominam (timing curto)
+ *   - spot/margin:    smc+harmonic dominam (estrutura)
+ *
+ * Confianca individual (0-100) tambem deriva do snapshot:
+ *   - ghost  -> winRate apos >=5 trades resolvidos (fail-honest)
+ *   - smc    -> presenca de sweep/liquidity/structure detectados
+ *   - hft    -> microTiming.momentumStrength (binary) ou signal.confidence (spot)
+ *   - harm   -> analysis.harmonic.confidence
+ *   - macro  -> distancia do extremo F&G (quanto mais fora do extremo, melhor)
+ *
+ * WebSocket-ready: cada barra tem id estavel + data-engine + data-weight +
+ * data-confidence. Layer SSE pode atualizar atributos/largura sem reconstruir
+ * o DOM (latest-wins via requestAnimationFrame ja em uso no projeto).
+ */
+function renderEnsembleEngine(analysis, snapshot, options = {}) {
+  if (!(analysisEnsembleEngineElement instanceof HTMLElement)
+    || !(analysisEnsembleListElement instanceof HTMLElement)) {
+    return;
+  }
+
+  if (!analysis || typeof analysis !== "object" || !analysis.signal) {
+    clearEnsembleEngine();
+    return;
+  }
+
+  const microTiming = options?.microTiming ?? null;
+  const operationalMode = options?.operationalMode ?? chartOperationalMode;
+  const isBinary = operationalMode === CHART_OPERATIONAL_MODE_BINARY_OPTIONS;
+
+  // ---- Confianca de cada motor (0-100) ----
+  const ghostStats = isBinary ? getBinaryOptionsGhostTrackerStats() : getSpotMarginGhostTrackerStats();
+  const ghostResolved = Number.isFinite(ghostStats?.resolvedTrades) ? ghostStats.resolvedTrades : 0;
+  const ghostWinRate = Number.isFinite(ghostStats?.winRate) ? ghostStats.winRate : 0;
+  const ghostConfidence = ghostResolved >= 5 ? Math.max(0, Math.min(100, ghostWinRate)) : 0;
+
+  const smcStructure = typeof analysis.smc?.structure === "string" ? analysis.smc.structure.trim() : "";
+  const smcLiquidity = typeof analysis.smc?.liquidity === "string" ? analysis.smc.liquidity.trim() : "";
+  const smcSweep = typeof analysis.smc?.sweepRisk === "string" ? analysis.smc.sweepRisk.trim() : "";
+  const smcSignals = (smcStructure ? 1 : 0) + (smcLiquidity ? 1 : 0) + (smcSweep ? 1 : 0);
+  const smcConfidence = Math.round((smcSignals / 3) * 100);
+
+  const hftConfidence = isBinary && microTiming
+    ? Math.max(0, Math.min(100, Number(microTiming.momentumStrength ?? 0) * 100))
+    : Math.max(0, Math.min(100, Number(analysis.signal?.confidence ?? 0)));
+
+  const harmonicConfidence = Math.max(0, Math.min(100, Number(analysis.harmonic?.confidence ?? 0)));
+
+  const fgScore = Number(analysis.fearGreed?.score ?? 50);
+  const fgDistance = Math.abs(50 - fgScore);
+  const macroConfidence = Math.max(0, Math.min(100, 100 - (fgDistance * 2)));
+
+  // ---- Peso BASE adaptativo (soma = 100) ----
+  // Binary: timing curto privilegia ghost+hft. Spot: estrutura privilegia smc+harmonic.
+  const baseWeights = isBinary
+    ? { ghost: 35, smc: 22, hft: 28, harmonic: 8, macro: 7 }
+    : { ghost: 22, smc: 32, hft: 18, harmonic: 18, macro: 10 };
+
+  // ---- Peso EFETIVO = base * (confianca/100). Renormaliza para somar 100. ----
+  const raw = {
+    ghost: baseWeights.ghost * (ghostConfidence / 100),
+    smc: baseWeights.smc * (smcConfidence / 100),
+    hft: baseWeights.hft * (hftConfidence / 100),
+    harmonic: baseWeights.harmonic * (harmonicConfidence / 100),
+    macro: baseWeights.macro * (macroConfidence / 100),
+  };
+  const rawTotal = raw.ghost + raw.smc + raw.hft + raw.harmonic + raw.macro;
+  const norm = (v) => (rawTotal > 0 ? Math.round((v / rawTotal) * 100) : 0);
+  const weights = {
+    ghost: norm(raw.ghost),
+    smc: norm(raw.smc),
+    hft: norm(raw.hft),
+    harmonic: norm(raw.harmonic),
+    macro: norm(raw.macro),
+  };
+
+  const engines = [
+    {
+      id: "ghost",
+      label: "Ghost Tracker (Auditoria Live)",
+      hint: ghostResolved >= 5
+        ? `${ghostResolved} trades auditados na sessao`
+        : `Aquecendo: ${ghostResolved}/5 trades para confiar`,
+      weight: weights.ghost,
+      confidence: Math.round(ghostConfidence),
+      tooltip: `Win rate ${ghostWinRate.toFixed(1)}% | trades resolvidos ${ghostResolved} | base ${baseWeights.ghost}% (${isBinary ? "binary" : "spot"})`,
+    },
+    {
+      id: "smc",
+      label: "Smart Money Concepts",
+      hint: smcSignals === 3 ? "3/3 sinais detectados" : `${smcSignals}/3 sinais ativos`,
+      weight: weights.smc,
+      confidence: smcConfidence,
+      tooltip: `structure=${smcStructure || "n/d"} | liquidity=${smcLiquidity || "n/d"} | sweep=${smcSweep || "n/d"} | base ${baseWeights.smc}%`,
+    },
+    {
+      id: "hft",
+      label: isBinary ? "Exaustao Cinetica (HFT)" : "Confianca probabilistica",
+      hint: isBinary
+        ? (hftConfidence >= 70 ? "Momentum exausto" : hftConfidence >= 45 ? "Tick acelerando" : "Mercado frio")
+        : (hftConfidence >= 70 ? "Edge alto" : hftConfidence >= 50 ? "Edge moderado" : "Edge fraco"),
+      weight: weights.hft,
+      confidence: Math.round(hftConfidence),
+      tooltip: isBinary
+        ? `momentumStrength=${(Number(microTiming?.momentumStrength ?? 0)).toFixed(2)} | base ${baseWeights.hft}%`
+        : `signal.confidence=${Math.round(Number(analysis.signal?.confidence ?? 0))} | base ${baseWeights.hft}%`,
+    },
+    {
+      id: "harmonic",
+      label: "Geometria Harmonica",
+      hint: `Padrao ${escapeHtml(String(analysis.harmonic?.pattern ?? "n/d"))}`,
+      weight: weights.harmonic,
+      confidence: Math.round(harmonicConfidence),
+      tooltip: `pattern=${analysis.harmonic?.pattern ?? "n/d"} | ratio=${(Number(analysis.harmonic?.ratio ?? 0)).toFixed(3)} | base ${baseWeights.harmonic}%`,
+    },
+    {
+      id: "macro",
+      label: "Sentimento Macro (F&G)",
+      hint: `${fgScore.toFixed(0)} (${escapeHtml(String(analysis.fearGreed?.label ?? ""))})`,
+      weight: weights.macro,
+      confidence: Math.round(macroConfidence),
+      tooltip: `Fear&Greed=${fgScore.toFixed(1)} | distancia do equilibrio=${fgDistance.toFixed(1)} | base ${baseWeights.macro}%`,
+    },
+  ];
+
+  if (analysisEnsembleModeElement instanceof HTMLElement) {
+    const modeLabel = isBinary ? "Binary" : "Spot/Margem";
+    if (analysisEnsembleModeElement.textContent !== modeLabel) {
+      analysisEnsembleModeElement.textContent = modeLabel;
+    }
+    analysisEnsembleModeElement.dataset.mode = isBinary ? "binary" : "spot";
+  }
+
+  analysisEnsembleListElement.innerHTML = engines
+    .map((engine) => `
+      <article
+        class="analysis-ensemble-row"
+        role="listitem"
+        id="ensemble-engine-${engine.id}"
+        data-engine="${engine.id}"
+        data-weight="${engine.weight}"
+        data-confidence="${engine.confidence}"
+        title="${escapeHtml(engine.tooltip)}"
+      >
+        <div class="analysis-ensemble-row-head">
+          <span class="analysis-ensemble-row-label">${escapeHtml(engine.label)}</span>
+          <strong class="analysis-ensemble-row-weight">${engine.weight}%</strong>
+        </div>
+        <div class="analysis-ensemble-bar" aria-hidden="true">
+          <span class="analysis-ensemble-bar-fill" style="width: ${engine.weight}%"></span>
+        </div>
+        <div class="analysis-ensemble-row-foot">
+          <span class="analysis-ensemble-row-hint">${escapeHtml(engine.hint)}</span>
+          <span class="analysis-ensemble-row-conf">conf ${engine.confidence}%</span>
+        </div>
+      </article>
+    `)
+    .join("");
+
+  analysisEnsembleEngineElement.hidden = false;
+}
+
+function clearEnsembleEngine() {
+  if (analysisEnsembleListElement instanceof HTMLElement) {
+    analysisEnsembleListElement.innerHTML = "";
+  }
+  if (analysisEnsembleEngineElement instanceof HTMLElement) {
+    analysisEnsembleEngineElement.hidden = true;
+  }
 }
 
 function clearInstitutionalSummary() {

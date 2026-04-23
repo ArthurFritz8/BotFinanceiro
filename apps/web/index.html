@@ -798,6 +798,32 @@
 
           <div id="analysis-signal-card" class="analysis-signal-card"></div>
 
+          <p
+            id="analysis-trigger-narrative"
+            class="analysis-trigger-narrative"
+            role="status"
+            aria-live="polite"
+            data-ws-channel="intelligence:trigger-narrative"
+            hidden
+          ></p>
+
+          <section
+            id="analysis-ensemble-engine"
+            class="analysis-ensemble-engine"
+            aria-label="Contribuicao do motor quantitativo (ensemble)"
+            data-ws-channel="intelligence:ensemble"
+            hidden
+          >
+            <header class="analysis-ensemble-head">
+              <div>
+                <h4>Contribuicao do motor quantitativo</h4>
+                <p class="analysis-ensemble-sub">Pesos derivados do snapshot real, adaptativos ao modo operacional. Hover em cada motor expoe a metrica bruta auditavel.</p>
+              </div>
+              <span id="analysis-ensemble-mode" class="analysis-ensemble-mode" data-mode="spot">Spot</span>
+            </header>
+            <div id="analysis-ensemble-list" class="analysis-ensemble-list" role="list"></div>
+          </section>
+
           <section
             id="institutional-summary"
             class="institutional-summary"
