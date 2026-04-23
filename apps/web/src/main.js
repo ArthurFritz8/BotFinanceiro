@@ -8628,6 +8628,289 @@ function renderHarmonicScanner(scanner) {
   `;
 }
 
+const RISK_LAB_STORAGE_KEY = "botfinanceiro:risk-lab:v1";
+const RISK_LAB_STRATEGY_OPTIONS = [
+  { id: "fixed", label: "Mao Fixa (institucional)", description: "Stake constante = capital * risco%. Recomendado para qualquer banca." },
+  { id: "soros1", label: "Soros Nivel 1", description: "Apos 1 win consecutivo dobra o stake. Reset apos win 2 ou loss." },
+  { id: "soros2", label: "Soros Nivel 2", description: "Mantem soros ate 2 wins consecutivos (cap 4x). Reset apos." },
+  { id: "limited_recovery", label: "Recuperacao com Limite", description: "Apos loss aumenta stake em 2x ate no maximo 2 niveis (cap 4x). Reset no win. NAO usar como Martingale puro." },
+];
+
+function loadRiskLabState(defaults) {
+  try {
+    const raw = window.localStorage?.getItem(RISK_LAB_STORAGE_KEY);
+    if (!raw) return { ...defaults };
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return { ...defaults };
+    return {
+      capital: Number.isFinite(parsed.capital) ? parsed.capital : defaults.capital,
+      riskPct: Number.isFinite(parsed.riskPct) ? parsed.riskPct : defaults.riskPct,
+      payoutOrRR: Number.isFinite(parsed.payoutOrRR) ? parsed.payoutOrRR : defaults.payoutOrRR,
+      winRatePct: Number.isFinite(parsed.winRatePct) ? parsed.winRatePct : defaults.winRatePct,
+      strategy: typeof parsed.strategy === "string" ? parsed.strategy : defaults.strategy,
+    };
+  } catch (_error) {
+    return { ...defaults };
+  }
+}
+
+function persistRiskLabState(state) {
+  try {
+    window.localStorage?.setItem(RISK_LAB_STORAGE_KEY, JSON.stringify(state));
+  } catch (_error) {
+    /* noop */
+  }
+}
+
+function nextRiskLabStake({ baseStake, strategy, winStreak, lossStreak }) {
+  if (strategy === "soros1") {
+    return winStreak === 1 ? baseStake * 2 : baseStake;
+  }
+  if (strategy === "soros2") {
+    if (winStreak === 1) return baseStake * 2;
+    if (winStreak === 2) return baseStake * 4;
+    return baseStake;
+  }
+  if (strategy === "limited_recovery") {
+    if (lossStreak === 1) return baseStake * 2;
+    if (lossStreak >= 2) return baseStake * 4; // CAP rigido em 4x
+    return baseStake;
+  }
+  return baseStake; // fixed
+}
+
+function runMonteCarloRiskSimulation({
+  capital,
+  riskPct,
+  payoutOrRR,
+  winRatePct,
+  strategy,
+  mode,
+  trials = 2000,
+  tradesPerTrial = 100,
+}) {
+  const safeCapital = Math.max(1, Number(capital) || 0);
+  const safeRiskPct = clampNumber(Number(riskPct) || 0, 0.05, 25);
+  const safeWinRate = clampNumber(Number(winRatePct) || 50, 5, 95) / 100;
+  const baseStake = safeCapital * (safeRiskPct / 100);
+  const isBinary = mode === "binary";
+  const payoutFraction = isBinary
+    ? clampNumber(Number(payoutOrRR) || 80, 10, 99) / 100
+    : Math.max(0.1, Number(payoutOrRR) || 1);
+
+  const finalEquities = [];
+  let ruinedCount = 0;
+  let drawdownSum = 0;
+
+  for (let t = 0; t < trials; t += 1) {
+    let equity = safeCapital;
+    let peak = safeCapital;
+    let maxDdPct = 0;
+    let winStreak = 0;
+    let lossStreak = 0;
+    let ruined = false;
+    for (let i = 0; i < tradesPerTrial; i += 1) {
+      const stake = Math.min(
+        equity,
+        nextRiskLabStake({ baseStake, strategy, winStreak, lossStreak }),
+      );
+      const isWin = Math.random() < safeWinRate;
+      if (isWin) {
+        equity += isBinary ? stake * payoutFraction : stake * payoutFraction;
+        winStreak += 1;
+        lossStreak = 0;
+      } else {
+        equity -= stake;
+        lossStreak += 1;
+        winStreak = 0;
+      }
+      if (equity > peak) peak = equity;
+      const ddPct = peak > 0 ? ((peak - equity) / peak) * 100 : 0;
+      if (ddPct > maxDdPct) maxDdPct = ddPct;
+      if (equity <= safeCapital * 0.5) {
+        ruined = true;
+        break;
+      }
+    }
+    if (ruined) ruinedCount += 1;
+    drawdownSum += maxDdPct;
+    finalEquities.push(equity);
+  }
+
+  finalEquities.sort((left, right) => left - right);
+  const pickPercentile = (p) => {
+    const idx = Math.min(finalEquities.length - 1, Math.max(0, Math.floor(finalEquities.length * p)));
+    return finalEquities[idx] ?? safeCapital;
+  };
+
+  return {
+    p10: pickPercentile(0.1),
+    p50: pickPercentile(0.5),
+    p90: pickPercentile(0.9),
+    avgMaxDrawdownPct: drawdownSum / Math.max(1, trials),
+    ruinPct: (ruinedCount / Math.max(1, trials)) * 100,
+    baseStake,
+    capital: safeCapital,
+    trials,
+    tradesPerTrial,
+  };
+}
+
+function classifyRiskLabRuinTone(ruinPct, riskPct) {
+  if (riskPct > 5 || ruinPct >= 35) return { tone: "danger", label: "RISCO DE RUINA ELEVADO — over-leverage detectado" };
+  if (riskPct > 2 || ruinPct >= 12) return { tone: "warning", label: "Risco moderado — monitorar drawdown" };
+  return { tone: "ok", label: "Risco institucional saudavel" };
+}
+
+function renderRiskLab({ mode, currency, defaults, reference }) {
+  const persisted = loadRiskLabState(defaults);
+  const strategyOptions = RISK_LAB_STRATEGY_OPTIONS.map((opt) =>
+    `<option value="${opt.id}" ${opt.id === persisted.strategy ? "selected" : ""}>${escapeHtml(opt.label)}</option>`,
+  ).join("");
+  const isBinary = mode === "binary";
+  const payoutLabel = isBinary ? "Payout (%)" : "Relacao Risco/Retorno (ex: 3 = 1:3)";
+  const payoutMin = isBinary ? 10 : 0.5;
+  const payoutMax = isBinary ? 99 : 20;
+  const payoutStep = isBinary ? 0.5 : 0.1;
+  const referenceBlock = reference
+    ? `<article class="analysis-block">
+        <h4>Referencia do sinal atual</h4>
+        <p>Capital de referencia: ${escapeHtml(formatPrice(reference.capitalRef, "usd"))}</p>
+        <p>Risco padrao 1%: ${escapeHtml(formatPrice(reference.riskBudget, "usd"))}</p>
+        <p>Distancia ao stop: ${escapeHtml(formatPercent(reference.stopDistancePercent))}</p>
+        <p>Notional sugerido: ${escapeHtml(formatPrice(reference.suggestedNotional, "usd"))}</p>
+        <p>Entrada: ${escapeHtml(formatPrice(reference.signal.entryLow, currency))} - ${escapeHtml(formatPrice(reference.signal.entryHigh, currency))}</p>
+        <p>Stop: ${escapeHtml(formatPrice(reference.signal.stopLoss, currency))} • TP1/TP2: ${escapeHtml(formatPrice(reference.signal.takeProfit1, currency))} / ${escapeHtml(formatPrice(reference.signal.takeProfit2, currency))}</p>
+      </article>`
+    : "";
+  return `
+    <div class="risk-lab" data-risk-lab data-mode="${escapeHtml(mode)}">
+      <header class="risk-lab__header">
+        <h4>Risk Lab — Gestao de Capital Quantitativa</h4>
+        <small>Monte Carlo client-side (2000 trajetorias × 100 trades). Inputs persistidos em localStorage.</small>
+      </header>
+      <form class="risk-lab__form" data-risk-lab-form>
+        <label class="prop-desk-field">
+          Capital atual (banca, USD)
+          <input type="number" min="10" step="10" data-risk-input="capital" value="${persisted.capital}" />
+        </label>
+        <label class="prop-desk-field">
+          Risco por operacao (%)
+          <input type="number" min="0.1" max="25" step="0.1" data-risk-input="riskPct" value="${persisted.riskPct}" />
+        </label>
+        <label class="prop-desk-field">
+          ${escapeHtml(payoutLabel)}
+          <input type="number" min="${payoutMin}" max="${payoutMax}" step="${payoutStep}" data-risk-input="payoutOrRR" value="${persisted.payoutOrRR}" />
+        </label>
+        <label class="prop-desk-field">
+          Win rate observado (%)
+          <input type="number" min="5" max="95" step="0.5" data-risk-input="winRatePct" value="${persisted.winRatePct}" />
+        </label>
+        <label class="prop-desk-field">
+          Estrategia de stake
+          <select data-risk-input="strategy">${strategyOptions}</select>
+        </label>
+      </form>
+      <div class="risk-lab__warning" data-risk-lab-warning role="status" aria-live="polite"></div>
+      <div class="risk-lab__ruin" data-risk-lab-ruin>
+        <span class="risk-lab__ruin-label">Medidor de risco de ruina</span>
+        <div class="risk-lab__ruin-bar"><div class="risk-lab__ruin-fill" data-risk-lab-ruin-fill style="width:0%"></div></div>
+        <span class="risk-lab__ruin-pct" data-risk-lab-ruin-pct>—</span>
+      </div>
+      <div class="risk-lab__scenarios" data-risk-lab-scenarios></div>
+      <div class="analysis-grid">
+        <article class="analysis-block">
+          <h4>Estrategia selecionada</h4>
+          <p data-risk-lab-strategy-desc>${escapeHtml(RISK_LAB_STRATEGY_OPTIONS.find((opt) => opt.id === persisted.strategy)?.description ?? "")}</p>
+          <p><strong>Regra de ouro:</strong> nenhum sistema legitima Martingale ilimitado. Recuperacao com Limite tem teto fisico de 4x base.</p>
+        </article>
+        ${referenceBlock}
+      </div>
+    </div>
+  `;
+}
+
+function attachRiskLabHandlers(rootElement, { mode, currency }) {
+  if (!(rootElement instanceof HTMLElement)) return;
+  const container = rootElement.querySelector("[data-risk-lab]");
+  if (!(container instanceof HTMLElement)) return;
+  const form = container.querySelector("[data-risk-lab-form]");
+  const warningEl = container.querySelector("[data-risk-lab-warning]");
+  const ruinFill = container.querySelector("[data-risk-lab-ruin-fill]");
+  const ruinPctEl = container.querySelector("[data-risk-lab-ruin-pct]");
+  const scenariosEl = container.querySelector("[data-risk-lab-scenarios]");
+  const strategyDesc = container.querySelector("[data-risk-lab-strategy-desc]");
+  let debounceHandle = null;
+
+  function readState() {
+    const inputs = container.querySelectorAll("[data-risk-input]");
+    const state = { strategy: "fixed", capital: 0, riskPct: 1, payoutOrRR: 1, winRatePct: 50 };
+    inputs.forEach((input) => {
+      const key = input.getAttribute("data-risk-input");
+      if (!key) return;
+      if (input.tagName === "SELECT") {
+        state[key] = input.value;
+      } else {
+        const num = Number(input.value);
+        state[key] = Number.isFinite(num) ? num : 0;
+      }
+    });
+    return state;
+  }
+
+  function recompute() {
+    const state = readState();
+    persistRiskLabState(state);
+    const sim = runMonteCarloRiskSimulation({ ...state, mode });
+    const ruinClass = classifyRiskLabRuinTone(sim.ruinPct, state.riskPct);
+    if (warningEl instanceof HTMLElement) {
+      warningEl.dataset.tone = ruinClass.tone;
+      warningEl.textContent = ruinClass.tone === "danger"
+        ? `${ruinClass.label}. Reduza o risco abaixo de 2% para preservar a banca.`
+        : ruinClass.tone === "warning"
+          ? `${ruinClass.label}. Mantenha disciplina de stop e nao escale apos sequencia de loss.`
+          : ruinClass.label;
+    }
+    if (ruinFill instanceof HTMLElement) {
+      ruinFill.style.width = `${Math.min(100, sim.ruinPct).toFixed(1)}%`;
+      ruinFill.dataset.tone = ruinClass.tone;
+    }
+    if (ruinPctEl instanceof HTMLElement) {
+      ruinPctEl.textContent = `${sim.ruinPct.toFixed(1)}% das simulacoes terminaram em rebaixamento >50%`;
+    }
+    if (scenariosEl instanceof HTMLElement) {
+      const cards = [
+        { tone: "ok", title: "Cenario otimista (P90)", value: sim.p90, hint: "10% das trajetorias terminam acima deste equity." },
+        { tone: "neutral", title: "Cenario neutro (P50, mediana)", value: sim.p50, hint: "Resultado tipico apos 100 trades." },
+        { tone: "danger", title: "Cenario de rebaixamento (P10)", value: sim.p10, hint: `Drawdown medio simulado: ${sim.avgMaxDrawdownPct.toFixed(1)}%.` },
+      ];
+      scenariosEl.innerHTML = cards.map((card) => `
+        <article class="risk-lab__scenario" data-tone="${card.tone}">
+          <span class="risk-lab__scenario-title">${escapeHtml(card.title)}</span>
+          <strong class="risk-lab__scenario-value">${escapeHtml(formatPrice(card.value, "usd"))}</strong>
+          <small class="risk-lab__scenario-hint">${escapeHtml(card.hint)}</small>
+        </article>
+      `).join("");
+    }
+    if (strategyDesc instanceof HTMLElement) {
+      const desc = RISK_LAB_STRATEGY_OPTIONS.find((opt) => opt.id === state.strategy)?.description ?? "";
+      strategyDesc.textContent = desc;
+    }
+  }
+
+  if (form instanceof HTMLElement) {
+    form.addEventListener("input", () => {
+      if (debounceHandle !== null) {
+        window.clearTimeout(debounceHandle);
+      }
+      debounceHandle = window.setTimeout(recompute, 200);
+    });
+    form.addEventListener("change", recompute);
+  }
+  recompute();
+  return { recompute, currency };
+}
+
 function renderAnalysisTabContent(analysis, snapshot, options = {}) {
   if (!(analysisTabContentElement instanceof HTMLElement)) {
     return;
@@ -9190,24 +9473,28 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
       100,
     );
     const suggestedNotional = roundNumber(riskBudget / (stopDistancePercent / 100), 2);
-
-    analysisTabContentElement.innerHTML = `
-      <div class="analysis-grid">
-        <article class="analysis-block">
-          <h4>Calculadora de risco (referencia)</h4>
-          <p>Capital de referencia: ${escapeHtml(formatPrice(capitalRef, "usd"))}</p>
-          <p>Risco por trade (1%): ${escapeHtml(formatPrice(riskBudget, "usd"))}</p>
-          <p>Distancia ao stop: ${escapeHtml(formatPercent(stopDistancePercent))}</p>
-          <p>Notional sugerido: ${escapeHtml(formatPrice(suggestedNotional, "usd"))}</p>
-        </article>
-        <article class="analysis-block">
-          <h4>Parametros atuais</h4>
-          <p>Entrada: ${escapeHtml(formatPrice(analysis.signal.entryLow, currency))} - ${escapeHtml(formatPrice(analysis.signal.entryHigh, currency))}</p>
-          <p>Stop: ${escapeHtml(formatPrice(analysis.signal.stopLoss, currency))}</p>
-          <p>TP1/TP2: ${escapeHtml(formatPrice(analysis.signal.takeProfit1, currency))} • ${escapeHtml(formatPrice(analysis.signal.takeProfit2, currency))}</p>
-        </article>
-      </div>
-    `;
+    const defaultRR = analysis.signal.riskReward !== null && Number.isFinite(analysis.signal.riskReward)
+      ? Math.max(0.2, Number(analysis.signal.riskReward))
+      : 2;
+    analysisTabContentElement.innerHTML = renderRiskLab({
+      mode: "spot",
+      currency,
+      defaults: {
+        capital: capitalRef,
+        riskPct: 1,
+        payoutOrRR: defaultRR,
+        winRatePct: 55,
+        strategy: "fixed",
+      },
+      reference: {
+        capitalRef,
+        riskBudget,
+        stopDistancePercent,
+        suggestedNotional,
+        signal: analysis.signal,
+      },
+    });
+    attachRiskLabHandlers(analysisTabContentElement, { mode: "spot", currency });
     return;
   }
 

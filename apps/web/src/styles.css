@@ -5215,3 +5215,88 @@ body.sidebar-collapsed .app-shell {
   margin-right: 0.2rem;
 }
 .harmonic-levels--locked { font-style: italic; opacity: 0.7; }
+
+/* Risk Lab — Quant Risk Manager (Intelligence Desk) */
+.risk-lab {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.6rem;
+  border: 1px solid rgba(94, 138, 196, 0.28);
+  border-radius: 12px;
+  background: rgba(6, 18, 33, 0.45);
+}
+.risk-lab__header h4 {
+  margin: 0;
+  color: #eaf4ff;
+}
+.risk-lab__header small {
+  color: #8ca9ce;
+  font-size: 0.62rem;
+}
+.risk-lab__form {
+  display: grid;
+  gap: 0.42rem;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+.risk-lab__warning {
+  padding: 0.5rem 0.7rem;
+  border-radius: 9px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  border: 1px solid rgba(94, 138, 196, 0.32);
+  background: rgba(6, 18, 33, 0.55);
+  color: #cbd9ee;
+}
+.risk-lab__warning[data-tone="ok"] { border-color: rgba(101, 235, 182, 0.55); color: #6ff0b8; background: rgba(20, 56, 42, 0.4); }
+.risk-lab__warning[data-tone="warning"] { border-color: rgba(255, 209, 102, 0.55); color: #ffd166; background: rgba(54, 44, 12, 0.4); }
+.risk-lab__warning[data-tone="danger"] { border-color: rgba(255, 100, 100, 0.6); color: #ff8b8b; background: rgba(70, 20, 20, 0.45); }
+.risk-lab__ruin {
+  display: grid;
+  gap: 0.32rem;
+}
+.risk-lab__ruin-label {
+  color: #eaf4ff;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+.risk-lab__ruin-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(94, 138, 196, 0.18);
+  overflow: hidden;
+}
+.risk-lab__ruin-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #6ff0b8, #ffd166);
+  transition: width 240ms ease;
+}
+.risk-lab__ruin-fill[data-tone="warning"] { background: linear-gradient(90deg, #ffd166, #ffa040); }
+.risk-lab__ruin-fill[data-tone="danger"] { background: linear-gradient(90deg, #ffa040, #ff5b5b); }
+.risk-lab__ruin-pct {
+  color: #8ca9ce;
+  font-size: 0.62rem;
+}
+.risk-lab__scenarios {
+  display: grid;
+  gap: 0.42rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+.risk-lab__scenario {
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+  padding: 0.52rem 0.62rem;
+  border-radius: 10px;
+  background: rgba(6, 18, 33, 0.55);
+  border: 1px solid rgba(94, 138, 196, 0.26);
+}
+.risk-lab__scenario[data-tone="ok"] { border-color: rgba(101, 235, 182, 0.5); }
+.risk-lab__scenario[data-tone="neutral"] { border-color: rgba(135, 175, 230, 0.4); }
+.risk-lab__scenario[data-tone="danger"] { border-color: rgba(255, 100, 100, 0.5); }
+.risk-lab__scenario-title { color: #cbd9ee; font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.risk-lab__scenario-value { color: #eaf4ff; font-size: 1.04rem; }
+.risk-lab__scenario[data-tone="ok"] .risk-lab__scenario-value { color: #6ff0b8; }
+.risk-lab__scenario[data-tone="danger"] .risk-lab__scenario-value { color: #ff8b8b; }
+.risk-lab__scenario-hint { color: #8ca9ce; font-size: 0.6rem; }
