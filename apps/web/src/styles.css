@@ -5763,3 +5763,192 @@ body.sidebar-collapsed .app-shell {
   .tech-needle { transition: none; }
   .tech-classic-details { break-inside: avoid; }
 }
+
+/* =============================================================
+   Detalhamento SMC institucional — ADR-071
+   Terminal de auditoria SMC: Estrutura (BOS/CHoCH + Discount/
+   Equilibrium/Premium), Order Blocks candidatos, FVG ativo,
+   Monitor de liquidez (BSL/SSL + Sweep). Fontes mono para
+   preços; cores sóbrias (esmeralda/rosa/âmbar).
+   ============================================================= */
+.smc-institutional { display: grid; gap: 14px; }
+.smc-institutional__head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.smc-institutional__title { margin: 0; font-size: 14px; font-weight: 700; color: #e5e7eb; letter-spacing: 0.02em; }
+.smc-institutional__sub { font-size: 11px; color: #6b7280; letter-spacing: 0.04em; text-transform: uppercase; }
+.smc-live-badge {
+  font-size: 10px; padding: 3px 8px; border-radius: 9999px;
+  background: rgba(16,185,129,0.12); color: #6ee7b7;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  animation: smcPulse 1.8s ease-in-out infinite;
+}
+@keyframes smcPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+.smc-mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-feature-settings: "tnum" 1;
+  font-size: 12px; color: #e5e7eb;
+}
+
+.smc-panel { padding: 14px; }
+.smc-panel__head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px;
+}
+.smc-panel__head h4 { margin: 0; font-size: 13px; font-weight: 600; color: #e5e7eb; }
+.smc-panel__hint { font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
+
+.smc-bias-badge {
+  font-size: 10px; padding: 3px 9px; border-radius: 9999px;
+  background: rgba(255,255,255,0.05); color: #9ca3af;
+  letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600;
+}
+.smc-bias-badge[data-tone="bull"] { background: rgba(16,185,129,0.15); color: #6ee7b7; }
+.smc-bias-badge[data-tone="bear"] { background: rgba(239,68,68,0.15); color: #fca5a5; }
+
+.smc-structure-row {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;
+  margin-bottom: 14px;
+}
+.smc-structure-cell {
+  display: flex; flex-direction: column; gap: 4px; padding: 8px 10px;
+  background: rgba(255,255,255,0.02); border-radius: 6px;
+  cursor: help;
+}
+.smc-structure-cell__label { font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
+.smc-structure-tag {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  background: rgba(255,255,255,0.04); color: #9ca3af; padding: 2px 6px;
+  border-radius: 4px; align-self: flex-start;
+}
+.smc-structure-tag[data-tone="bull"] { background: rgba(16,185,129,0.15); color: #6ee7b7; }
+.smc-structure-tag[data-tone="bear"] { background: rgba(239,68,68,0.15); color: #fca5a5; }
+
+.smc-zone-meter { margin: 6px 0; cursor: help; }
+.smc-zone-meter__track {
+  position: relative; display: grid; grid-template-columns: 1fr 1fr 1fr;
+  height: 22px; border-radius: 6px; overflow: hidden;
+  background: rgba(255,255,255,0.04);
+}
+.smc-zone-seg {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 700; color: rgba(255,255,255,0.55);
+  letter-spacing: 0.08em;
+}
+.smc-zone-seg--discount { background: rgba(16,185,129,0.18); }
+.smc-zone-seg--equilibrium { background: rgba(107,114,128,0.18); }
+.smc-zone-seg--premium { background: rgba(239,68,68,0.18); }
+.smc-zone-marker {
+  position: absolute; top: -3px; bottom: -3px; width: 3px;
+  background: #fbbf24; border-radius: 2px;
+  box-shadow: 0 0 8px rgba(251,191,36,0.7);
+  transform: translateX(-50%);
+  transition: left 600ms cubic-bezier(.4,2,.3,1);
+}
+.smc-zone-meter__legend {
+  display: grid; grid-template-columns: 1fr auto 1fr;
+  margin-top: 6px; font-size: 11px; align-items: center;
+}
+.smc-zone-meter__legend > :first-child { text-align: left; }
+.smc-zone-meter__legend > :last-child { text-align: right; }
+.smc-zone-active {
+  font-size: 10px; padding: 2px 8px; border-radius: 9999px;
+  background: rgba(255,255,255,0.05); font-weight: 700; letter-spacing: 0.05em;
+}
+.smc-zone-active[data-tone="bull"] { background: rgba(16,185,129,0.18); color: #6ee7b7; }
+.smc-zone-active[data-tone="bear"] { background: rgba(239,68,68,0.18); color: #fca5a5; }
+
+.smc-invalidation {
+  margin: 10px 0 0; font-size: 11px; color: #9ca3af;
+  padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.06);
+  cursor: help;
+}
+.smc-invalidation strong { color: #fcd34d; }
+
+.smc-grid { display: grid; gap: 12px; grid-template-columns: 1fr; }
+@media (min-width: 720px) { .smc-grid { grid-template-columns: 1fr 1fr; } }
+
+.smc-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.smc-empty {
+  font-size: 12px; color: #6b7280; padding: 10px; text-align: center;
+  background: rgba(255,255,255,0.02); border-radius: 6px;
+}
+
+.smc-ob-row, .smc-liq-row {
+  display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center;
+  padding: 8px 10px; border-radius: 6px;
+  background: rgba(255,255,255,0.02); border-left: 3px solid transparent;
+}
+.smc-ob-row[data-tone="bull"] { border-left-color: rgba(16,185,129,0.6); }
+.smc-ob-row[data-tone="bear"] { border-left-color: rgba(239,68,68,0.6); }
+.smc-ob-row[data-mitigated="true"] { opacity: 0.55; }
+.smc-ob-row__kind, .smc-liq-row__kind { font-size: 12px; color: #d1d5db; cursor: help; }
+.smc-ob-row__price { font-size: 12px; }
+
+.smc-ob-row__tag, .smc-liq-row__tag {
+  font-size: 9px; padding: 2px 6px; border-radius: 4px;
+  background: rgba(255,255,255,0.05); color: #9ca3af;
+  text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;
+}
+.smc-ob-row__tag[data-tone="bull"] { background: rgba(16,185,129,0.18); color: #6ee7b7; }
+.smc-ob-row__tag[data-tone="bear"] { background: rgba(239,68,68,0.18); color: #fca5a5; }
+.smc-liq-row__tag[data-tone="warn"] { background: rgba(245,158,11,0.2); color: #fcd34d; }
+
+.smc-liq-row[data-tone="bull"] { border-left-color: rgba(16,185,129,0.6); }
+.smc-liq-row[data-tone="bear"] { border-left-color: rgba(239,68,68,0.6); }
+
+.smc-fvg-badge {
+  font-size: 10px; padding: 3px 8px; border-radius: 4px;
+  background: rgba(255,255,255,0.05); color: #9ca3af;
+  letter-spacing: 0.05em; text-transform: uppercase; font-weight: 700;
+}
+.smc-fvg-badge[data-tone="bull"] { background: rgba(16,185,129,0.18); color: #6ee7b7; }
+.smc-fvg-badge[data-tone="bear"] { background: rgba(239,68,68,0.18); color: #fca5a5; }
+
+.smc-fvg-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;
+}
+.smc-fvg-cell {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 8px 10px; background: rgba(255,255,255,0.02); border-radius: 6px;
+  cursor: help;
+}
+.smc-fvg-cell__label { font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
+.smc-fvg-cell strong { font-size: 13px; }
+
+.smc-sweep-badge {
+  font-size: 10px; padding: 3px 8px; border-radius: 4px;
+  background: rgba(245,158,11,0.18); color: #fcd34d;
+  letter-spacing: 0.06em; text-transform: uppercase; font-weight: 700;
+  cursor: help;
+}
+
+.smc-narrative {
+  margin: 10px 0 0; font-size: 11px; color: #9ca3af;
+  padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.06);
+}
+
+.smc-drilldown {
+  background: rgba(255,255,255,0.02); border-radius: 8px; padding: 12px 14px;
+}
+.smc-drilldown > summary {
+  cursor: pointer; user-select: none; list-style: none;
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 12px; font-weight: 600; color: #d1d5db;
+}
+.smc-drilldown > summary::-webkit-details-marker { display: none; }
+.smc-drilldown__hint { font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
+.smc-drilldown[open] > summary { margin-bottom: 10px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .smc-live-badge, .smc-zone-marker { animation: none; transition: none; }
+}
+
+@media print {
+  .smc-institutional { color: #1f2937; }
+  .smc-live-badge { display: none; }
+  .smc-zone-marker { animation: none; }
+  .smc-drilldown { break-inside: avoid; }
+}

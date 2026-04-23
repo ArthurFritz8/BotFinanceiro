@@ -8539,6 +8539,379 @@ function renderSmcConfluenceChecklist(confluence) {
 }
 
 // =============================================================
+// Detalhamento SMC institucional (aba "SMC") — ADR-071
+// Renderiza Estrutura (BOS/CHoCH + Discount/Equilibrium/Premium),
+// Order Blocks candidatos (lastSwing*), Fair Value Gap ativo e
+// Monitor de Liquidez (BSL/SSL com flag de Sweep). Top-Down 3x1
+// (quando institutional disponível) e Killzone preservados como
+// drill-down secundário. Dados 100% derivados de
+// snapshot.insights.marketStructure — sem fabricação.
+// =============================================================
+
+function smcSignalToTone(signal) {
+  if (signal === "bullish") return "bull";
+  if (signal === "bearish") return "bear";
+  return "neutral";
+}
+
+function smcSignalLabel(signal) {
+  if (signal === "bullish") return "BULL";
+  if (signal === "bearish") return "BEAR";
+  return "—";
+}
+
+function smcZoneLabel(zone) {
+  if (zone === "discount") return "DISCOUNT";
+  if (zone === "premium") return "PREMIUM";
+  return "EQUILIBRIUM";
+}
+
+function smcZoneTone(zone) {
+  if (zone === "discount") return "bull";
+  if (zone === "premium") return "bear";
+  return "neutral";
+}
+
+function buildSmcInstitutionalView(analysis, snapshot, currency) {
+  const insights = snapshot?.insights ?? {};
+  const ms = insights.marketStructure ?? {};
+  const currentPrice = Number(insights.currentPrice ?? 0);
+  const swingHigh = Number(ms.lastSwingHigh ?? 0);
+  const swingLow = Number(ms.lastSwingLow ?? 0);
+  const range = swingHigh - swingLow;
+
+  // Posição relativa do preço no range (0 = fundo, 1 = topo)
+  let pricePosition = 0.5;
+  if (range > 0 && currentPrice > 0) {
+    pricePosition = clampNumber((currentPrice - swingLow) / range, 0, 1);
+  }
+
+  const bias = String(ms.bias ?? "neutral");
+  const zone = String(ms.institutionalZone ?? "equilibrium");
+  const bos = String(ms.bosSignal ?? "none");
+  const choch = String(ms.chochSignal ?? "none");
+  const sweep = String(ms.liquiditySweepSignal ?? "none");
+  const fvgActive = Boolean(ms.fairValueGapActive);
+  const fvgBias = String(ms.fairValueGapBias ?? "none");
+  const fvgLow = Number(ms.fairValueGapLower ?? 0);
+  const fvgHigh = Number(ms.fairValueGapUpper ?? 0);
+  const bsl = ms.liquiditySweepReferenceHigh; // buy-side liquidity (acima)
+  const ssl = ms.liquiditySweepReferenceLow;  // sell-side liquidity (abaixo)
+
+  // Order Blocks candidatos — derivados dos swings, sem fabricar
+  const obCandidates = [];
+  if (swingHigh > 0) {
+    const mitigated = currentPrice >= swingHigh;
+    obCandidates.push({
+      kind: "Bearish OB",
+      tone: "bear",
+      level: swingHigh,
+      label: mitigated ? "Mitigado" : (bias === "bearish" ? "Ativo" : "Pendente"),
+      mitigated,
+    });
+  }
+  if (swingLow > 0) {
+    const mitigated = currentPrice <= swingLow;
+    obCandidates.push({
+      kind: "Bullish OB",
+      tone: "bull",
+      level: swingLow,
+      label: mitigated ? "Mitigado" : (bias === "bullish" ? "Ativo" : "Pendente"),
+      mitigated,
+    });
+  }
+  if (Number.isFinite(Number(ms.previousSwingHigh)) && Number(ms.previousSwingHigh) > 0) {
+    obCandidates.push({
+      kind: "Bearish OB (prévio)",
+      tone: "bear",
+      level: Number(ms.previousSwingHigh),
+      label: "Histórico",
+      mitigated: currentPrice >= Number(ms.previousSwingHigh),
+    });
+  }
+  if (Number.isFinite(Number(ms.previousSwingLow)) && Number(ms.previousSwingLow) > 0) {
+    obCandidates.push({
+      kind: "Bullish OB (prévio)",
+      tone: "bull",
+      level: Number(ms.previousSwingLow),
+      label: "Histórico",
+      mitigated: currentPrice <= Number(ms.previousSwingLow),
+    });
+  }
+
+  // Distância % do preço ao FVG
+  let fvgDistancePercent = null;
+  let fvgDirection = "—";
+  if (fvgActive && fvgLow > 0 && fvgHigh > 0 && currentPrice > 0) {
+    const fvgMid = (fvgLow + fvgHigh) / 2;
+    fvgDistancePercent = ((fvgMid - currentPrice) / currentPrice) * 100;
+    fvgDirection = fvgDistancePercent > 0 ? "↑" : fvgDistancePercent < 0 ? "↓" : "≈";
+  }
+
+  return {
+    bias,
+    zone,
+    bos,
+    choch,
+    sweep,
+    fvg: {
+      active: fvgActive,
+      bias: fvgBias,
+      low: fvgLow,
+      high: fvgHigh,
+      distancePercent: fvgDistancePercent,
+      direction: fvgDirection,
+    },
+    pricePosition,
+    swingHigh,
+    swingLow,
+    currentPrice,
+    obCandidates,
+    bsl: Number.isFinite(Number(bsl)) ? Number(bsl) : null,
+    ssl: Number.isFinite(Number(ssl)) ? Number(ssl) : null,
+    swingRangePercent: Number(ms.swingRangePercent ?? 0),
+    invalidationLevel: analysis?.timing?.invalidationLevel ?? null,
+    smcText: {
+      structure: analysis?.smc?.structure ?? "",
+      liquidity: analysis?.smc?.liquidity ?? "",
+      sweepRisk: analysis?.smc?.sweepRisk ?? "",
+    },
+  };
+}
+
+function renderSmcStructurePanel(view, currency) {
+  const bosTone = smcSignalToTone(view.bos);
+  const chochTone = smcSignalToTone(view.choch);
+  const zoneTone = smcZoneTone(view.zone);
+  const biasTone = view.bias === "bullish" ? "bull" : view.bias === "bearish" ? "bear" : "neutral";
+  const markerLeft = (view.pricePosition * 100).toFixed(2);
+  const invalidationFmt = view.invalidationLevel != null
+    ? formatPrice(view.invalidationLevel, currency)
+    : "—";
+
+  return `
+    <article class="analysis-block smc-panel" data-tone="${biasTone}" id="smc-structure-panel">
+      <header class="smc-panel__head">
+        <h4>Estrutura de Mercado</h4>
+        <span class="smc-bias-badge" data-tone="${biasTone}" id="smc-bias">
+          ${escapeHtml(view.bias.toUpperCase())}
+        </span>
+      </header>
+      <div class="smc-structure-row">
+        <div class="smc-structure-cell" title="Break of Structure: rompimento de máximo/mínimo prévio confirmando continuidade do bias">
+          <span class="smc-structure-cell__label">BOS</span>
+          <span class="smc-structure-tag" data-tone="${bosTone}" id="smc-bos">${escapeHtml(smcSignalLabel(view.bos))}</span>
+        </div>
+        <div class="smc-structure-cell" title="Change of Character: rompimento contrário ao bias vigente, sinal de possível reversão">
+          <span class="smc-structure-cell__label">CHoCH</span>
+          <span class="smc-structure-tag" data-tone="${chochTone}" id="smc-choch">${escapeHtml(smcSignalLabel(view.choch))}</span>
+        </div>
+        <div class="smc-structure-cell" title="Sweep: varredura de liquidez (stop-hunt) acima/abaixo de extremo prévio">
+          <span class="smc-structure-cell__label">Sweep</span>
+          <span class="smc-structure-tag" data-tone="${smcSignalToTone(view.sweep)}" id="smc-sweep">${escapeHtml(smcSignalLabel(view.sweep))}</span>
+        </div>
+      </div>
+      <div class="smc-zone-meter" title="Discount (fundo) = compra institucional. Premium (topo) = venda institucional. Equilibrium = miolo do range.">
+        <div class="smc-zone-meter__track">
+          <div class="smc-zone-seg smc-zone-seg--discount">DISCOUNT</div>
+          <div class="smc-zone-seg smc-zone-seg--equilibrium">EQUILIBRIUM</div>
+          <div class="smc-zone-seg smc-zone-seg--premium">PREMIUM</div>
+          <div class="smc-zone-marker" id="smc-zone-marker" style="left: ${markerLeft}%" aria-hidden="true"></div>
+        </div>
+        <div class="smc-zone-meter__legend">
+          <span class="smc-mono">${escapeHtml(formatPrice(view.swingLow, currency))}</span>
+          <span class="smc-zone-active" data-tone="${zoneTone}" id="smc-zone-label">${escapeHtml(smcZoneLabel(view.zone))}</span>
+          <span class="smc-mono">${escapeHtml(formatPrice(view.swingHigh, currency))}</span>
+        </div>
+      </div>
+      <p class="smc-invalidation" title="Fechamento de candle além deste nível invalida o setup vigente">
+        Invalida em <strong class="smc-mono" id="smc-invalidation">${escapeHtml(invalidationFmt)}</strong>
+        • Range estrutural <span class="smc-mono">${view.swingRangePercent.toFixed(2)}%</span>
+      </p>
+    </article>
+  `;
+}
+
+function renderSmcOrderBlocksPanel(view, currency) {
+  const items = view.obCandidates.length === 0
+    ? `<li class="smc-empty">Sem swings estruturais detectados na janela atual</li>`
+    : view.obCandidates.map((ob, idx) => `
+        <li class="smc-ob-row" data-tone="${ob.tone}" data-mitigated="${ob.mitigated ? "true" : "false"}" id="smc-ob-${idx}">
+          <span class="smc-ob-row__kind">${escapeHtml(ob.kind)}</span>
+          <span class="smc-mono smc-ob-row__price">${escapeHtml(formatPrice(ob.level, currency))}</span>
+          <span class="smc-ob-row__tag" data-tone="${ob.tone}">${escapeHtml(ob.label)}</span>
+        </li>
+      `).join("");
+
+  return `
+    <article class="analysis-block smc-panel" id="smc-order-blocks-panel">
+      <header class="smc-panel__head">
+        <h4>Order Blocks (candidatos)</h4>
+        <span class="smc-panel__hint" title="Derivado de últimos swing high/low — fonte: backend marketStructure">Auditado</span>
+      </header>
+      <ul class="smc-list" role="list">${items}</ul>
+    </article>
+  `;
+}
+
+function renderSmcFvgPanel(view, currency) {
+  const fvg = view.fvg;
+  if (!fvg.active) {
+    return `
+      <article class="analysis-block smc-panel" id="smc-fvg-panel">
+        <header class="smc-panel__head">
+          <h4>Fair Value Gap (FVG)</h4>
+          <span class="smc-panel__hint">Nenhum desequilíbrio aberto</span>
+        </header>
+        <p class="smc-empty">Sem FVG ativo na janela atual. Aguarde candle de impulso para abrir gap institucional.</p>
+      </article>
+    `;
+  }
+  const tone = smcSignalToTone(fvg.bias);
+  const distLabel = fvg.distancePercent != null
+    ? `${fvg.direction} ${Math.abs(fvg.distancePercent).toFixed(2)}%`
+    : "—";
+  return `
+    <article class="analysis-block smc-panel" data-tone="${tone}" id="smc-fvg-panel">
+      <header class="smc-panel__head">
+        <h4>Fair Value Gap (FVG)</h4>
+        <span class="smc-fvg-badge" data-tone="${tone}">${escapeHtml(fvg.bias.toUpperCase())}</span>
+      </header>
+      <div class="smc-fvg-grid">
+        <div class="smc-fvg-cell" title="Limite inferior do desequilíbrio">
+          <span class="smc-fvg-cell__label">Inferior</span>
+          <strong class="smc-mono" id="smc-fvg-low">${escapeHtml(formatPrice(fvg.low, currency))}</strong>
+        </div>
+        <div class="smc-fvg-cell" title="Limite superior do desequilíbrio">
+          <span class="smc-fvg-cell__label">Superior</span>
+          <strong class="smc-mono" id="smc-fvg-high">${escapeHtml(formatPrice(fvg.high, currency))}</strong>
+        </div>
+        <div class="smc-fvg-cell" title="Distância percentual do preço atual até o ponto médio do FVG">
+          <span class="smc-fvg-cell__label">Distância</span>
+          <strong class="smc-mono" id="smc-fvg-distance">${escapeHtml(distLabel)}</strong>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function renderSmcLiquidityPanel(view, currency) {
+  const sweepActive = view.sweep !== "none";
+  const sweepTone = smcSignalToTone(view.sweep);
+  const bslLabel = view.bsl != null ? formatPrice(view.bsl, currency) : "—";
+  const sslLabel = view.ssl != null ? formatPrice(view.ssl, currency) : "—";
+
+  return `
+    <article class="analysis-block smc-panel" id="smc-liquidity-panel">
+      <header class="smc-panel__head">
+        <h4>Monitor de Liquidez</h4>
+        ${sweepActive ? `<span class="smc-sweep-badge" data-tone="${sweepTone}" title="Varredura institucional detectada">⚠ SWEEP ${escapeHtml(view.sweep.toUpperCase())}</span>` : `<span class="smc-panel__hint">Liquidez intacta</span>`}
+      </header>
+      <ul class="smc-list" role="list">
+        <li class="smc-liq-row" data-tone="bear" id="smc-bsl">
+          <span class="smc-liq-row__kind" title="Buy-side Liquidity: stops de vendedores acima — alvo institucional de alta">BSL (acima)</span>
+          <span class="smc-mono">${escapeHtml(bslLabel)}</span>
+          <span class="smc-liq-row__tag" data-tone="${view.sweep === "bullish" ? "warn" : "neutral"}">${view.sweep === "bullish" ? "VARRIDA" : "Pendente"}</span>
+        </li>
+        <li class="smc-liq-row" data-tone="bull" id="smc-ssl">
+          <span class="smc-liq-row__kind" title="Sell-side Liquidity: stops de compradores abaixo — alvo institucional de baixa">SSL (abaixo)</span>
+          <span class="smc-mono">${escapeHtml(sslLabel)}</span>
+          <span class="smc-liq-row__tag" data-tone="${view.sweep === "bearish" ? "warn" : "neutral"}">${view.sweep === "bearish" ? "VARRIDA" : "Pendente"}</span>
+        </li>
+      </ul>
+      <p class="smc-narrative">${escapeHtml(view.smcText.sweepRisk || "Sem leitura de risco de sweep no momento.")}</p>
+    </article>
+  `;
+}
+
+function renderSmcTopDownDrillDown(snapshot, currency) {
+  const institutional = snapshot?.institutional;
+  if (!institutional || typeof institutional !== "object") return "";
+  const topDown = institutional.topDown ?? {};
+  const daily = topDown.daily ?? {};
+  const h4 = topDown.h4 ?? {};
+  const m5 = topDown.m5 ?? {};
+  const vote = topDown.vote ?? {};
+  const killzones = institutional.killzones ?? {};
+
+  return `
+    <details class="smc-drilldown">
+      <summary>
+        <span>Top‑Down 3×1 + Killzone</span>
+        <span class="smc-drilldown__hint">expandir</span>
+      </summary>
+      <div class="analysis-grid">
+        <article class="analysis-block">
+          <h4>Top-Down 3×1 (D1 + H4 + M5)</h4>
+          <p><strong>D1:</strong> Bias ${escapeHtml(String(daily.bias ?? "neutral"))} • PDH ${escapeHtml(formatPrice(daily.pdh, currency))} • PDL ${escapeHtml(formatPrice(daily.pdl, currency))}</p>
+          <p><strong>H4:</strong> Bias ${escapeHtml(String(h4.bias ?? "neutral"))} • FVG ${escapeHtml(String(h4.fvgCount ?? 0))} • ERL ${escapeHtml(formatPrice(h4.erl, currency))} • IRL ${escapeHtml(formatPrice(h4.irl, currency))} • CRT ${escapeHtml(String(h4.crt ?? "inactive"))}</p>
+          <p><strong>M5:</strong> Bias ${escapeHtml(String(m5.bias ?? "neutral"))} • MSS ${escapeHtml(String(m5.mss ?? "none"))} • BOS ${escapeHtml(String(m5.bos ?? "none"))}</p>
+        </article>
+        <article class="analysis-block">
+          <h4>Confluência institucional</h4>
+          <p>Votação: Bull ${escapeHtml(String(vote.bullish ?? 0))} • Bear ${escapeHtml(String(vote.bearish ?? 0))} • Neutral ${escapeHtml(String(vote.neutral ?? 0))}</p>
+          <p>Status 3×1: ${escapeHtml(String(vote.confluence ?? "mixed"))}</p>
+          <p>Killzone: ${escapeHtml(String(killzones.session ?? "off_session"))} • Fase: ${escapeHtml(String(killzones.phase ?? "transition"))} • UTC ${escapeHtml(String(killzones.utcHour ?? "--"))}</p>
+          <p>${escapeHtml(String(killzones.narrative ?? "Sem narrativa institucional disponível"))}</p>
+        </article>
+      </div>
+    </details>
+  `;
+}
+
+function renderInstitutionalSmcTab(analysis, snapshot, currency) {
+  let view;
+  try {
+    view = buildSmcInstitutionalView(analysis, snapshot, currency);
+  } catch {
+    view = null;
+  }
+
+  const smcConfluence = buildSmcPriceActionConfluence(analysis);
+
+  // Graceful degradation: se não temos marketStructure, cai no checklist + texto base
+  if (!view || (!view.swingHigh && !view.swingLow && !view.fvg.active)) {
+    return `
+      ${renderSmcConfluenceChecklist(smcConfluence)}
+      <div class="analysis-grid">
+        <article class="analysis-block">
+          <h4>Estrutura e liquidez (SMC)</h4>
+          <p>${escapeHtml(analysis.smc.structure)}</p>
+          <p>${escapeHtml(analysis.smc.liquidity)}</p>
+          <p>${escapeHtml(analysis.smc.sweepRisk)}</p>
+        </article>
+        <article class="analysis-block">
+          <h4>Invalidação estrutural</h4>
+          <p>Nível de invalidação: ${escapeHtml(formatPrice(analysis?.timing?.invalidationLevel, currency))}</p>
+          <p>Se houver fechamento além desse nível, o setup atual perde validade.</p>
+        </article>
+      </div>
+      ${renderSmcTopDownDrillDown(snapshot, currency)}
+    `;
+  }
+
+  return `
+    <section class="smc-institutional" data-tone="${view.bias === "bullish" ? "bull" : view.bias === "bearish" ? "bear" : "neutral"}">
+      <header class="smc-institutional__head">
+        <div>
+          <h3 class="smc-institutional__title">Detalhamento SMC</h3>
+          <span class="smc-institutional__sub">Terminal de auditoria · Smart Money Concepts</span>
+        </div>
+        <span class="smc-live-badge" title="Dados derivados de snapshot.insights.marketStructure">● AO VIVO</span>
+      </header>
+      ${renderSmcStructurePanel(view, currency)}
+      <div class="analysis-grid smc-grid">
+        ${renderSmcOrderBlocksPanel(view, currency)}
+        ${renderSmcFvgPanel(view, currency)}
+      </div>
+      ${renderSmcLiquidityPanel(view, currency)}
+      ${renderSmcConfluenceChecklist(smcConfluence)}
+      ${renderSmcTopDownDrillDown(snapshot, currency)}
+    </section>
+  `;
+}
+
+// =============================================================
 // Velocímetro de Confluência Institucional (aba "Tecnica")
 // ADR-070 — substitui placar de varejo por gauge SVG + sensores SMC/HFT.
 // Score adaptativo:
@@ -9551,58 +9924,7 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
   }
 
   if (activeAnalysisTabId === "smc") {
-    const institutional = snapshot?.institutional;
-
-    if (institutional && typeof institutional === "object") {
-      const topDown = institutional.topDown && typeof institutional.topDown === "object"
-        ? institutional.topDown
-        : {};
-      const daily = topDown.daily && typeof topDown.daily === "object" ? topDown.daily : {};
-      const h4 = topDown.h4 && typeof topDown.h4 === "object" ? topDown.h4 : {};
-      const m5 = topDown.m5 && typeof topDown.m5 === "object" ? topDown.m5 : {};
-      const vote = topDown.vote && typeof topDown.vote === "object" ? topDown.vote : {};
-      const killzones = institutional.killzones && typeof institutional.killzones === "object"
-        ? institutional.killzones
-        : {};
-
-      analysisTabContentElement.innerHTML = `
-        <div class="analysis-grid">
-          <article class="analysis-block">
-            <h4>Top-Down 3x1 (D1 + H4 + M5)</h4>
-            <p><strong>D1 Bias:</strong> ${escapeHtml(String(daily.bias ?? "neutral"))} • PDH ${escapeHtml(formatPrice(daily.pdh, currency))} • PDL ${escapeHtml(formatPrice(daily.pdl, currency))}</p>
-            <p><strong>H4:</strong> Bias ${escapeHtml(String(h4.bias ?? "neutral"))} • FVG ${escapeHtml(String(h4.fvgCount ?? 0))} • ERL ${escapeHtml(formatPrice(h4.erl, currency))} • IRL ${escapeHtml(formatPrice(h4.irl, currency))} • CRT ${escapeHtml(String(h4.crt ?? "inactive"))}</p>
-            <p><strong>M5:</strong> Bias ${escapeHtml(String(m5.bias ?? "neutral"))} • MSS ${escapeHtml(String(m5.mss ?? "none"))} • BOS ${escapeHtml(String(m5.bos ?? "none"))}</p>
-          </article>
-          <article class="analysis-block">
-            <h4>Confluencia institucional</h4>
-            <p>Votacao: Bull ${escapeHtml(String(vote.bullish ?? 0))} • Bear ${escapeHtml(String(vote.bearish ?? 0))} • Neutral ${escapeHtml(String(vote.neutral ?? 0))}</p>
-            <p>Status 3x1: ${escapeHtml(String(vote.confluence ?? "mixed"))}</p>
-            <p>Killzone: ${escapeHtml(String(killzones.session ?? "off_session"))} • Fase: ${escapeHtml(String(killzones.phase ?? "transition"))} • UTC ${escapeHtml(String(killzones.utcHour ?? "--"))}</p>
-            <p>${escapeHtml(String(killzones.narrative ?? "Sem narrativa institucional disponivel"))}</p>
-          </article>
-        </div>
-      `;
-      return;
-    }
-
-    const smcConfluence = buildSmcPriceActionConfluence(analysis);
-
-    analysisTabContentElement.innerHTML = `
-      ${renderSmcConfluenceChecklist(smcConfluence)}
-      <div class="analysis-grid">
-        <article class="analysis-block">
-          <h4>Estrutura e liquidez (SMC)</h4>
-          <p>${escapeHtml(analysis.smc.structure)}</p>
-          <p>${escapeHtml(analysis.smc.liquidity)}</p>
-          <p>${escapeHtml(analysis.smc.sweepRisk)}</p>
-        </article>
-        <article class="analysis-block">
-          <h4>Invalidação estrutural</h4>
-          <p>Nivel de invalidacao: ${escapeHtml(formatPrice(analysis.timing.invalidationLevel, currency))}</p>
-          <p>Se houver fechamento alem desse nivel, o setup atual perde validade.</p>
-        </article>
-      </div>
-    `;
+    analysisTabContentElement.innerHTML = renderInstitutionalSmcTab(analysis, snapshot, currency);
     return;
   }
 
