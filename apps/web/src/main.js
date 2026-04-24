@@ -21026,7 +21026,7 @@ initPushNotifications();
 initPaperTradingPanel();
 initBacktestingPanel();
 bootstrapLiveSignals({
-  // ADR-078 — Auditar Sinal: abre o ativo no Chart Lab e dispara
+  // ADR-080 — Auditar Sinal: abre o ativo no Chart Lab e dispara
   // o pipeline completo (SMC + HFT + Probabilistica + ...).
   onAuditSignal: ({ symbol }) => {
     try {

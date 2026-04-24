@@ -55,4 +55,4 @@ Trade-offs:
 - [x] Anotacoes do chart com melhoria de leitura R:R e ENTRY.
 - [x] ADR sequencial registrada.
 - [x] Build validado no apps/web.
-- [ ] Commit + push com referencia ADR-079.
+- [x] Commit + push com referencia ADR-079.

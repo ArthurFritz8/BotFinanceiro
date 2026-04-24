@@ -123,7 +123,19 @@ Politica de retencao:
 37. ADR 065: `docs/ADR/ADR-065-regime-alerts-periodic-scanner.md`
 38. ADR 066: `docs/ADR/ADR-066-regime-alerts-mute.md`
 39. ADR 067: `docs/ADR/ADR-067-regime-alerts-scanner-status.md`
-40. ADR 079: `docs/ADR/ADR-079-polimento-resumo-e-anotacoes-chart-lab.md`
+40. ADR 068: `docs/ADR/ADR-068-narrativa-gatilho-e-ensemble-engine-derivado.md`
+41. ADR 069: `docs/ADR/ADR-069-relatorio-executivo-briefing-tatico.md`
+42. ADR 070: `docs/ADR/ADR-070-velocimetro-confluencia-institucional.md`
+43. ADR 071: `docs/ADR/ADR-071-detalhamento-smc-institucional.md`
+44. ADR 072: `docs/ADR/ADR-072-detalhamento-harmonico-xabcd.md`
+45. ADR 073: `docs/ADR/ADR-073-central-wegd-institucional.md`
+46. ADR 074: `docs/ADR/ADR-074-dashboard-probabilistico-quantitativo.md`
+47. ADR 075: `docs/ADR/ADR-075-calculadora-posicao-institucional.md`
+48. ADR 076: `docs/ADR/ADR-076-timing-desk-institucional.md`
+49. ADR 077: `docs/ADR/ADR-077-camada-anotacoes-grafico-interativo.md`
+50. ADR 078: `docs/ADR/ADR-078-hub-inteligencia-fundamentalista.md`
+51. ADR 079: `docs/ADR/ADR-079-polimento-resumo-e-anotacoes-chart-lab.md`
+52. ADR 080: `docs/ADR/ADR-080-live-signals-screener-cross-asset.md`
 
 ## Relatorio completo desta entrega
 

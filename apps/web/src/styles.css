@@ -7527,7 +7527,7 @@ body.sidebar-collapsed .app-shell {
 }
 
 /* ============================================================================
-   ADR-078 — Live Signals Screener (Top Opportunities cross-asset)
+  ADR-080 — Live Signals Screener (Top Opportunities cross-asset)
    Dark Premium institucional. Tokens dedicados via data-tone, sem cores
    Tailwind cruas. prefers-reduced-motion respeitado em todos os pulses.
    ============================================================================ */

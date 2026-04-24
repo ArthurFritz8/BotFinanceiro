@@ -1,4 +1,4 @@
-// ADR-078 — Live Signals Screener (Top Opportunities cross-asset)
+// ADR-080 — Live Signals Screener (Top Opportunities cross-asset)
 //
 // Modulo isolado para nao inflar main.js (ja com 18k+ linhas). Renderiza o
 // painel de sinais de alta confluencia, banner PRO com countdown persistido,

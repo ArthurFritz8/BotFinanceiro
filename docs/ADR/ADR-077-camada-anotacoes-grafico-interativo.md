@@ -64,7 +64,7 @@ Transformar a apresentação "crua" do gráfico interativo (`#chart-viewport`, `
 
 ### Negativas / Trade-offs
 - **Custom primitive** adiciona ~150 linhas de código pintura. Mitigado: arquivo isolado e simples (paneViews retorna 1 renderer).
-- Não cobre o painel "Visual IA" (PNG). Trade-off aceito — anotação Vision é trabalho de prompt (futura ADR-078 se necessário).
+- Não cobre o painel "Visual IA" (PNG). Trade-off aceito — anotação Vision é trabalho de prompt (futura ADR dedicada, se necessário).
 - Caixas estendem-se à largura visível inteira (não delimitam o candle de origem da zona). Mitigação parcial via "(A) linha vertical ao candle de origem" desenhada pelo mesmo primitive.
 - Drawdown Ghost Tracker exige snapshot histórico (`resolvedTrades`); fail-honest com badge "Coletando" se `< 5` trades.
 
@@ -78,7 +78,7 @@ Transformar a apresentação "crua" do gráfico interativo (`#chart-viewport`, `
 - [x] CSS vars semânticas + `prefers-reduced-motion`.
 - [x] `npm run build` (apps/web) verde.
 - [x] Commit Conventional Commits referenciando ADR-077.
-- [ ] Push para remote (etapa final).
+- [x] Push para remote (etapa final).
 
 ## Referências
 
