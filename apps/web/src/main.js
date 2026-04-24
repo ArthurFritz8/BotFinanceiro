@@ -15,6 +15,7 @@ import { setLiveStatus, getLiveStatusSnapshot, LIVE_STATUS } from "./shared/live
 import { initPushNotifications } from "./shared/push-notifications.js";
 import { initPaperTradingPanel } from "./shared/paper-trading-panel.js";
 import { initBacktestingPanel } from "./shared/backtesting-panel.js";
+import { bootstrapLiveSignals } from "./live-signals.js";
 import { bootstrapExecutiveReport, generateExecutiveReport } from "./executive-report.js";
 import { PriceZonesPrimitive } from "./chart-zones-primitive.js";
 import "./styles.css";
@@ -53,6 +54,7 @@ const memecoinsStageSection = document.querySelector(".memecoins-stage");
 const airdropsStageSection = document.querySelector(".airdrops-stage");
 const paperTradingPanelSection = document.querySelector("#paper-trading-panel");
 const backtestingPanelSection = document.querySelector("#backtesting-panel");
+const liveSignalsStageSection = document.querySelector("#live-signals-stage");
 const chartControlsForm = document.querySelector("#chart-controls");
 const chartAssetSelect = document.querySelector("#chart-asset");
 const chartModeSelect = document.querySelector("#chart-mode");
@@ -231,6 +233,7 @@ const APP_ROUTE_MEMECOINS = "memecoins";
 const APP_ROUTE_AIRDROPS = "airdrops";
 const APP_ROUTE_PAPER = "paper";
 const APP_ROUTE_BACKTESTING = "backtesting";
+const APP_ROUTE_LIVE_SIGNALS = "live-signals";
 const APP_ROUTES = new Set([
   APP_ROUTE_CHAT,
   APP_ROUTE_CHART_LAB,
@@ -239,6 +242,7 @@ const APP_ROUTES = new Set([
   APP_ROUTE_AIRDROPS,
   APP_ROUTE_PAPER,
   APP_ROUTE_BACKTESTING,
+  APP_ROUTE_LIVE_SIGNALS,
 ]);
 const APP_ROUTE_LABELS = {
   [APP_ROUTE_CHAT]: "Chat",
@@ -248,6 +252,7 @@ const APP_ROUTE_LABELS = {
   [APP_ROUTE_AIRDROPS]: "Airdrops",
   [APP_ROUTE_PAPER]: "Paper Trading",
   [APP_ROUTE_BACKTESTING]: "Backtesting",
+  [APP_ROUTE_LIVE_SIGNALS]: "Sinais ao Vivo",
 };
 const APP_ROUTE_SHORTCUTS = {
   Digit7: APP_ROUTE_CHAT,
@@ -2570,6 +2575,10 @@ function resolveRouteFromLocation() {
     return APP_ROUTE_BACKTESTING;
   }
 
+  if (pathname.endsWith(`/${APP_ROUTE_LIVE_SIGNALS}`) || hash === "#/live-signals") {
+    return APP_ROUTE_LIVE_SIGNALS;
+  }
+
   return APP_ROUTE_CHAT;
 }
 
@@ -2614,6 +2623,7 @@ function setRouteVisibility(route) {
   const showAirdrops = route === APP_ROUTE_AIRDROPS;
   const showPaperTrading = route === APP_ROUTE_PAPER;
   const showBacktesting = route === APP_ROUTE_BACKTESTING;
+  const showLiveSignals = route === APP_ROUTE_LIVE_SIGNALS;
 
   if (chartDeskSection instanceof HTMLElement) {
     chartDeskSection.classList.toggle("route-hidden", !showChartDesk);
@@ -2649,6 +2659,10 @@ function setRouteVisibility(route) {
 
   if (backtestingPanelSection instanceof HTMLElement) {
     backtestingPanelSection.classList.toggle("route-hidden", !showBacktesting);
+  }
+
+  if (liveSignalsStageSection instanceof HTMLElement) {
+    liveSignalsStageSection.classList.toggle("route-hidden", !showLiveSignals);
   }
 
   if (workspaceStageSection instanceof HTMLElement) {
@@ -20977,6 +20991,29 @@ setupMemecoinRadarPanel();
 initPushNotifications();
 initPaperTradingPanel();
 initBacktestingPanel();
+bootstrapLiveSignals({
+  // ADR-078 — Auditar Sinal: abre o ativo no Chart Lab e dispara
+  // o pipeline completo (SMC + HFT + Probabilistica + ...).
+  onAuditSignal: ({ symbol }) => {
+    try {
+      navigateToRoute(APP_ROUTE_CHART_LAB);
+      const chartAssetSelect = document.querySelector("#chart-asset");
+      if (chartAssetSelect instanceof HTMLSelectElement && typeof symbol === "string" && symbol.length > 0) {
+        const slug = symbol.toLowerCase().replace(/\s+/g, "-");
+        const candidates = [symbol, symbol.toLowerCase(), slug];
+        const match = Array.from(chartAssetSelect.options).find((opt) =>
+          candidates.includes(opt.value) || candidates.includes(opt.textContent?.trim().toLowerCase() ?? ""),
+        );
+        if (match) {
+          chartAssetSelect.value = match.value;
+          chartAssetSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      }
+    } catch {
+      // Falha silenciosa — graceful degradation.
+    }
+  },
+});
 bootstrapExecutiveReport({ openTrigger: document.getElementById("btn-open-executive-report") });
 void (async () => {
   await initializeAuth();
