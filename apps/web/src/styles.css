@@ -7045,3 +7045,126 @@ body.sidebar-collapsed .app-shell {
 @media (prefers-reduced-motion: reduce) {
   .pos-calc__profile, .pos-calc__row, .pos-calc__capital-input, .pos-calc__copy-btn { transition: none; }
 }
+
+/* ============================================================================
+   ADR-076 — Timing Desk Institucional (Sessoes / Killzones / Calendario Macro)
+   ============================================================================ */
+.timing-desk { display: flex; flex-direction: column; gap: 0.85rem; }
+.timing-desk-header { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+.timing-context-card {
+  display: flex; flex-direction: column; gap: 0.2rem;
+  padding: 0.75rem 0.9rem; border-radius: 10px;
+  background: linear-gradient(135deg, rgba(15,23,42,0.9), rgba(15,23,42,0.65));
+  border: 1px solid rgba(148,163,184,0.18);
+  transition: border-color 160ms ease, transform 160ms ease;
+}
+.timing-context-card[data-tone="hot"] { border-color: rgba(34,197,94,0.45); box-shadow: 0 0 0 1px rgba(34,197,94,0.15) inset; }
+.timing-context-card[data-tone="warn"] { border-color: rgba(234,179,8,0.45); box-shadow: 0 0 0 1px rgba(234,179,8,0.15) inset; }
+.timing-context-card[data-tone="danger"] { border-color: rgba(239,68,68,0.55); box-shadow: 0 0 0 1px rgba(239,68,68,0.18) inset; }
+.timing-context-card[data-tone="cool"] { border-color: rgba(56,189,248,0.35); }
+.timing-context-card[data-tone="neutral"] { border-color: rgba(148,163,184,0.25); }
+.timing-context-label { font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(203,213,225,0.7); }
+.timing-context-card strong { font-size: 1.05rem; color: #f8fafc; font-weight: 600; }
+.timing-context-meta { font-size: 0.72rem; color: rgba(148,163,184,0.85); font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
+.timing-utc-clock { font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+
+.timing-binary-warn {
+  padding: 0.55rem 0.8rem; border-radius: 8px;
+  background: rgba(234,179,8,0.12); border: 1px solid rgba(234,179,8,0.4);
+  color: #fde68a; font-size: 0.78rem;
+}
+
+.timing-block { padding: 0.85rem 1rem; }
+.timing-block h4 { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 0.6rem 0; }
+.timing-asset-tag {
+  font-size: 0.62rem; letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 0.12rem 0.45rem; border-radius: 6px;
+  background: rgba(56,189,248,0.12); color: #7dd3fc; border: 1px solid rgba(56,189,248,0.3);
+  font-weight: 500;
+}
+
+.timing-sessions-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.timing-session-row {
+  display: grid; grid-template-columns: auto 1fr auto auto; gap: 0.6rem; align-items: center;
+  padding: 0.5rem 0.75rem; border-radius: 8px;
+  background: rgba(15,23,42,0.55); border: 1px solid rgba(148,163,184,0.15);
+  transition: background-color 200ms ease, border-color 200ms ease;
+}
+.timing-session-row[data-active="true"] {
+  background: rgba(34,197,94,0.10); border-color: rgba(34,197,94,0.45);
+}
+.timing-session-icon { font-size: 1.1rem; }
+.timing-session-name { color: #e2e8f0; font-size: 0.84rem; font-weight: 500; }
+.timing-session-hours { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-variant-numeric: tabular-nums; font-size: 0.74rem; color: rgba(148,163,184,0.85); }
+.timing-session-tag {
+  font-size: 0.6rem; letter-spacing: 0.1em; padding: 0.18rem 0.45rem;
+  background: rgba(34,197,94,0.25); color: #bbf7d0; border-radius: 6px; font-weight: 600;
+}
+
+.timing-killzone-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+.timing-killzone-col h5 {
+  margin: 0 0 0.4rem 0; font-size: 0.72rem; letter-spacing: 0.08em;
+  text-transform: uppercase; color: rgba(203,213,225,0.7);
+}
+.timing-killzone-col[data-kind="recommended"] h5 { color: #86efac; }
+.timing-killzone-col[data-kind="avoid"] h5 { color: #fca5a5; }
+.timing-killzone-card {
+  display: flex; flex-direction: column; gap: 0.25rem;
+  padding: 0.55rem 0.7rem; border-radius: 8px;
+  background: rgba(15,23,42,0.55);
+  border: 1px solid rgba(148,163,184,0.18);
+  cursor: help;
+  margin-bottom: 0.4rem;
+  transition: border-color 160ms ease, transform 160ms ease;
+}
+.timing-killzone-card[data-kind="recommended"] { border-color: rgba(34,197,94,0.35); background: rgba(34,197,94,0.06); }
+.timing-killzone-card[data-kind="avoid"] { border-color: rgba(239,68,68,0.35); background: rgba(239,68,68,0.06); }
+.timing-killzone-card:hover { transform: translateY(-1px); }
+.timing-killzone-card header { display: flex; justify-content: space-between; }
+.timing-killzone-range { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-variant-numeric: tabular-nums; font-size: 0.72rem; color: rgba(226,232,240,0.85); }
+.timing-killzone-card strong { font-size: 0.82rem; color: #f8fafc; font-weight: 600; }
+.timing-killzone-card p { font-size: 0.72rem; color: rgba(148,163,184,0.85); margin: 0; line-height: 1.4; }
+
+.timing-events-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+.timing-event-row {
+  display: grid; grid-template-columns: 70px 60px 1fr auto auto; gap: 0.6rem; align-items: center;
+  padding: 0.5rem 0.75rem; border-radius: 8px;
+  background: rgba(15,23,42,0.55); border: 1px solid rgba(148,163,184,0.15);
+  font-size: 0.78rem;
+}
+.timing-event-when { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-variant-numeric: tabular-nums; color: rgba(148,163,184,0.9); font-size: 0.72rem; }
+.timing-event-currency {
+  font-size: 0.65rem; padding: 0.15rem 0.4rem; border-radius: 5px; text-align: center;
+  background: rgba(56,189,248,0.15); color: #7dd3fc; font-weight: 600; letter-spacing: 0.04em;
+}
+.timing-event-name { color: #e2e8f0; }
+.timing-event-impact {
+  font-size: 0.62rem; padding: 0.18rem 0.5rem; border-radius: 5px;
+  letter-spacing: 0.08em; font-weight: 600;
+}
+.timing-event-impact[data-impact="high"] { background: rgba(239,68,68,0.18); color: #fca5a5; border: 1px solid rgba(239,68,68,0.35); }
+.timing-event-impact[data-impact="medium"] { background: rgba(234,179,8,0.18); color: #fde68a; border: 1px solid rgba(234,179,8,0.35); }
+.timing-event-impact[data-impact="low"] { background: rgba(148,163,184,0.18); color: #cbd5e1; border: 1px solid rgba(148,163,184,0.3); }
+.timing-event-impact[data-impact="proxy"] { background: rgba(56,189,248,0.15); color: #7dd3fc; border: 1px solid rgba(56,189,248,0.3); }
+.timing-event-bias {
+  font-size: 0.62rem; padding: 0.18rem 0.5rem; border-radius: 5px;
+  letter-spacing: 0.04em; text-transform: capitalize; font-weight: 500;
+}
+.timing-event-bias[data-bias="bullish"] { color: #86efac; background: rgba(34,197,94,0.12); }
+.timing-event-bias[data-bias="bearish"] { color: #fca5a5; background: rgba(239,68,68,0.12); }
+.timing-event-bias[data-bias="neutro"], .timing-event-bias[data-bias="neutral"] { color: #cbd5e1; background: rgba(148,163,184,0.12); }
+.timing-muted { color: rgba(148,163,184,0.85); font-size: 0.78rem; }
+
+@media (max-width: 720px) {
+  .timing-desk-header { grid-template-columns: 1fr; }
+  .timing-killzone-grid { grid-template-columns: 1fr; }
+  .timing-session-row { grid-template-columns: auto 1fr auto; }
+  .timing-session-row .timing-session-tag { grid-column: 1 / -1; justify-self: end; }
+  .timing-event-row { grid-template-columns: 1fr auto; gap: 0.3rem; }
+  .timing-event-row > * { font-size: 0.7rem; }
+  .timing-event-when, .timing-event-currency { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .timing-context-card, .timing-session-row, .timing-killzone-card { transition: none; }
+  .timing-killzone-card:hover { transform: none; }
+}

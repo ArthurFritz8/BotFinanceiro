@@ -7107,6 +7107,8 @@ function buildQuantitativeAnalysis(snapshot) {
           : signalTone === "sell"
             ? "Priorize falha de rompimento e candle de rejeicao para entrada"
             : "Aguardar rompimento limpo ou retorno a zonas extremas para melhorar assimetria",
+      // ADR-076 — exposto p/ Timing Desk derivar regime de volatilidade real.
+      volatilityPercent: Number.isFinite(insights.volatilityPercent) ? insights.volatilityPercent : 0,
     },
     visualChecklist: [
       `Trend: ${formatTrendLabel(insights.trend)}`,
@@ -12381,24 +12383,9 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
   }
 
   if (activeAnalysisTabId === "timing") {
-    analysisTabContentElement.innerHTML = `
-      <div class="analysis-grid">
-        <article class="analysis-block">
-          <h4>Janela de execucao</h4>
-          <p>${escapeHtml(analysis.timing.executionWindow)}</p>
-          <p>Invalidação: ${escapeHtml(formatPrice(analysis.timing.invalidationLevel, currency))}</p>
-          <p>${escapeHtml(analysis.timing.note)}</p>
-        </article>
-        <article class="analysis-block">
-          <h4>Ritmo operacional</h4>
-          <ul class="analysis-list">
-            <li>Confirmar direcao no fechamento da vela do timeframe selecionado.</li>
-            <li>Executar apenas quando risco/retorno minimo estiver acima de 1.5:1.</li>
-            <li>Evitar perseguir movimento apos candle de extensao acima da media.</li>
-          </ul>
-        </article>
-      </div>
-    `;
+    // ADR-076 — Timing Desk Institucional.
+    analysisTabContentElement.innerHTML = renderTimingDeskHtml(analysis, snapshot, currency);
+    startTimingUtcClock();
     return;
   }
 
@@ -12518,10 +12505,263 @@ function renderDeepAnalysisPanel(snapshot) {
   });
 }
 
+// ============================================================================
+// ADR-076 — Timing Desk Institucional (Sessoes, Killzones, Calendario Macro)
+// Helpers puros + render. Zero fetch externo: tudo derivado de Date.now() UTC,
+// `analysis.timing.volatilityPercent` e `institutional.macroRadar.upcomingEvents`.
+// ============================================================================
+
+const TIMING_DESK_SESSIONS = Object.freeze([
+  Object.freeze({ key: "asia", label: "Asia (Toquio/Sydney)", startUtcHour: 23, endUtcHour: 8, tone: "warm", icon: "🌏" }),
+  Object.freeze({ key: "london", label: "Londres (LSE/FFM)", startUtcHour: 7, endUtcHour: 16, tone: "hot", icon: "🇬🇧" }),
+  Object.freeze({ key: "newyork", label: "Nova York (NYSE/Nasdaq)", startUtcHour: 13, endUtcHour: 22, tone: "hot", icon: "🇺🇸" }),
+]);
+
+function isUtcHourInSession(hour, startHour, endHour) {
+  if (startHour <= endHour) {
+    return hour >= startHour && hour < endHour;
+  }
+  // Sessao cruza meia-noite (ex.: Asia 23-08).
+  return hour >= startHour || hour < endHour;
+}
+
+function getCurrentTradingSessionUtc(nowMs = Date.now()) {
+  const date = new Date(nowMs);
+  const utcHour = date.getUTCHours();
+  const active = TIMING_DESK_SESSIONS.filter((session) =>
+    isUtcHourInSession(utcHour, session.startUtcHour, session.endUtcHour),
+  );
+
+  if (active.length === 0) {
+    return { active: [], primary: null, label: "Mercado em transicao (baixa liquidez)" };
+  }
+
+  // Sobreposicao Londres+NY (13-16 UTC) eh o pico real do dia.
+  const hasLondonNyOverlap = active.some((s) => s.key === "london") && active.some((s) => s.key === "newyork");
+
+  if (hasLondonNyOverlap) {
+    return {
+      active,
+      primary: "overlap-london-ny",
+      label: "Sobreposicao Londres + Nova York (PICO de liquidez)",
+    };
+  }
+
+  const labels = active.map((s) => s.label).join(" + ");
+  return { active, primary: active[0].key, label: `Sessao ativa: ${labels}` };
+}
+
+function getVolatilityRegime(volatilityPercent) {
+  const v = Number.isFinite(volatilityPercent) ? volatilityPercent : 0;
+  if (v >= 7) return { key: "extreme", label: "Extrema (CUIDADO)", tone: "danger" };
+  if (v >= 4) return { key: "high", label: "Alta", tone: "warn" };
+  if (v >= 1.5) return { key: "normal", label: "Normal", tone: "neutral" };
+  return { key: "low", label: "Baixa", tone: "cool" };
+}
+
+function detectAssetClassForTiming(assetId) {
+  const id = typeof assetId === "string" ? assetId.trim() : "";
+  if (!id) return "crypto";
+  // Reusa heuristica robusta ja existente (linha ~2093).
+  try {
+    if (typeof isLikelyForexPairSymbol === "function" && isLikelyForexPairSymbol(id.toUpperCase())) {
+      return "forex";
+    }
+  } catch { /* ignore */ }
+  // Fallback: pares forex listados explicitamente.
+  const lower = id.toLowerCase();
+  const forexPairs = ["eurusd", "gbpusd", "usdjpy", "audusd", "usdcad", "usdchf", "nzdusd", "eurjpy", "gbpjpy"];
+  if (forexPairs.some((p) => lower.includes(p))) return "forex";
+  return "crypto";
+}
+
+function getKillzonesForAssetClass(assetClass) {
+  // Killzones ICT/SMC + sessoes de overlap. Adaptativo por classe.
+  const recommended = [
+    { range: "07:00 - 10:00 UTC", title: "London Open Killzone", hint: "ICT classico — institucionais britanicos abrem posicoes; setups de breakout limpos" },
+    { range: "13:00 - 16:00 UTC", title: "NY AM Killzone (Overlap)", hint: "Sobreposicao Londres+NY — MAIOR liquidez global do dia, ideal p/ continuacao" },
+    { range: "06:00 - 07:00 UTC", title: "Pre-London (acumulacao)", hint: "Pre-mercado europeu — bons setups de breakout via varredura asiatica" },
+  ];
+  const avoid = [
+    { range: "11:00 - 12:30 UTC", title: "London Lunch Gap", hint: "Volume cai antes do almoco europeu — movimentos erraticos, false breaks" },
+    { range: "16:00 - 17:30 UTC", title: "Fechamento Londres", hint: "Reversoes falsas comuns; spreads alargam apos o fechamento" },
+    { range: "21:00 - 23:00 UTC", title: "Pos-fechamento NY", hint: "Liquidez evapora — slippage agressivo e gap risk noturno" },
+  ];
+
+  if (assetClass === "crypto") {
+    // Funding windows em perpetuals: 00:00, 08:00, 16:00 UTC (padrao Binance/Bybit/OKX).
+    avoid.push({
+      range: "Funding ±5min (00/08/16 UTC)",
+      title: "Funding Window (Perpetuals)",
+      hint: "Stop-hunts e spikes artificiais para pagar/receber funding — evite entradas curtas",
+    });
+  }
+
+  return { recommended, avoid };
+}
+
+function formatUtcClock(date = new Date()) {
+  const hh = String(date.getUTCHours()).padStart(2, "0");
+  const mm = String(date.getUTCMinutes()).padStart(2, "0");
+  const ss = String(date.getUTCSeconds()).padStart(2, "0");
+  return `${hh}:${mm}:${ss} UTC`;
+}
+
+let timingUtcClockInterval = null;
+
+function startTimingUtcClock() {
+  stopTimingUtcClock();
+  const tick = () => {
+    const clockEl = document.getElementById("timing-utc-clock");
+    if (!(clockEl instanceof HTMLElement)) {
+      stopTimingUtcClock();
+      return;
+    }
+    const now = new Date();
+    clockEl.textContent = formatUtcClock(now);
+    const sessionEl = document.getElementById("timing-session-active");
+    if (sessionEl instanceof HTMLElement) {
+      const session = getCurrentTradingSessionUtc(now.getTime());
+      sessionEl.textContent = session.label;
+      sessionEl.dataset.primary = session.primary ?? "none";
+    }
+  };
+  tick();
+  timingUtcClockInterval = window.setInterval(tick, 1000);
+}
+
+function stopTimingUtcClock() {
+  if (timingUtcClockInterval !== null) {
+    window.clearInterval(timingUtcClockInterval);
+    timingUtcClockInterval = null;
+  }
+}
+
+function renderTimingDeskHtml(analysis, snapshot, currency) {
+  const nowMs = Date.now();
+  const session = getCurrentTradingSessionUtc(nowMs);
+  const regime = getVolatilityRegime(analysis?.timing?.volatilityPercent);
+  const assetClass = detectAssetClassForTiming(snapshot?.assetId);
+  const killzones = getKillzonesForAssetClass(assetClass);
+  const utcHourNow = new Date(nowMs).getUTCHours();
+
+  const macroRadar = snapshot?.institutional?.macroRadar;
+  const macroEvents = Array.isArray(macroRadar?.upcomingEvents) ? macroRadar.upcomingEvents.slice(0, 6) : [];
+  const newsProxy = Array.isArray(analysis?.newsProxy) ? analysis.newsProxy : [];
+
+  const sessionsTimelineHtml = TIMING_DESK_SESSIONS.map((s) => {
+    const isActive = isUtcHourInSession(utcHourNow, s.startUtcHour, s.endUtcHour);
+    return `
+      <li class="timing-session-row" data-active="${isActive}">
+        <span class="timing-session-icon" aria-hidden="true">${s.icon}</span>
+        <span class="timing-session-name">${escapeHtml(s.label)}</span>
+        <span class="timing-session-hours">${String(s.startUtcHour).padStart(2, "0")}:00 → ${String(s.endUtcHour).padStart(2, "0")}:00 UTC</span>
+        ${isActive ? `<span class="timing-session-tag">VOCE ESTA AQUI</span>` : ""}
+      </li>`;
+  }).join("");
+
+  const killRecommendedHtml = killzones.recommended.map((k) => `
+    <article class="timing-killzone-card" data-kind="recommended" title="${escapeHtml(k.hint)}">
+      <header><span class="timing-killzone-range">${escapeHtml(k.range)}</span></header>
+      <strong>${escapeHtml(k.title)}</strong>
+      <p>${escapeHtml(k.hint)}</p>
+    </article>`).join("");
+
+  const killAvoidHtml = killzones.avoid.map((k) => `
+    <article class="timing-killzone-card" data-kind="avoid" title="${escapeHtml(k.hint)}">
+      <header><span class="timing-killzone-range">${escapeHtml(k.range)}</span></header>
+      <strong>${escapeHtml(k.title)}</strong>
+      <p>${escapeHtml(k.hint)}</p>
+    </article>`).join("");
+
+  const eventsHtml = macroEvents.length > 0
+    ? macroEvents.map((ev) => {
+        const name = typeof ev?.name === "string" ? ev.name : "Evento macro";
+        const impact = typeof ev?.impact === "string" ? ev.impact.toLowerCase() : "medium";
+        const hours = typeof ev?.hoursToEvent === "number" && Number.isFinite(ev.hoursToEvent) ? `em ${ev.hoursToEvent}h` : "n/d";
+        const currencyTag = typeof ev?.currency === "string" ? ev.currency : (typeof ev?.region === "string" ? ev.region : "GLOBAL");
+        const bias = typeof ev?.bias === "string" ? ev.bias : "neutro";
+        return `
+          <li class="timing-event-row" data-impact="${escapeHtml(impact)}">
+            <span class="timing-event-when">${escapeHtml(hours)}</span>
+            <span class="timing-event-currency">${escapeHtml(currencyTag)}</span>
+            <span class="timing-event-name">${escapeHtml(name)}</span>
+            <span class="timing-event-impact" data-impact="${escapeHtml(impact)}">${escapeHtml(impact.toUpperCase())}</span>
+            <span class="timing-event-bias" data-bias="${escapeHtml(bias)}">${escapeHtml(bias)}</span>
+          </li>`;
+      }).join("")
+    : newsProxy.map((item) => `
+        <li class="timing-event-row" data-impact="proxy">
+          <span class="timing-event-when">proxy</span>
+          <span class="timing-event-currency">QUANT</span>
+          <span class="timing-event-name">${escapeHtml(item)}</span>
+          <span class="timing-event-impact" data-impact="proxy">SINAL</span>
+          <span class="timing-event-bias" data-bias="neutro">derivado</span>
+        </li>`).join("");
+
+  const binaryWarnHtml = (typeof isBinaryOptionsOperationalMode === "function" && isBinaryOptionsOperationalMode())
+    ? `<div class="timing-binary-warn" role="alert">⚠️ Modo Binario ativo: evite expiracoes curtas a ±15min de eventos HIGH impact.</div>`
+    : "";
+
+  return `
+    <section class="timing-desk" aria-label="Timing Desk Institucional">
+      <header class="timing-desk-header">
+        <article class="timing-context-card" data-tone="${regime.tone}">
+          <span class="timing-context-label">Volatilidade</span>
+          <strong id="timing-vol-status">${escapeHtml(regime.label)}</strong>
+          <span class="timing-context-meta">${(analysis?.timing?.volatilityPercent ?? 0).toFixed(2)}% (range recente)</span>
+        </article>
+        <article class="timing-context-card" data-tone="${session.primary === "overlap-london-ny" ? "hot" : "neutral"}">
+          <span class="timing-context-label">Sessao Ativa</span>
+          <strong id="timing-session-active" data-primary="${session.primary ?? "none"}">${escapeHtml(session.label)}</strong>
+          <span class="timing-context-meta"><span class="timing-utc-clock" id="timing-utc-clock">${escapeHtml(formatUtcClock())}</span></span>
+        </article>
+      </header>
+
+      ${binaryWarnHtml}
+
+      <article class="analysis-block timing-block">
+        <h4>🌐 Mapa de Liquidez Global (UTC)</h4>
+        <ul class="timing-sessions-list" id="timing-sessions-list">${sessionsTimelineHtml}</ul>
+      </article>
+
+      <article class="analysis-block timing-block">
+        <h4>🎯 Killzones ICT / SMC ${assetClass === "crypto" ? "<span class=\"timing-asset-tag\">CRYPTO 24/7 + funding</span>" : "<span class=\"timing-asset-tag\">FOREX</span>"}</h4>
+        <div class="timing-killzone-grid" id="timing-killzone-list">
+          <div class="timing-killzone-col" data-kind="recommended">
+            <h5>✅ Janelas Recomendadas</h5>
+            ${killRecommendedHtml}
+          </div>
+          <div class="timing-killzone-col" data-kind="avoid">
+            <h5>❌ Zonas a Evitar</h5>
+            ${killAvoidHtml}
+          </div>
+        </div>
+      </article>
+
+      <article class="analysis-block timing-block">
+        <h4>📅 Calendario Macro ${macroEvents.length === 0 ? "<span class=\"timing-asset-tag\">fallback proxy</span>" : ""}</h4>
+        <ul class="timing-events-list" id="timing-events-list">
+          ${eventsHtml || `<li class="timing-event-row" data-impact="empty"><span class="timing-event-name">Sem eventos nas proximas horas.</span></li>`}
+        </ul>
+      </article>
+
+      <article class="analysis-block timing-block">
+        <h4>⏱️ Janela do Setup Atual</h4>
+        <p>${escapeHtml(analysis.timing.executionWindow)}</p>
+        <p class="timing-muted">Invalidacao: ${escapeHtml(formatPrice(analysis.timing.invalidationLevel, currency))} • ${escapeHtml(analysis.timing.note)}</p>
+      </article>
+    </section>
+  `;
+}
+
 function renderDeepAnalysisPanelImmediate(snapshot) {
   if (!(analysisPanel instanceof HTMLElement)) {
     return;
   }
+
+  // ADR-076 — para o relogio UTC ao re-renderizar; reinicia se a aba ativa for "timing".
+  stopTimingUtcClock();
 
   ensureActiveAnalysisTabForOperationalMode(chartOperationalMode);
 
