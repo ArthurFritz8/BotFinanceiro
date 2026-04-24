@@ -15,6 +15,28 @@
   --user-bubble: #18334f;
   --assistant-bubble: #f2ece0;
   --shadow: 0 12px 28px rgba(18, 32, 46, 0.12);
+
+  /* ADR-077 \u2014 Camada de Anota\u00e7\u00f5es do Gr\u00e1fico Interativo (Lightweight Charts).
+     Paleta sem\u00e2ntica documental: o canvas do primitive desenha com valores
+     equivalentes (em rgba), estas vars servem para tema/parametriza\u00e7\u00e3o futura
+     e como contrato visual com o Design System Dark Premium. */
+  --anno-entry: #36bffa;
+  --anno-sl: #f94144;
+  --anno-tp: #43aa8b;
+  --anno-rr-profit: #43aa8b;
+  --anno-rr-risk: #f94144;
+  --anno-ob-bull: #33d9b2;
+  --anno-ob-bear: #ff6b80;
+  --anno-fvg: #ffd166;
+}
+
+/* ADR-077 \u2014 respeitar redu\u00e7\u00e3o de movimento em toggles do chart e zonas. */
+@media (prefers-reduced-motion: reduce) {
+  .toggle-chip,
+  .toggle-chip * {
+    transition: none !important;
+    animation: none !important;
+  }
 }
 
 * {

@@ -16,6 +16,7 @@ import { initPushNotifications } from "./shared/push-notifications.js";
 import { initPaperTradingPanel } from "./shared/paper-trading-panel.js";
 import { initBacktestingPanel } from "./shared/backtesting-panel.js";
 import { bootstrapExecutiveReport, generateExecutiveReport } from "./executive-report.js";
+import { PriceZonesPrimitive } from "./chart-zones-primitive.js";
 import "./styles.css";
 
 const chatForm = document.querySelector("#chat-form");
@@ -1873,6 +1874,7 @@ let chartBaseSeriesStyle = "";
 let chartEmaFastSeries = null;
 let chartEmaSlowSeries = null;
 let chartPriceLines = [];
+let chartZonesPrimitive = null; // ADR-077: Series Primitive para zonas SMC + Position Tool R:R
 let chartResizeObserver = null;
 let chartLatestCandles = [];
 let chartCandleByTime = new Map();
@@ -16542,6 +16544,11 @@ function ensureChartOverlaySeries() {
 }
 
 function clearChartPriceLines() {
+  // ADR-077: alias semântico clearChartAnnotations — limpa priceLines E zonas do primitive.
+  if (chartZonesPrimitive) {
+    chartZonesPrimitive.clear();
+  }
+
   if (!chartBaseSeries || chartPriceLines.length === 0) {
     return;
   }
@@ -16551,6 +16558,31 @@ function clearChartPriceLines() {
   }
 
   chartPriceLines = [];
+}
+
+// ADR-077: detach explícito do primitive (chamado em destroyInteractiveChart e quando trocamos série base).
+function detachChartZonesPrimitive() {
+  if (chartZonesPrimitive && chartBaseSeries) {
+    try {
+      chartBaseSeries.detachPrimitive(chartZonesPrimitive);
+    } catch (_err) {
+      // série pode já ter sido removida — ignore.
+    }
+  }
+  chartZonesPrimitive = null;
+}
+
+// ADR-077: garante 1 instância anexada à série base ativa.
+function ensureChartZonesPrimitive() {
+  if (!chartBaseSeries) return null;
+  if (chartZonesPrimitive) return chartZonesPrimitive;
+  chartZonesPrimitive = new PriceZonesPrimitive();
+  try {
+    chartBaseSeries.attachPrimitive(chartZonesPrimitive);
+  } catch (_err) {
+    chartZonesPrimitive = null;
+  }
+  return chartZonesPrimitive;
 }
 
 function createBaseSeries(style) {
@@ -16606,6 +16638,7 @@ function ensureBaseSeries(style) {
   }
 
   clearChartPriceLines();
+  detachChartZonesPrimitive();
 
   if (chartBaseSeries) {
     chartApi.removeSeries(chartBaseSeries);
@@ -16634,6 +16667,52 @@ function updateChartLegendFromCandle(candle, snapshot, isCursor = false) {
   );
 }
 
+// ADR-077: Camada de Anota\u00e7\u00f5es do Gr\u00e1fico Interativo \u2014 paleta sem\u00e2ntica.
+const ANNO_PALETTE = Object.freeze({
+  entry: "#36bffa",       // Azul institucional
+  fvg: "#ffd166",         // Amarelo (desequil\u00edbrio)
+  obBear: "#ff6b80",      // OB de venda
+  obBull: "#33d9b2",      // OB de compra
+  resistance: "#ff8fab",  // Resist\u00eancia
+  rrProfit: "#43aa8b",    // R:R lucro (Position Tool)
+  rrRisk: "#f94144",      // R:R risco (Position Tool)
+  stop: "#f94144",        // Stop Loss
+  support: "#16d6b3",     // Suporte
+  tp: "#43aa8b",          // Take Profit
+});
+
+// ADR-077: classifica status de toque baseado no preco corrente vs nivel.
+function classifyLevelTouch(currentPrice, level, kind) {
+  if (!Number.isFinite(currentPrice) || !Number.isFinite(level)) return "";
+  // tol: 0.05% do preco para considerar "testado"
+  const tol = Math.abs(currentPrice) * 0.0005;
+  const diff = currentPrice - level;
+  if (kind === "support" || kind === "obBull") {
+    if (currentPrice <= level) return "Mitigado";
+    if (Math.abs(diff) <= tol) return "Testado";
+    return "N\u00e3o testado";
+  }
+  if (kind === "resistance" || kind === "obBear") {
+    if (currentPrice >= level) return "Mitigado";
+    if (Math.abs(diff) <= tol) return "Testado";
+    return "N\u00e3o testado";
+  }
+  return "";
+}
+
+// ADR-077: infere lado do trade pelos tradeLevels.
+function inferTradeSide(entry, sl, tp) {
+  if (!Number.isFinite(entry) || !Number.isFinite(sl) || !Number.isFinite(tp)) return "buy";
+  if (tp > entry && entry > sl) return "buy";
+  if (tp < entry && entry < sl) return "sell";
+  return tp >= entry ? "buy" : "sell";
+}
+
+function formatRR(rr) {
+  if (!Number.isFinite(rr) || rr <= 0) return "";
+  return `1:${rr >= 10 ? rr.toFixed(0) : rr.toFixed(1)}`;
+}
+
 function applyChartLevels(snapshot, enabled) {
   clearChartPriceLines();
 
@@ -16642,32 +16721,136 @@ function applyChartLevels(snapshot, enabled) {
   }
 
   const insights = snapshot.insights;
-  const levels = [
-    { color: "#16d6b3", price: insights.supportLevel, title: "SUP" },
-    { color: "#ff8fab", price: insights.resistanceLevel, title: "RES" },
-    { color: "#ffd166", price: insights.tradeLevels?.entryZoneLow, title: "ENT LO" },
-    { color: "#ffd166", price: insights.tradeLevels?.entryZoneHigh, title: "ENT HI" },
-    { color: "#f94144", price: insights.tradeLevels?.stopLoss, title: "STOP" },
-    { color: "#90be6d", price: insights.tradeLevels?.takeProfit1, title: "TP1" },
-    { color: "#43aa8b", price: insights.tradeLevels?.takeProfit2, title: "TP2" },
+  const tradeLevels = insights.tradeLevels ?? {};
+  const ms = insights.marketStructure ?? {};
+  const currentPrice = Number(insights.currentPrice ?? snapshot.currentPrice ?? 0);
+  const intervalLabel = (typeof activeTerminalInterval === "string" ? activeTerminalInterval : "").toUpperCase();
+
+  const entryRef = Number.isFinite(Number(tradeLevels.entryZoneLow)) && Number.isFinite(Number(tradeLevels.entryZoneHigh))
+    ? (Number(tradeLevels.entryZoneLow) + Number(tradeLevels.entryZoneHigh)) / 2
+    : Number(insights.lastClose ?? currentPrice);
+  const sl = Number(tradeLevels.stopLoss);
+  const tp1 = Number(tradeLevels.takeProfit1);
+  const tp2 = Number(tradeLevels.takeProfit2);
+  const side = inferTradeSide(entryRef, sl, Number.isFinite(tp1) ? tp1 : tp2);
+
+  // R:R numerico para axis labels (ADR-077 item C)
+  let rr1 = NaN;
+  let rr2 = NaN;
+  try {
+    if (Number.isFinite(entryRef) && Number.isFinite(sl)) {
+      if (Number.isFinite(tp1)) rr1 = computeRiskReward(entryRef, sl, tp1, side);
+      if (Number.isFinite(tp2)) rr2 = computeRiskReward(entryRef, sl, tp2, side);
+    }
+  } catch (_e) { /* graceful */ }
+
+  // PriceLines com paleta semantica + status + R:R no title
+  const supTouch = classifyLevelTouch(currentPrice, Number(insights.supportLevel), "support");
+  const resTouch = classifyLevelTouch(currentPrice, Number(insights.resistanceLevel), "resistance");
+  const lines = [
+    { color: ANNO_PALETTE.support, price: Number(insights.supportLevel), title: `SUP${supTouch ? " \u00b7 " + supTouch : ""}`, width: 1 },
+    { color: ANNO_PALETTE.resistance, price: Number(insights.resistanceLevel), title: `RES${resTouch ? " \u00b7 " + resTouch : ""}`, width: 1 },
+    { color: ANNO_PALETTE.entry, price: Number(tradeLevels.entryZoneLow), title: "ENT LO", width: 2 },
+    { color: ANNO_PALETTE.entry, price: Number(tradeLevels.entryZoneHigh), title: "ENT HI", width: 2 },
+    { color: ANNO_PALETTE.stop, price: sl, title: "STOP", width: 2 },
+    { color: ANNO_PALETTE.tp, price: tp1, title: `TP1${formatRR(rr1) ? " (" + formatRR(rr1) + ")" : ""}`, width: 2 },
+    { color: ANNO_PALETTE.tp, price: tp2, title: `TP2${formatRR(rr2) ? " (" + formatRR(rr2) + ")" : ""}`, width: 2 },
   ];
 
-  for (const level of levels) {
-    if (typeof level.price !== "number" || Number.isNaN(level.price)) {
-      continue;
-    }
-
+  for (const level of lines) {
+    if (!Number.isFinite(level.price) || level.price <= 0) continue;
     const priceLine = chartBaseSeries.createPriceLine({
       axisLabelVisible: true,
       color: level.color,
       lineVisible: true,
-      lineWidth: 1,
+      lineWidth: level.width,
       price: level.price,
       title: level.title,
     });
-
     chartPriceLines.push(priceLine);
   }
+
+  // Zonas sombreadas via Series Primitive (ADR-077 itens 2, 3, A, F)
+  const primitive = ensureChartZonesPrimitive();
+  if (!primitive) return;
+
+  const zones = [];
+
+  // Zona Entry (azul)
+  const entryLow = Number(tradeLevels.entryZoneLow);
+  const entryHigh = Number(tradeLevels.entryZoneHigh);
+  if (Number.isFinite(entryLow) && Number.isFinite(entryHigh) && entryHigh > entryLow) {
+    zones.push({
+      bottom: entryLow,
+      top: entryHigh,
+      fill: "rgba(54, 191, 250, 0.10)",
+      stroke: "rgba(54, 191, 250, 0.55)",
+      label: `ENTRY${intervalLabel ? " " + intervalLabel : ""}`,
+      labelColor: ANNO_PALETTE.entry,
+    });
+  }
+
+  // Position Tool R:R \u2014 lucro (entry\u2192tp2)
+  if (Number.isFinite(entryRef) && Number.isFinite(tp2)) {
+    zones.push({
+      bottom: Math.min(entryRef, tp2),
+      top: Math.max(entryRef, tp2),
+      fill: "rgba(67, 170, 139, 0.12)",
+      stroke: "rgba(67, 170, 139, 0.45)",
+      label: `LUCRO ${formatRR(rr2) || ""}`.trim(),
+      labelColor: ANNO_PALETTE.rrProfit,
+    });
+  }
+
+  // Position Tool R:R \u2014 risco (entry\u2192sl)
+  if (Number.isFinite(entryRef) && Number.isFinite(sl)) {
+    zones.push({
+      bottom: Math.min(entryRef, sl),
+      top: Math.max(entryRef, sl),
+      fill: "rgba(249, 65, 68, 0.12)",
+      stroke: "rgba(249, 65, 68, 0.45)",
+      label: "RISCO",
+      labelColor: ANNO_PALETTE.rrRisk,
+    });
+  }
+
+  // FVG ativo (amarelo)
+  const fvgActive = Boolean(ms.fairValueGapActive);
+  const fvgLower = Number(ms.fairValueGapLower);
+  const fvgUpper = Number(ms.fairValueGapUpper);
+  if (fvgActive && Number.isFinite(fvgLower) && Number.isFinite(fvgUpper) && fvgUpper > fvgLower) {
+    zones.push({
+      bottom: fvgLower,
+      top: fvgUpper,
+      fill: "rgba(255, 209, 102, 0.10)",
+      stroke: "rgba(255, 209, 102, 0.55)",
+      label: `FVG${intervalLabel ? " " + intervalLabel : ""}`,
+      labelColor: ANNO_PALETTE.fvg,
+      dashed: true,
+    });
+  }
+
+  // Order Blocks candidatos \u2014 swings como faixas estreitas
+  const obSpec = [
+    { kind: "obBull", level: Number(ms.swingLow), prefix: "OB\u2191", color: ANNO_PALETTE.obBull, fill: "rgba(51, 217, 178, 0.10)", stroke: "rgba(51, 217, 178, 0.50)" },
+    { kind: "obBear", level: Number(ms.swingHigh), prefix: "OB\u2193", color: ANNO_PALETTE.obBear, fill: "rgba(255, 107, 128, 0.10)", stroke: "rgba(255, 107, 128, 0.50)" },
+  ];
+  for (const ob of obSpec) {
+    if (!Number.isFinite(ob.level) || ob.level <= 0) continue;
+    const status = classifyLevelTouch(currentPrice, ob.level, ob.kind);
+    if (status === "Mitigado") continue; // OB mitigado n\u00e3o pinta zona (apenas ru\u00eddo visual)
+    const halfBand = Math.abs(ob.level) * 0.0005; // \u00b10.05%
+    zones.push({
+      bottom: ob.level - halfBand,
+      top: ob.level + halfBand,
+      fill: ob.fill,
+      stroke: ob.stroke,
+      label: `${ob.prefix}${intervalLabel ? " " + intervalLabel : ""}${status ? " \u00b7 " + status : ""}`,
+      labelColor: ob.color,
+    });
+  }
+
+  primitive.setZones(zones);
 }
 
 function ensureInteractiveChart() {
@@ -16833,6 +17016,7 @@ function destroyInteractiveChart() {
   chartEmaFastSeries = null;
   chartEmaSlowSeries = null;
   chartPriceLines = [];
+  chartZonesPrimitive = null; // ADR-077
   chartLatestCandles = [];
   chartCandleByTime = new Map();
 
