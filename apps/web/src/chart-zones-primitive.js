@@ -20,6 +20,7 @@ const DEFAULT_ZONE = Object.freeze({
   bottom: 0,
   dashed: false,
   fill: "rgba(255,255,255,0.08)",
+  labelAlign: "top-left",
   label: "",
   labelColor: "rgba(255,255,255,0.85)",
   stroke: "rgba(255,255,255,0.32)",
@@ -93,7 +94,7 @@ class ZonesPaneRenderer {
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Rótulo no canto superior esquerdo
+        // Rótulo da zona (top-left por padrão, central para Position Tool R:R)
         if (zone.label) {
           const fontSize = 10 * ratioY;
           const padX = 6 * ratioX;
@@ -103,8 +104,16 @@ class ZonesPaneRenderer {
           const metrics = ctx.measureText(text);
           const tagW = metrics.width + padX * 2;
           const tagH = fontSize + padY * 2;
-          const tagX = padX;
-          const tagY = yTopPx + padY;
+          const defaultTagX = padX;
+          const defaultTagY = yTopPx + padY;
+          const centerTagX = (widthPx - tagW) / 2;
+          const centerTagY = yTopPx + (heightZone - tagH) / 2;
+          const tagX = zone.labelAlign === "center"
+            ? Math.max(0, Math.min(centerTagX, widthPx - tagW))
+            : defaultTagX;
+          const tagY = zone.labelAlign === "center"
+            ? Math.max(0, Math.min(centerTagY, Math.max(0, heightPx - tagH)))
+            : defaultTagY;
 
           // Background tag
           ctx.fillStyle = "rgba(6, 11, 20, 0.78)";

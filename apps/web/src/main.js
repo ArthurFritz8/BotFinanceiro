@@ -13219,7 +13219,7 @@ function clearTriggerNarrative() {
 /**
  * Pesos do Ensemble Engine (motor quantitativo).
  *
- * VETO ao anti-pattern de pesos fixos hardcoded (35/30/20/10/5): isso mente ao
+ * VETO ao anti-pattern de pesos fixos hardcoded (35/30/20/15): isso mente ao
  * usuario. Em vez disso, derivamos o peso de cada motor do snapshot real e
  * normalizamos a soma para 100%. O peso BASE de cada motor depende ainda do
  * operationalMode:
@@ -13251,6 +13251,17 @@ function renderEnsembleEngine(analysis, snapshot, options = {}) {
   const microTiming = options?.microTiming ?? null;
   const operationalMode = options?.operationalMode ?? chartOperationalMode;
   const isBinary = operationalMode === CHART_OPERATIONAL_MODE_BINARY_OPTIONS;
+  const directionalBias = analysis.signal?.tone === "sell"
+    ? "bear"
+    : analysis.signal?.tone === "buy"
+      ? "bull"
+      : "neutral";
+  const targetProfileWeights = Object.freeze({
+    smc: 35,
+    hft: 30,
+    harmonic: 20,
+    macro: 15,
+  });
 
   // ---- Confianca de cada motor (0-100) ----
   const ghostStats = isBinary ? getBinaryOptionsGhostTrackerStats() : getSpotMarginGhostTrackerStats();
@@ -13300,30 +13311,26 @@ function renderEnsembleEngine(analysis, snapshot, options = {}) {
 
   const engines = [
     {
-      id: "ghost",
-      label: "Ghost Tracker (Auditoria Live)",
-      hint: ghostResolved >= 5
-        ? `${ghostResolved} trades auditados na sessao`
-        : `Aquecendo: ${ghostResolved}/5 trades para confiar`,
-      weight: weights.ghost,
-      confidence: Math.round(ghostConfidence),
-      tooltip: `Win rate ${ghostWinRate.toFixed(1)}% | trades resolvidos ${ghostResolved} | base ${baseWeights.ghost}% (${isBinary ? "binary" : "spot"})`,
-    },
-    {
       id: "smc",
       label: "Smart Money Concepts",
       hint: smcSignals === 3 ? "3/3 sinais detectados" : `${smcSignals}/3 sinais ativos`,
       weight: weights.smc,
+      targetWeight: targetProfileWeights.smc,
+      role: "core",
+      bias: directionalBias,
       confidence: smcConfidence,
       tooltip: `structure=${smcStructure || "n/d"} | liquidity=${smcLiquidity || "n/d"} | sweep=${smcSweep || "n/d"} | base ${baseWeights.smc}%`,
     },
     {
       id: "hft",
-      label: isBinary ? "Exaustao Cinetica (HFT)" : "Confianca probabilistica",
+      label: "Exaustao Cinetica (HFT)",
       hint: isBinary
         ? (hftConfidence >= 70 ? "Momentum exausto" : hftConfidence >= 45 ? "Tick acelerando" : "Mercado frio")
         : (hftConfidence >= 70 ? "Edge alto" : hftConfidence >= 50 ? "Edge moderado" : "Edge fraco"),
       weight: weights.hft,
+      targetWeight: targetProfileWeights.hft,
+      role: "core",
+      bias: directionalBias,
       confidence: Math.round(hftConfidence),
       tooltip: isBinary
         ? `momentumStrength=${(Number(microTiming?.momentumStrength ?? 0)).toFixed(2)} | base ${baseWeights.hft}%`
@@ -13334,16 +13341,35 @@ function renderEnsembleEngine(analysis, snapshot, options = {}) {
       label: "Geometria Harmonica",
       hint: `Padrao ${escapeHtml(String(analysis.harmonic?.pattern ?? "n/d"))}`,
       weight: weights.harmonic,
+      targetWeight: targetProfileWeights.harmonic,
+      role: "core",
+      bias: directionalBias,
       confidence: Math.round(harmonicConfidence),
       tooltip: `pattern=${analysis.harmonic?.pattern ?? "n/d"} | ratio=${(Number(analysis.harmonic?.ratio ?? 0)).toFixed(3)} | base ${baseWeights.harmonic}%`,
     },
     {
       id: "macro",
-      label: "Sentimento Macro (F&G)",
+      label: "Sentimento Macro/Micro",
       hint: `${fgScore.toFixed(0)} (${escapeHtml(String(analysis.fearGreed?.label ?? ""))})`,
       weight: weights.macro,
+      targetWeight: targetProfileWeights.macro,
+      role: "core",
+      bias: directionalBias,
       confidence: Math.round(macroConfidence),
       tooltip: `Fear&Greed=${fgScore.toFixed(1)} | distancia do equilibrio=${fgDistance.toFixed(1)} | base ${baseWeights.macro}%`,
+    },
+    {
+      id: "ghost",
+      label: "Ghost Tracker (Auditoria Live)",
+      hint: ghostResolved >= 5
+        ? `${ghostResolved} trades auditados na sessao`
+        : `Aquecendo: ${ghostResolved}/5 trades para confiar`,
+      weight: weights.ghost,
+      targetWeight: null,
+      role: "audit",
+      bias: "neutral",
+      confidence: Math.round(ghostConfidence),
+      tooltip: `Win rate ${ghostWinRate.toFixed(1)}% | trades resolvidos ${ghostResolved} | base ${baseWeights.ghost}% (${isBinary ? "binary" : "spot"})`,
     },
   ];
 
@@ -13362,6 +13388,8 @@ function renderEnsembleEngine(analysis, snapshot, options = {}) {
         role="listitem"
         id="ensemble-engine-${engine.id}"
         data-engine="${engine.id}"
+        data-role="${engine.role}"
+        data-bias="${engine.bias}"
         data-weight="${engine.weight}"
         data-confidence="${engine.confidence}"
         title="${escapeHtml(engine.tooltip)}"
@@ -13375,7 +13403,10 @@ function renderEnsembleEngine(analysis, snapshot, options = {}) {
         </div>
         <div class="analysis-ensemble-row-foot">
           <span class="analysis-ensemble-row-hint">${escapeHtml(engine.hint)}</span>
-          <span class="analysis-ensemble-row-conf">conf ${engine.confidence}%</span>
+          <span class="analysis-ensemble-row-meta">
+            <span class="analysis-ensemble-row-target">${engine.targetWeight == null ? "auditoria" : `perfil ${engine.targetWeight}%`}</span>
+            <span class="analysis-ensemble-row-conf">conf ${engine.confidence}%</span>
+          </span>
         </div>
       </article>
     `)
@@ -17006,9 +17037,11 @@ function applyChartLevels(snapshot, enabled) {
   const ms = insights.marketStructure ?? {};
   const currentPrice = Number(insights.currentPrice ?? snapshot.currentPrice ?? 0);
   const intervalLabel = (typeof activeTerminalInterval === "string" ? activeTerminalInterval : "").toUpperCase();
+  const entryLow = Number(tradeLevels.entryZoneLow);
+  const entryHigh = Number(tradeLevels.entryZoneHigh);
 
-  const entryRef = Number.isFinite(Number(tradeLevels.entryZoneLow)) && Number.isFinite(Number(tradeLevels.entryZoneHigh))
-    ? (Number(tradeLevels.entryZoneLow) + Number(tradeLevels.entryZoneHigh)) / 2
+  const entryRef = Number.isFinite(entryLow) && Number.isFinite(entryHigh)
+    ? (entryLow + entryHigh) / 2
     : Number(insights.lastClose ?? currentPrice);
   const sl = Number(tradeLevels.stopLoss);
   const tp1 = Number(tradeLevels.takeProfit1);
@@ -17031,8 +17064,9 @@ function applyChartLevels(snapshot, enabled) {
   const lines = [
     { color: ANNO_PALETTE.support, price: Number(insights.supportLevel), title: `SUP${supTouch ? " \u00b7 " + supTouch : ""}`, width: 1 },
     { color: ANNO_PALETTE.resistance, price: Number(insights.resistanceLevel), title: `RES${resTouch ? " \u00b7 " + resTouch : ""}`, width: 1 },
-    { color: ANNO_PALETTE.entry, price: Number(tradeLevels.entryZoneLow), title: "ENT LO", width: 2 },
-    { color: ANNO_PALETTE.entry, price: Number(tradeLevels.entryZoneHigh), title: "ENT HI", width: 2 },
+    { color: ANNO_PALETTE.entry, price: entryRef, title: "ENTRY", width: 2 },
+    { color: ANNO_PALETTE.entry, price: entryLow, title: "ENT LO", width: 1 },
+    { color: ANNO_PALETTE.entry, price: entryHigh, title: "ENT HI", width: 1 },
     { color: ANNO_PALETTE.stop, price: sl, title: "STOP", width: 2 },
     { color: ANNO_PALETTE.tp, price: tp1, title: `TP1${formatRR(rr1) ? " (" + formatRR(rr1) + ")" : ""}`, width: 2 },
     { color: ANNO_PALETTE.tp, price: tp2, title: `TP2${formatRR(rr2) ? " (" + formatRR(rr2) + ")" : ""}`, width: 2 },
@@ -17058,8 +17092,6 @@ function applyChartLevels(snapshot, enabled) {
   const zones = [];
 
   // Zona Entry (azul)
-  const entryLow = Number(tradeLevels.entryZoneLow);
-  const entryHigh = Number(tradeLevels.entryZoneHigh);
   if (Number.isFinite(entryLow) && Number.isFinite(entryHigh) && entryHigh > entryLow) {
     zones.push({
       bottom: entryLow,
@@ -17076,10 +17108,11 @@ function applyChartLevels(snapshot, enabled) {
     zones.push({
       bottom: Math.min(entryRef, tp2),
       top: Math.max(entryRef, tp2),
-      fill: "rgba(67, 170, 139, 0.12)",
+      fill: "rgba(67, 170, 139, 0.20)",
       stroke: "rgba(67, 170, 139, 0.45)",
       label: `LUCRO ${formatRR(rr2) || ""}`.trim(),
       labelColor: ANNO_PALETTE.rrProfit,
+      labelAlign: "center",
     });
   }
 
@@ -17088,10 +17121,11 @@ function applyChartLevels(snapshot, enabled) {
     zones.push({
       bottom: Math.min(entryRef, sl),
       top: Math.max(entryRef, sl),
-      fill: "rgba(249, 65, 68, 0.12)",
+      fill: "rgba(249, 65, 68, 0.20)",
       stroke: "rgba(249, 65, 68, 0.45)",
       label: "RISCO",
       labelColor: ANNO_PALETTE.rrRisk,
+      labelAlign: "center",
     });
   }
 

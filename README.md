@@ -123,6 +123,7 @@ Politica de retencao:
 37. ADR 065: `docs/ADR/ADR-065-regime-alerts-periodic-scanner.md`
 38. ADR 066: `docs/ADR/ADR-066-regime-alerts-mute.md`
 39. ADR 067: `docs/ADR/ADR-067-regime-alerts-scanner-status.md`
+40. ADR 079: `docs/ADR/ADR-079-polimento-resumo-e-anotacoes-chart-lab.md`
 
 ## Relatorio completo desta entrega
 
