@@ -11240,6 +11240,490 @@ function classifyRiskLabRuinTone(ruinPct, riskPct) {
   return { tone: "ok", label: "Risco institucional saudavel" };
 }
 
+// =============================================================================
+// ADR-075 — Calculadora de Posicao Institucional (Forex/Cripto Margin)
+// Coexiste com Risk Lab Monte Carlo. Inputs persistidos. Pip-aware por classe.
+// =============================================================================
+
+const POSITION_CALC_STORAGE_KEY = "botfinanceiro:position-calc:v1";
+const POSITION_CALC_PROFILES = [
+  { id: "conservative", label: "Conservador", riskMin: 0.5, riskMax: 1.0, default: 0.75 },
+  { id: "moderate", label: "Moderado", riskMin: 1.0, riskMax: 2.0, default: 1.5 },
+  { id: "aggressive", label: "Agressivo", riskMin: 2.0, riskMax: 3.0, default: 2.5 },
+];
+
+function classifyPositionAssetSpec(assetId, currency) {
+  const id = String(assetId ?? "").toLowerCase();
+  // Forex majors comuns expostos no app
+  const forexPairs = ["eurusd", "gbpusd", "usdjpy", "audusd", "usdcad", "usdchf", "nzdusd"];
+  if (forexPairs.some((pair) => id.includes(pair))) {
+    const isJpy = id.includes("jpy");
+    return {
+      kind: "forex",
+      label: id.toUpperCase(),
+      pipSize: isJpy ? 0.01 : 0.0001,
+      contractSize: 100000,
+      lotMin: 0.01,
+      lotStep: 0.01,
+      defaultSpreadPips: 0.8,
+      unitLabel: "lote",
+      pipLabel: "pips",
+    };
+  }
+  // Cripto: nao tem "pip"; usamos tick = preco minimo. Notional puro.
+  return {
+    kind: "crypto",
+    label: id.toUpperCase() || "ATIVO",
+    pipSize: null,
+    contractSize: 1,
+    lotMin: 0.0001,
+    lotStep: 0.0001,
+    defaultSpreadPips: 0,
+    unitLabel: "unidades",
+    pipLabel: "ticks",
+    currency,
+  };
+}
+
+function loadPositionCalcState(defaults) {
+  try {
+    const raw = window.localStorage?.getItem(POSITION_CALC_STORAGE_KEY);
+    if (!raw) return { ...defaults };
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return { ...defaults };
+    return {
+      capital: Number.isFinite(parsed.capital) ? parsed.capital : defaults.capital,
+      profile: typeof parsed.profile === "string" ? parsed.profile : defaults.profile,
+      spreadPips: Number.isFinite(parsed.spreadPips) ? parsed.spreadPips : defaults.spreadPips,
+    };
+  } catch (_error) {
+    return { ...defaults };
+  }
+}
+
+function persistPositionCalcState(state) {
+  try {
+    window.localStorage?.setItem(POSITION_CALC_STORAGE_KEY, JSON.stringify(state));
+  } catch (_error) { /* noop */ }
+}
+
+function computePositionCalc({ capital, riskPct, signal, spec, spreadPips }) {
+  const safeCapital = Math.max(0, toFiniteNumber(capital, 0));
+  const safeRiskPct = clampNumber(toFiniteNumber(riskPct, 1), 0.05, 25);
+  const entry = toFiniteNumber(signal?.entryLow, Number.NaN);
+  const stop = toFiniteNumber(signal?.stopLoss, Number.NaN);
+  const tp1 = toFiniteNumber(signal?.takeProfit1, Number.NaN);
+  const tp2 = toFiniteNumber(signal?.takeProfit2, Number.NaN);
+  const tp3 = toFiniteNumber(signal?.takeProfit3 ?? signal?.takeProfit2, Number.NaN);
+  const ready = safeCapital > 0 && Number.isFinite(entry) && Number.isFinite(stop) && entry !== stop;
+  if (!ready) {
+    return { ready: false, capital: safeCapital, riskPct: safeRiskPct };
+  }
+  const riskBudget = safeCapital * (safeRiskPct / 100);
+  const stopDistanceAbs = Math.abs(entry - stop);
+  const isLong = entry > stop;
+
+  // Pip-aware: forex usa pip; cripto usa preco bruto (1 unidade)
+  const pipSize = spec.pipSize;
+  const stopDistancePips = pipSize ? stopDistanceAbs / pipSize : null;
+  // Pip value por lote padrao (forex): contractSize * pipSize (em moeda base = USD para pares X/USD)
+  // Para cripto: notional = lote * preco; usamos lote em unidades.
+  let suggestedLot;
+  let pipValuePerLot;
+  if (spec.kind === "forex") {
+    pipValuePerLot = spec.contractSize * pipSize; // USD por pip por lote padrao
+    const riskPerLot = stopDistancePips * pipValuePerLot;
+    suggestedLot = riskPerLot > 0 ? riskBudget / riskPerLot : 0;
+  } else {
+    pipValuePerLot = entry; // 1 unidade = entry USD
+    suggestedLot = stopDistanceAbs > 0 ? riskBudget / stopDistanceAbs : 0;
+  }
+  // Quantizar ao lotStep e respeitar lotMin
+  const lotStep = spec.lotStep;
+  const lotMin = spec.lotMin;
+  let recommendedLot = Math.floor(suggestedLot / lotStep) * lotStep;
+  if (recommendedLot < lotMin) recommendedLot = lotMin;
+  recommendedLot = roundNumber(recommendedLot, 4);
+
+  const actualRisk = spec.kind === "forex"
+    ? recommendedLot * stopDistancePips * pipValuePerLot
+    : recommendedLot * stopDistanceAbs;
+  const actualRiskPct = safeCapital > 0 ? (actualRisk / safeCapital) * 100 : 0;
+  const exceedsRisk = actualRiskPct > safeRiskPct * 1.05; // tolerancia 5%
+
+  // Spread cost
+  const safeSpreadPips = clampNumber(toFiniteNumber(spreadPips, spec.defaultSpreadPips), 0, 50);
+  const spreadCost = spec.kind === "forex"
+    ? recommendedLot * safeSpreadPips * pipValuePerLot
+    : recommendedLot * (safeSpreadPips * (pipSize ?? entry * 0.0001));
+
+  // TPs
+  const tps = [tp1, tp2, tp3].map((tpPrice, index) => {
+    if (!Number.isFinite(tpPrice)) return null;
+    const distAbs = Math.abs(tpPrice - entry);
+    const distPips = pipSize ? distAbs / pipSize : null;
+    const profit = spec.kind === "forex"
+      ? recommendedLot * (distPips ?? 0) * pipValuePerLot
+      : recommendedLot * distAbs;
+    const gainPct = safeCapital > 0 ? (profit / safeCapital) * 100 : 0;
+    const rr = stopDistanceAbs > 0 ? distAbs / stopDistanceAbs : 0;
+    return {
+      label: `TP${index + 1}`,
+      price: tpPrice,
+      profit,
+      gainPct,
+      distPips,
+      distAbs,
+      riskReward: rr,
+      direction: isLong ? "long" : "short",
+    };
+  });
+
+  // Comparativo dos 3 perfis (mesma struct, lote calculado para cada)
+  const scenarios = POSITION_CALC_PROFILES.map((profile) => {
+    const profileRisk = safeCapital * (profile.default / 100);
+    let lot = spec.kind === "forex"
+      ? profileRisk / Math.max(stopDistancePips * pipValuePerLot, 1e-9)
+      : profileRisk / Math.max(stopDistanceAbs, 1e-9);
+    lot = Math.floor(lot / lotStep) * lotStep;
+    if (lot < lotMin) lot = lotMin;
+    lot = roundNumber(lot, 4);
+    const realRisk = spec.kind === "forex"
+      ? lot * stopDistancePips * pipValuePerLot
+      : lot * stopDistanceAbs;
+    const realRiskPct = safeCapital > 0 ? (realRisk / safeCapital) * 100 : 0;
+    const tp1Profit = Number.isFinite(tp1)
+      ? spec.kind === "forex"
+        ? lot * (Math.abs(tp1 - entry) / pipSize) * pipValuePerLot
+        : lot * Math.abs(tp1 - entry)
+      : 0;
+    return {
+      id: profile.id,
+      label: profile.label,
+      lot,
+      risk: realRisk,
+      riskPct: realRiskPct,
+      tp1Profit,
+    };
+  });
+
+  return {
+    ready: true,
+    capital: safeCapital,
+    riskPct: safeRiskPct,
+    riskBudget,
+    entry,
+    stop,
+    isLong,
+    stopDistanceAbs,
+    stopDistancePips,
+    recommendedLot,
+    actualRisk,
+    actualRiskPct,
+    exceedsRisk,
+    spreadPips: safeSpreadPips,
+    spreadCost,
+    pipValuePerLot,
+    tps,
+    scenarios,
+    spec,
+  };
+}
+
+function formatPositionLot(value, spec) {
+  if (!Number.isFinite(value)) return "—";
+  const decimals = spec.kind === "forex" ? 2 : 4;
+  return `${value.toFixed(decimals)} ${spec.unitLabel}`;
+}
+
+function renderPositionCalculator({ analysis, snapshot, currency, assetId }) {
+  const spec = classifyPositionAssetSpec(assetId, currency);
+  const defaults = { capital: 0, profile: "moderate", spreadPips: spec.defaultSpreadPips };
+  const persisted = loadPositionCalcState(defaults);
+  const profileMeta = POSITION_CALC_PROFILES.find((p) => p.id === persisted.profile) ?? POSITION_CALC_PROFILES[1];
+
+  const signal = analysis?.signal ?? {};
+  const positionLabel = signal?.action ?? "AGUARDANDO";
+
+  return `
+    <section class="pos-calc" data-position-calculator data-asset-kind="${spec.kind}" aria-label="Calculadora de Posicao Institucional">
+      <header class="pos-calc__header">
+        <div>
+          <h4>Calculadora de Gestao de Risco</h4>
+          <small>Calcule o tamanho ideal da sua posicao para ${escapeHtml(spec.label)}</small>
+        </div>
+        <span class="pos-calc__asset-tag">${escapeHtml(spec.label)}</span>
+      </header>
+
+      <article class="pos-calc__signal-card">
+        <div class="pos-calc__signal-head">
+          <strong>Posicao: <span data-pos-action>${escapeHtml(String(positionLabel).toUpperCase())}</span></strong>
+          <small>${signal?.guidance ? escapeHtml(signal.guidance) : "Aguardando melhor momento"}</small>
+        </div>
+        <div class="pos-calc__levels">
+          <span class="pos-calc__level-label">Lote Minimo: <strong>${spec.lotMin.toFixed(spec.kind === "forex" ? 2 : 4)}</strong></span>
+        </div>
+        <div class="pos-calc__levels-grid">
+          <div class="pos-calc__level"><small>Entrada</small><strong data-tone="entry">${escapeHtml(formatPrice(signal?.entryLow, currency))}</strong></div>
+          <div class="pos-calc__level"><small>Stop Loss</small><strong data-tone="bear">${escapeHtml(formatPrice(signal?.stopLoss, currency))}</strong></div>
+          <div class="pos-calc__level"><small>TP1</small><strong data-tone="bull">${escapeHtml(formatPrice(signal?.takeProfit1, currency))}</strong></div>
+          <div class="pos-calc__level"><small>TP2</small><strong data-tone="bull">${escapeHtml(formatPrice(signal?.takeProfit2, currency))}</strong></div>
+          <div class="pos-calc__level"><small>TP3</small><strong data-tone="bull">${escapeHtml(formatPrice(signal?.takeProfit3 ?? signal?.takeProfit2, currency))}</strong></div>
+        </div>
+      </article>
+
+      <div class="pos-calc__warning" data-pos-margin-warning role="status" aria-live="polite" hidden></div>
+
+      <label class="pos-calc__capital-field" for="pos-calc-capital">
+        <span>Seu Capital (Banca) em Dolares (USD)</span>
+        <span class="pos-calc__capital-input"><span aria-hidden="true">$</span><input id="pos-calc-capital" data-pos-input="capital" type="number" min="0" step="10" placeholder="Ex: 10000" value="${persisted.capital > 0 ? persisted.capital : ""}" /></span>
+        <small>Digite o valor total do seu capital em Dolares (USD)</small>
+      </label>
+
+      <fieldset class="pos-calc__profiles" aria-label="Cenarios de Risco">
+        <legend>Cenarios de Risco</legend>
+        ${POSITION_CALC_PROFILES.map((profile) => `
+          <label class="pos-calc__profile" data-profile-id="${profile.id}" data-active="${profile.id === persisted.profile}">
+            <input type="radio" name="pos-calc-profile" value="${profile.id}" ${profile.id === persisted.profile ? "checked" : ""} />
+            <span class="pos-calc__profile-icon" aria-hidden="true">${profile.id === "conservative" ? "🛡" : profile.id === "moderate" ? "📊" : "⚡"}</span>
+            <strong>${escapeHtml(profile.label)}</strong>
+            <small data-pos-profile-lot="${profile.id}">Insira capital</small>
+            <small class="pos-calc__profile-risk">Risco: ${profile.riskMin}% - ${profile.riskMax}%</small>
+          </label>
+        `).join("")}
+        <p class="pos-calc__profile-hint">Insira seu capital para ver o risco % calculado</p>
+      </fieldset>
+
+      <article class="pos-calc__scenarios-card">
+        <header><h5>💲 Comparativo de Cenarios (USD)</h5></header>
+        <div class="pos-calc__scenarios-table" role="table" aria-label="Comparativo de cenarios">
+          <div class="pos-calc__row pos-calc__row--head" role="row">
+            <span role="columnheader">Cenario</span>
+            <span role="columnheader">Lotes</span>
+            <span role="columnheader">Risco ($)</span>
+            <span role="columnheader">Risco (%)</span>
+            <span role="columnheader">TP1 Lucro</span>
+          </div>
+          ${POSITION_CALC_PROFILES.map((profile) => `
+            <div class="pos-calc__row" role="row" data-pos-scenario-row="${profile.id}" data-active="${profile.id === persisted.profile}">
+              <span role="cell">${escapeHtml(profile.label)}</span>
+              <span role="cell" data-pos-scenario-lot="${profile.id}">—</span>
+              <span role="cell" class="pos-calc__cell--bear" data-pos-scenario-risk="${profile.id}">—</span>
+              <span role="cell" class="pos-calc__cell--bear" data-pos-scenario-risk-pct="${profile.id}">—</span>
+              <span role="cell" class="pos-calc__cell--bull" data-pos-scenario-tp1="${profile.id}">—</span>
+            </div>
+          `).join("")}
+        </div>
+        <small class="pos-calc__scenarios-hint">Clique em uma linha para selecionar o cenario • Lote minimo: ${spec.lotMin}</small>
+      </article>
+
+      <article class="pos-calc__sl-card">
+        <header><h5>📉 Risco Maximo (Stop Loss)</h5></header>
+        <div class="pos-calc__sl-grid">
+          <div class="pos-calc__sl-cell">
+            <small>Prejuizo Maximo</small>
+            <strong data-pos-output="maxLoss">—</strong>
+            <small data-pos-output="maxLossPct">—</small>
+          </div>
+          <div class="pos-calc__sl-cell">
+            <small>Stop em</small>
+            <strong data-pos-output="stopPrice">${escapeHtml(formatPrice(signal?.stopLoss, currency))}</strong>
+            <small data-pos-output="stopPips">—</small>
+          </div>
+        </div>
+        <div class="pos-calc__spread-row" data-pos-spread-row>
+          <small>⚠ Custo do Spread <input type="number" min="0" step="0.1" data-pos-input="spreadPips" value="${persisted.spreadPips}" aria-label="Spread em ${spec.pipLabel}" /> ${escapeHtml(spec.pipLabel)}</small>
+          <small>Custo estimado: <strong data-pos-output="spreadCost">—</strong></small>
+        </div>
+      </article>
+
+      <article class="pos-calc__tp-card">
+        <header><h5>📈 Potencial de Lucro (Take Profits)</h5></header>
+        <div class="pos-calc__tp-grid">
+          ${[1, 2, 3].map((idx) => `
+            <div class="pos-calc__tp-row" data-pos-tp-row="${idx}">
+              <header>
+                <span class="pos-calc__tp-tag">TP ${idx}</span>
+                <strong data-pos-output="tp${idx}Price">—</strong>
+                <span class="pos-calc__tp-rr" data-pos-output="tp${idx}Rr">R:R —</span>
+              </header>
+              <div class="pos-calc__tp-cells">
+                <div><small>Lucro Potencial</small><strong class="pos-calc__cell--bull" data-pos-output="tp${idx}Profit">—</strong></div>
+                <div><small>Ganho %</small><strong class="pos-calc__cell--bull" data-pos-output="tp${idx}Gain">—</strong></div>
+                <div><small>${escapeHtml(spec.pipLabel.charAt(0).toUpperCase() + spec.pipLabel.slice(1))}</small><strong class="pos-calc__cell--bull" data-pos-output="tp${idx}Pips">—</strong></div>
+              </div>
+            </div>
+          `).join("")}
+        </div>
+      </article>
+
+      <article class="pos-calc__summary-card">
+        <header>
+          <h5>✓ Resumo da Gestao</h5>
+          <button type="button" class="pos-calc__copy-btn" data-pos-copy aria-label="Copiar plano para area de transferencia">📋 Copiar Plano</button>
+        </header>
+        <p data-pos-output="summary">Insira seu capital para gerar o resumo executivo da operacao.</p>
+      </article>
+
+      <article class="pos-calc__important-card">
+        <header><h5>⚠ Importante</h5></header>
+        <p>Os calculos consideram as especificacoes padrao do ativo ${escapeHtml(spec.label)}${spec.kind === "forex" ? ` (contrato: ${spec.contractSize.toLocaleString("pt-BR")}, pip: ${spec.pipSize}, spread medio: ${spec.defaultSpreadPips} pips)` : ` (notional em unidades base)`}. Verifique as condicoes do seu broker pois os spreads aumentam em periodos de alta volatilidade.</p>
+      </article>
+    </section>
+  `;
+}
+
+function attachPositionCalculatorHandlers(rootElement, { analysis, snapshot, currency, assetId }) {
+  if (!(rootElement instanceof HTMLElement)) return;
+  const container = rootElement.querySelector("[data-position-calculator]");
+  if (!(container instanceof HTMLElement)) return;
+  const spec = classifyPositionAssetSpec(assetId, currency);
+  let debounceHandle = null;
+
+  function readState() {
+    const capitalEl = container.querySelector('[data-pos-input="capital"]');
+    const spreadEl = container.querySelector('[data-pos-input="spreadPips"]');
+    const profileEl = container.querySelector('input[name="pos-calc-profile"]:checked');
+    return {
+      capital: capitalEl instanceof HTMLInputElement ? Number(capitalEl.value) : 0,
+      spreadPips: spreadEl instanceof HTMLInputElement ? Number(spreadEl.value) : spec.defaultSpreadPips,
+      profile: profileEl instanceof HTMLInputElement ? profileEl.value : "moderate",
+    };
+  }
+
+  function applyResult(state, result) {
+    const setText = (selector, value) => {
+      const el = container.querySelector(selector);
+      if (el) el.textContent = value;
+    };
+    // Profile cards (lot estimado por perfil)
+    POSITION_CALC_PROFILES.forEach((profile) => {
+      const card = container.querySelector(`[data-profile-id="${profile.id}"]`);
+      if (card instanceof HTMLElement) card.dataset.active = profile.id === state.profile ? "true" : "false";
+      const row = container.querySelector(`[data-pos-scenario-row="${profile.id}"]`);
+      if (row instanceof HTMLElement) row.dataset.active = profile.id === state.profile ? "true" : "false";
+      const scen = result.ready ? result.scenarios.find((s) => s.id === profile.id) : null;
+      const lotText = scen ? `$${result.capital >= 1 ? Math.round(scen.risk).toLocaleString("pt-BR") : "0"} / ${scen.lot.toFixed(spec.kind === "forex" ? 2 : 4)} ${spec.unitLabel}` : "Insira capital";
+      setText(`[data-pos-profile-lot="${profile.id}"]`, lotText);
+      setText(`[data-pos-scenario-lot="${profile.id}"]`, scen ? scen.lot.toFixed(spec.kind === "forex" ? 2 : 4) : "—");
+      setText(`[data-pos-scenario-risk="${profile.id}"]`, scen ? `$${scen.risk.toFixed(2)}` : "—");
+      setText(`[data-pos-scenario-risk-pct="${profile.id}"]`, scen ? `${scen.riskPct.toFixed(2)}%` : "—");
+      setText(`[data-pos-scenario-tp1="${profile.id}"]`, scen ? `+$${scen.tp1Profit.toFixed(2)}` : "—");
+    });
+
+    const warningEl = container.querySelector("[data-pos-margin-warning]");
+    if (warningEl instanceof HTMLElement) {
+      if (result.ready && result.exceedsRisk) {
+        warningEl.hidden = false;
+        warningEl.dataset.tone = "warning";
+        warningEl.innerHTML = `⚠ <strong>Atencao ao Tamanho da Posicao</strong>: O lote minimo (${spec.lotMin}) gera risco de <strong>$${result.actualRisk.toFixed(2)} (${result.actualRiskPct.toFixed(1)}%)</strong>, acima do alvo de ${result.riskPct}%. Considere aumentar capital ou usar timeframes maiores.`;
+      } else if (result.ready && result.actualRiskPct > 10) {
+        warningEl.hidden = false;
+        warningEl.dataset.tone = "danger";
+        warningEl.innerHTML = `🚨 <strong>Risco excede 10% do capital</strong>: $${result.actualRisk.toFixed(2)} (${result.actualRiskPct.toFixed(1)}%). Operacao matematicamente perigosa.`;
+      } else {
+        warningEl.hidden = true;
+      }
+    }
+
+    if (!result.ready) {
+      setText('[data-pos-output="maxLoss"]', "—");
+      setText('[data-pos-output="maxLossPct"]', "—");
+      setText('[data-pos-output="stopPips"]', "—");
+      setText('[data-pos-output="spreadCost"]', "—");
+      setText('[data-pos-output="summary"]', "Insira seu capital para gerar o resumo executivo da operacao.");
+      [1, 2, 3].forEach((idx) => {
+        setText(`[data-pos-output="tp${idx}Profit"]`, "—");
+        setText(`[data-pos-output="tp${idx}Gain"]`, "—");
+        setText(`[data-pos-output="tp${idx}Pips"]`, "—");
+        setText(`[data-pos-output="tp${idx}Rr"]`, "R:R —");
+      });
+      return;
+    }
+
+    setText('[data-pos-output="maxLoss"]', `$${result.actualRisk.toFixed(2)}`);
+    setText('[data-pos-output="maxLossPct"]', `${result.actualRiskPct.toFixed(2)}% do capital`);
+    setText('[data-pos-output="stopPips"]', spec.kind === "forex" ? `${result.stopDistancePips.toFixed(1)} ${spec.pipLabel}` : `${result.stopDistanceAbs.toFixed(spec.pipSize ? 4 : 2)} ${spec.pipLabel}`);
+    setText('[data-pos-output="spreadCost"]', `$${result.spreadCost.toFixed(2)}`);
+
+    [1, 2, 3].forEach((idx) => {
+      const tp = result.tps[idx - 1];
+      if (!tp) {
+        setText(`[data-pos-output="tp${idx}Profit"]`, "—");
+        setText(`[data-pos-output="tp${idx}Gain"]`, "—");
+        setText(`[data-pos-output="tp${idx}Pips"]`, "—");
+        setText(`[data-pos-output="tp${idx}Rr"]`, "R:R —");
+        return;
+      }
+      setText(`[data-pos-output="tp${idx}Price"]`, formatPrice(tp.price, currency));
+      setText(`[data-pos-output="tp${idx}Profit"]`, `+$${tp.profit.toFixed(2)}`);
+      setText(`[data-pos-output="tp${idx}Gain"]`, `+${tp.gainPct.toFixed(2)}%`);
+      setText(`[data-pos-output="tp${idx}Pips"]`, spec.kind === "forex" ? `+${tp.distPips.toFixed(1)}` : `+${tp.distAbs.toFixed(spec.pipSize ? 4 : 2)}`);
+      setText(`[data-pos-output="tp${idx}Rr"]`, `R:R 1:${tp.riskReward.toFixed(1)}`);
+    });
+
+    const profileLabel = POSITION_CALC_PROFILES.find((p) => p.id === state.profile)?.label ?? "Moderado";
+    const tp1 = result.tps[0];
+    const summary = `Com um capital de <strong>$${result.capital.toFixed(2)}</strong> e perfil <strong>${profileLabel.toLowerCase()}</strong>, voce pode arriscar no maximo <strong class="pos-calc__cell--bear">$${result.actualRisk.toFixed(2)}</strong> nesta operacao usando <strong>${result.recommendedLot.toFixed(spec.kind === "forex" ? 2 : 4)} ${spec.unitLabel}</strong>.${tp1 ? ` Se atingir a TP1, seu lucro sera de <strong class="pos-calc__cell--bull">+$${tp1.profit.toFixed(2)} (${tp1.gainPct.toFixed(2)}% do capital)</strong>.` : ""}`;
+    const summaryEl = container.querySelector('[data-pos-output="summary"]');
+    if (summaryEl instanceof HTMLElement) summaryEl.innerHTML = summary;
+  }
+
+  function recompute() {
+    const state = readState();
+    persistPositionCalcState(state);
+    const profileMeta = POSITION_CALC_PROFILES.find((p) => p.id === state.profile) ?? POSITION_CALC_PROFILES[1];
+    const result = computePositionCalc({
+      capital: state.capital,
+      riskPct: profileMeta.default,
+      signal: analysis?.signal ?? {},
+      spec,
+      spreadPips: state.spreadPips,
+    });
+    applyResult(state, result);
+  }
+
+  container.addEventListener("input", () => {
+    if (debounceHandle !== null) window.clearTimeout(debounceHandle);
+    debounceHandle = window.setTimeout(recompute, 150);
+  });
+  container.addEventListener("change", recompute);
+
+  // Click em linha do comparativo seleciona o perfil
+  container.querySelectorAll("[data-pos-scenario-row]").forEach((row) => {
+    row.addEventListener("click", () => {
+      const id = row.getAttribute("data-pos-scenario-row");
+      if (!id) return;
+      const radio = container.querySelector(`input[name="pos-calc-profile"][value="${id}"]`);
+      if (radio instanceof HTMLInputElement) {
+        radio.checked = true;
+        recompute();
+      }
+    });
+  });
+
+  // Copiar plano
+  const copyBtn = container.querySelector("[data-pos-copy]");
+  if (copyBtn instanceof HTMLButtonElement) {
+    copyBtn.addEventListener("click", async () => {
+      const summary = container.querySelector('[data-pos-output="summary"]')?.textContent ?? "";
+      const lot = container.querySelector('[data-pos-output="maxLoss"]')?.textContent ?? "";
+      const tp1 = container.querySelector('[data-pos-output="tp1Profit"]')?.textContent ?? "";
+      const tp2 = container.querySelector('[data-pos-output="tp2Profit"]')?.textContent ?? "";
+      const tp3 = container.querySelector('[data-pos-output="tp3Profit"]')?.textContent ?? "";
+      const text = `${spec.label} • ${analysis?.signal?.action ?? "—"}\nEntrada: ${formatPrice(analysis?.signal?.entryLow, currency)} | Stop: ${formatPrice(analysis?.signal?.stopLoss, currency)}\nRisco: ${lot} | TP1: ${tp1} | TP2: ${tp2} | TP3: ${tp3}\n${summary.replace(/<[^>]+>/g, "")}`;
+      try {
+        await navigator.clipboard.writeText(text);
+        const original = copyBtn.textContent;
+        copyBtn.textContent = "✓ Copiado";
+        window.setTimeout(() => { copyBtn.textContent = original; }, 1800);
+      } catch (_error) { /* noop */ }
+    });
+  }
+
+  recompute();
+}
+
 function renderRiskLab({ mode, currency, defaults, reference }) {
   const persisted = loadRiskLabState(defaults);
   const strategyOptions = RISK_LAB_STRATEGY_OPTIONS.map((opt) =>
@@ -11851,7 +12335,13 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
     const defaultRR = analysis.signal.riskReward !== null && Number.isFinite(analysis.signal.riskReward)
       ? Math.max(0.2, Number(analysis.signal.riskReward))
       : 2;
-    analysisTabContentElement.innerHTML = renderRiskLab({
+    const positionCalcHtml = renderPositionCalculator({
+      analysis,
+      snapshot,
+      currency,
+      assetId: snapshot?.assetId ?? chartAssetSelect?.value ?? "",
+    });
+    const riskLabHtml = renderRiskLab({
       mode: "spot",
       currency,
       defaults: {
@@ -11868,6 +12358,23 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
         suggestedNotional,
         signal: analysis.signal,
       },
+    });
+    analysisTabContentElement.innerHTML = `
+      <header class="analysis-tab-intro">
+        <h3><span aria-hidden="true">🧮</span> Calculadora de Posicao</h3>
+        <p>Calcule o tamanho ideal da sua posicao baseado no seu capital e perfil de risco.</p>
+      </header>
+      ${positionCalcHtml}
+      <details class="risk-lab-toggle" open>
+        <summary>Risk Lab — Monte Carlo (gestao de banca de longo prazo)</summary>
+        ${riskLabHtml}
+      </details>
+    `;
+    attachPositionCalculatorHandlers(analysisTabContentElement, {
+      analysis,
+      snapshot,
+      currency,
+      assetId: snapshot?.assetId ?? chartAssetSelect?.value ?? "",
     });
     attachRiskLabHandlers(analysisTabContentElement, { mode: "spot", currency });
     return;
