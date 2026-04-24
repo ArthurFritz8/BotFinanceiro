@@ -5778,6 +5778,8 @@ body.sidebar-collapsed .app-shell {
 .report-section__num { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; background: rgba(56, 189, 248, 0.12); color: #38bdf8; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; }
 .report-section__narrative { margin: 0; font-size: 13px; line-height: 1.65; color: #cbd5e1; }
 .report-section--danger { border-color: rgba(248, 113, 113, 0.25); background: rgba(127, 29, 29, 0.08); }
+.report-section--watch { border-color: rgba(251, 191, 36, 0.3); background: rgba(120, 53, 15, 0.12); }
+.report-section--safe { border-color: rgba(52, 211, 153, 0.3); background: rgba(6, 78, 59, 0.12); }
 .report-mtf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
 .report-mtf-cell { padding: 10px 12px; border-radius: 8px; background: rgba(30, 41, 59, 0.45); border-left: 3px solid #64748b; }
 .report-mtf-cell[data-tone="bull"]    { border-left-color: #34d399; }
@@ -5785,6 +5787,7 @@ body.sidebar-collapsed .app-shell {
 .report-mtf-cell[data-tone="neutral"] { border-left-color: #fbbf24; }
 .report-mtf-cell span { display: block; font-size: 10px; color: #94a3b8; letter-spacing: 0.6px; }
 .report-mtf-cell strong { display: block; margin-top: 4px; font-size: 13px; color: #f8fafc; }
+.report-mtf-note { display: block; margin-top: 4px; font-size: 10px; line-height: 1.35; color: #9eb2d0; }
 .report-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.7; color: #cbd5e1; }
 .report-list li { margin-bottom: 4px; }
 .report-kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 12px; }
@@ -5801,6 +5804,8 @@ body.sidebar-collapsed .app-shell {
 .report-plan li::marker { color: #38bdf8; font-weight: 700; }
 .report-risk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px; }
 .report-disclaimer { margin: 8px 0 0; font-size: 11px; color: #fca5a5; line-height: 1.5; }
+#report-section-risk[data-risk-tone="watch"] .report-disclaimer { color: #fcd34d; }
+#report-section-risk[data-risk-tone="safe"] .report-disclaimer { color: #86efac; }
 .executive-report__footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 22px; border-top: 1px solid rgba(148, 163, 184, 0.12); background: rgba(15, 23, 42, 0.6); font-size: 11px; color: #94a3b8; }
 .executive-report__footer code { color: #e2e8f0; background: rgba(56, 189, 248, 0.08); padding: 2px 6px; border-radius: 4px; font-size: 10px; }
 @media print {
