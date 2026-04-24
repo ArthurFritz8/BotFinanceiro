@@ -106,3 +106,32 @@ proposta original:
 - [x] Sem fabricar win rate (Ghost Tracker auditado ou "Aquecendo").
 - [x] `prefers-reduced-motion` honrado.
 - [x] Conventional commit referenciando ADR-074.
+
+## Atualizacao Fase 2 (mesmo ADR)
+
+### Contexto
+Peer review honesto identificou 6 lacunas vs prompt original do Gemini: header bipartido global, sazonalidade horaria + dia da semana (30 dias), padroes candle (Martelo/Engolfo/Doji), Skewness com vies textual, Curtose com alerta de caudas, tooltips educacionais.
+
+### Decisao
+Estender o `renderInstitutionalProbabilisticTab` mantendo todos os componentes da Fase 1 (KPIs, Stats, Monte Carlo, Cenarios, Sazonalidade Mensal, Risco) e adicionando:
+
+1. **Header Probabilidade Direcional Global** — barra bipartida bull/bear com edge em pontos percentuais e neutro residual, IDs `prob-direction-bull`, `prob-direction-bear`, `prob-direction-edge`.
+2. **Sazonalidade Horaria (24 cells UTC)** + **Dia da Semana (7 cells)** com janela de 30 dias, win rate por bucket, marcador de horario/dia atual. IDs `prob-season-hourly`, `prob-season-weekday`.
+3. **Padroes de Candlestick** — detector heuristico para Martelo, Engolfo de Alta, Engolfo de Baixa, Doji. Taxa de acerto medida pela direcao do proximo candle (>=5 ocorrencias para ativar — graceful degradation honesto). ID `prob-candle-patterns`.
+4. **Distribuicao de Retornos** — Volatilidade + Skewness com vies textual (Cauda direita/esquerda, Levemente positiva/negativa, Simetrica) + Curtose excess com alerta de caudas (Caudas MUITO gordas / gordas / normal / finas). IDs `prob-dist-skewness`, `prob-dist-skewness-bias`, `prob-dist-kurtosis`, `prob-dist-kurtosis-alert`.
+
+### Honestidade & Graceful Degradation
+- Skewness/Curtose exigem >=30 retornos (mesma constante `PROBABILISTIC_MIN_RETURNS_FOR_STATS`).
+- Padroes candle exigem >=5 ocorrencias para exibir win rate (caso contrario: "—" + "Aquecendo").
+- Sazonalidade horaria/semanal exige >=2 candles por bucket.
+- Tooltips via `title=` + `cursor: help` no CSS expoem amostra/threshold sem poluir UI.
+- Beta/Correlacao continuam "n/d" honesto sem benchmark.
+
+### Acessibilidade
+- `aria-label` em todas as secoes/barras.
+- `role="img"` na barra direcional.
+- `prefers-reduced-motion` neutraliza transitions de width e cells de sazonalidade.
+
+### Referencia
+- Commit Fase 1: `8b21841`
+- Commit Fase 2: (este commit)

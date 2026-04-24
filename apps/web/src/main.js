@@ -8682,6 +8682,180 @@ function classifyProbabilisticTone(value, { invert = false } = {}) {
   return positive ? "bull" : "bear";
 }
 
+// ADR-074 Fase 2 — Skewness / Curtose / Sazonalidade horaria+semanal / Padroes candle.
+const PROBABILISTIC_WEEKDAY_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sab"];
+const PROBABILISTIC_RECENT_DAYS_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+function computeProbabilisticSkewness(returns) {
+  if (!Array.isArray(returns) || returns.length < PROBABILISTIC_MIN_RETURNS_FOR_STATS) {
+    return { ready: false, value: null, bias: "n/d" };
+  }
+  const n = returns.length;
+  const mean = returns.reduce((acc, value) => acc + value, 0) / n;
+  const variance = returns.reduce((acc, value) => acc + (value - mean) ** 2, 0) / Math.max(n - 1, 1);
+  const stdDev = Math.sqrt(variance);
+  if (stdDev <= 0) {
+    return { ready: true, value: 0, bias: "Simetrica" };
+  }
+  const skew = returns.reduce((acc, value) => acc + ((value - mean) / stdDev) ** 3, 0) / n;
+  const rounded = roundNumber(skew, 2);
+  let bias = "Simetrica";
+  if (rounded > 0.5) bias = "Cauda direita (bullish)";
+  else if (rounded < -0.5) bias = "Cauda esquerda (bearish)";
+  else if (rounded > 0.1) bias = "Levemente positiva";
+  else if (rounded < -0.1) bias = "Levemente negativa";
+  return { ready: true, value: rounded, bias };
+}
+
+function computeProbabilisticKurtosis(returns) {
+  if (!Array.isArray(returns) || returns.length < PROBABILISTIC_MIN_RETURNS_FOR_STATS) {
+    return { ready: false, value: null, alert: "n/d", isFatTail: false };
+  }
+  const n = returns.length;
+  const mean = returns.reduce((acc, value) => acc + value, 0) / n;
+  const variance = returns.reduce((acc, value) => acc + (value - mean) ** 2, 0) / Math.max(n - 1, 1);
+  const stdDev = Math.sqrt(variance);
+  if (stdDev <= 0) {
+    return { ready: true, value: 0, alert: "Sem dispersao", isFatTail: false };
+  }
+  const kurt = returns.reduce((acc, value) => acc + ((value - mean) / stdDev) ** 4, 0) / n;
+  const excess = kurt - 3;
+  const rounded = roundNumber(excess, 2);
+  let alert = "Distribuicao normal";
+  let isFatTail = false;
+  if (rounded > 3) { alert = "Caudas MUITO gordas (eventos extremos)"; isFatTail = true; }
+  else if (rounded > 1) { alert = "Caudas gordas (cuidado com outliers)"; isFatTail = true; }
+  else if (rounded < -1) { alert = "Caudas finas (estavel)"; }
+  return { ready: true, value: rounded, alert, isFatTail };
+}
+
+function computeProbabilisticHourlySeasonality(points) {
+  const buckets = Array.from({ length: 24 }, () => ({ wins: 0, total: 0, sumChange: 0 }));
+  if (!Array.isArray(points) || points.length === 0) {
+    return { hours: buckets.map((_, hour) => ({ hour, ready: false, winRatePercent: null, avgChangePercent: null, sample: 0 })), currentHour: new Date().getUTCHours() };
+  }
+  const cutoff = Date.now() - PROBABILISTIC_RECENT_DAYS_WINDOW_MS;
+  for (const point of points) {
+    const open = toFiniteNumber(point?.open, Number.NaN);
+    const close = toFiniteNumber(point?.close, Number.NaN);
+    const timestamp = typeof point?.timestamp === "string" ? Date.parse(point.timestamp) : Number.NaN;
+    if (!Number.isFinite(open) || !Number.isFinite(close) || open <= 0 || close <= 0 || !Number.isFinite(timestamp)) continue;
+    if (timestamp < cutoff) continue;
+    const hour = new Date(timestamp).getUTCHours();
+    const change = (close - open) / open;
+    buckets[hour].total += 1;
+    buckets[hour].sumChange += change;
+    if (change > 0) buckets[hour].wins += 1;
+  }
+  return {
+    hours: buckets.map((bucket, hour) => ({
+      hour,
+      ready: bucket.total >= 2,
+      winRatePercent: bucket.total >= 2 ? roundNumber((bucket.wins / bucket.total) * 100, 0) : null,
+      avgChangePercent: bucket.total >= 2 ? roundNumber((bucket.sumChange / bucket.total) * 100, 2) : null,
+      sample: bucket.total,
+    })),
+    currentHour: new Date().getUTCHours(),
+  };
+}
+
+function computeProbabilisticWeekdaySeasonality(points) {
+  const buckets = Array.from({ length: 7 }, () => ({ wins: 0, total: 0, sumChange: 0 }));
+  if (!Array.isArray(points) || points.length === 0) {
+    return { days: buckets.map((_, index) => ({ index, label: PROBABILISTIC_WEEKDAY_LABELS[index], ready: false, winRatePercent: null, avgChangePercent: null, sample: 0 })), currentWeekday: new Date().getUTCDay() };
+  }
+  const cutoff = Date.now() - PROBABILISTIC_RECENT_DAYS_WINDOW_MS;
+  for (const point of points) {
+    const open = toFiniteNumber(point?.open, Number.NaN);
+    const close = toFiniteNumber(point?.close, Number.NaN);
+    const timestamp = typeof point?.timestamp === "string" ? Date.parse(point.timestamp) : Number.NaN;
+    if (!Number.isFinite(open) || !Number.isFinite(close) || open <= 0 || close <= 0 || !Number.isFinite(timestamp)) continue;
+    if (timestamp < cutoff) continue;
+    const weekday = new Date(timestamp).getUTCDay();
+    const change = (close - open) / open;
+    buckets[weekday].total += 1;
+    buckets[weekday].sumChange += change;
+    if (change > 0) buckets[weekday].wins += 1;
+  }
+  return {
+    days: buckets.map((bucket, index) => ({
+      index,
+      label: PROBABILISTIC_WEEKDAY_LABELS[index],
+      ready: bucket.total >= 2,
+      winRatePercent: bucket.total >= 2 ? roundNumber((bucket.wins / bucket.total) * 100, 0) : null,
+      avgChangePercent: bucket.total >= 2 ? roundNumber((bucket.sumChange / bucket.total) * 100, 2) : null,
+      sample: bucket.total,
+    })),
+    currentWeekday: new Date().getUTCDay(),
+  };
+}
+
+function detectProbabilisticCandlePatterns(points) {
+  const PATTERN_DEFS = [
+    { id: "hammer", label: "Martelo", bias: "bull" },
+    { id: "engulfing-bull", label: "Engolfo de Alta", bias: "bull" },
+    { id: "engulfing-bear", label: "Engolfo de Baixa", bias: "bear" },
+    { id: "doji", label: "Doji", bias: "neutral" },
+  ];
+  const stats = Object.fromEntries(PATTERN_DEFS.map((def) => [def.id, { ...def, occurrences: 0, wins: 0 }]));
+  if (!Array.isArray(points) || points.length < 3) {
+    return PATTERN_DEFS.map((def) => ({ ...def, occurrences: 0, winRatePercent: null, ready: false }));
+  }
+  const isCandleValid = (candle) => {
+    if (!candle) return false;
+    const o = toFiniteNumber(candle.open, Number.NaN);
+    const c = toFiniteNumber(candle.close, Number.NaN);
+    const h = toFiniteNumber(candle.high, Number.NaN);
+    const l = toFiniteNumber(candle.low, Number.NaN);
+    return Number.isFinite(o) && Number.isFinite(c) && Number.isFinite(h) && Number.isFinite(l) && h >= Math.max(o, c) && l <= Math.min(o, c);
+  };
+  for (let i = 1; i < points.length - 1; i += 1) {
+    const prev = points[i - 1];
+    const curr = points[i];
+    const next = points[i + 1];
+    if (!isCandleValid(prev) || !isCandleValid(curr) || !isCandleValid(next)) continue;
+    const o = curr.open, c = curr.close, h = curr.high, l = curr.low;
+    const range = h - l;
+    if (range <= 0) continue;
+    const body = Math.abs(c - o);
+    const lowerShadow = Math.min(o, c) - l;
+    const upperShadow = h - Math.max(o, c);
+    const nextChange = (next.close - next.open) / next.open;
+
+    // Doji: corpo <10% do range
+    if (body / range < 0.1) {
+      stats.doji.occurrences += 1;
+      if (nextChange > 0) stats.doji.wins += 1;
+    }
+    // Martelo: corpo pequeno no topo, sombra inferior >=2x corpo, sombra superior pequena
+    if (body / range < 0.35 && lowerShadow >= 2 * body && upperShadow < body) {
+      stats.hammer.occurrences += 1;
+      if (nextChange > 0) stats.hammer.wins += 1;
+    }
+    // Engolfo de Alta: prev bear, curr bull, corpo curr engole prev
+    const prevBody = Math.abs(prev.close - prev.open);
+    if (prev.close < prev.open && c > o && o <= prev.close && c >= prev.open && body > prevBody) {
+      stats["engulfing-bull"].occurrences += 1;
+      if (nextChange > 0) stats["engulfing-bull"].wins += 1;
+    }
+    // Engolfo de Baixa: prev bull, curr bear, corpo curr engole prev
+    if (prev.close > prev.open && c < o && o >= prev.close && c <= prev.open && body > prevBody) {
+      stats["engulfing-bear"].occurrences += 1;
+      if (nextChange < 0) stats["engulfing-bear"].wins += 1;
+    }
+  }
+  return PATTERN_DEFS.map((def) => {
+    const bucket = stats[def.id];
+    const ready = bucket.occurrences >= 5;
+    return {
+      ...def,
+      occurrences: bucket.occurrences,
+      winRatePercent: ready ? roundNumber((bucket.wins / bucket.occurrences) * 100, 0) : null,
+      ready,
+    };
+  });
+}
+
 function renderInstitutionalProbabilisticTab(analysis, snapshot, currency) {
   const points = Array.isArray(snapshot?.points) ? snapshot.points : [];
   const returns = computeProbabilisticReturnsSeries(points);
@@ -8692,6 +8866,11 @@ function renderInstitutionalProbabilisticTab(analysis, snapshot, currency) {
     returns,
   });
   const seasonality = computeProbabilisticMonthlySeasonality(points);
+  const skewness = computeProbabilisticSkewness(returns);
+  const kurtosis = computeProbabilisticKurtosis(returns);
+  const hourlySeasonality = computeProbabilisticHourlySeasonality(points);
+  const weekdaySeasonality = computeProbabilisticWeekdaySeasonality(points);
+  const candlePatterns = detectProbabilisticCandlePatterns(points);
 
   const ghostBackend = typeof getBinaryOptionsGhostBackendStats === "function"
     ? getBinaryOptionsGhostBackendStats()
@@ -8735,6 +8914,19 @@ function renderInstitutionalProbabilisticTab(analysis, snapshot, currency) {
 
   return `
     <section class="prob-dashboard" aria-label="Dashboard Probabilistico Quantitativo">
+      <header class="prob-direction-header" aria-label="Probabilidade Direcional Global">
+        <h4>Probabilidade Direcional Global</h4>
+        <div class="prob-direction-bar" role="img" aria-label="Equilibrio entre alta e baixa">
+          <div class="prob-direction-bar__bull" style="width: ${clampNumber(buyProbability, 0, 100)}%" title="Probabilidade de alta: ${buyProbability.toFixed(1)}%">
+            <span id="prob-direction-bull">▲ ${buyProbability.toFixed(0)}%</span>
+          </div>
+          <div class="prob-direction-bar__bear" style="width: ${clampNumber(sellProbability, 0, 100)}%" title="Probabilidade de baixa: ${sellProbability.toFixed(1)}%">
+            <span id="prob-direction-bear">${sellProbability.toFixed(0)}% ▼</span>
+          </div>
+        </div>
+        <p class="prob-direction-bar__edge">Edge direcional: <strong id="prob-direction-edge" data-tone="${directionalEdge > 0 ? "bull" : directionalEdge < 0 ? "bear" : "neutral"}">${directionalEdge >= 0 ? "+" : ""}${directionalEdge} p.p.</strong> • Neutro <strong>${neutralProbability.toFixed(0)}%</strong></p>
+      </header>
+
       <header class="prob-kpi-row">
         <article class="prob-kpi-card" data-tone="neutral">
           <span class="prob-kpi-icon" aria-hidden="true">📊</span>
@@ -8875,6 +9067,75 @@ function renderInstitutionalProbabilisticTab(analysis, snapshot, currency) {
           <div class="prob-risk-cell" data-tone="neutral" title="Correlacao vs benchmark (indisponivel sem serie de referencia)">
             <strong id="prob-correlation">${escapeHtml(risk.correlationLabel)}</strong>
             <span>Correlacao</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="prob-card">
+        <header class="prob-card__head">
+          <h4>Sazonalidade Recente (Ultimos 30 Dias)</h4>
+          <span class="prob-card__hint">Win rate por horario UTC e dia da semana</span>
+        </header>
+        <div class="prob-season-sub">
+          <h5>Horario Atual (UTC ${String(hourlySeasonality.currentHour).padStart(2, "0")}:00)</h5>
+          <div class="prob-season-hourly" id="prob-season-hourly">
+            ${hourlySeasonality.hours.map((bucket) => {
+              const tone = !bucket.ready ? "empty" : bucket.winRatePercent >= 55 ? "bull" : bucket.winRatePercent <= 45 ? "bear" : "neutral";
+              const isCurrent = bucket.hour === hourlySeasonality.currentHour;
+              return `<div class="prob-season-hourly__cell${isCurrent ? " prob-season-hourly__cell--current" : ""}" data-tone="${tone}" title="${bucket.ready ? `${bucket.sample} candles em ${String(bucket.hour).padStart(2, "0")}h • avg ${bucket.avgChangePercent}%` : `Sem amostras em ${String(bucket.hour).padStart(2, "0")}h`}"><strong>${String(bucket.hour).padStart(2, "0")}</strong><span>${bucket.ready ? `${bucket.winRatePercent}%` : "—"}</span></div>`;
+            }).join("")}
+          </div>
+        </div>
+        <div class="prob-season-sub">
+          <h5>Dia da Semana (Hoje: ${PROBABILISTIC_WEEKDAY_LABELS[weekdaySeasonality.currentWeekday]})</h5>
+          <div class="prob-season-weekday" id="prob-season-weekday">
+            ${weekdaySeasonality.days.map((day) => {
+              const tone = !day.ready ? "empty" : day.winRatePercent >= 55 ? "bull" : day.winRatePercent <= 45 ? "bear" : "neutral";
+              const isCurrent = day.index === weekdaySeasonality.currentWeekday;
+              return `<div class="prob-season-weekday__cell${isCurrent ? " prob-season-weekday__cell--current" : ""}" data-tone="${tone}" title="${day.ready ? `${day.sample} candles em ${day.label} • avg ${day.avgChangePercent}%` : `Sem amostras em ${day.label}`}"><strong>${day.label}</strong><span>${day.ready ? `${day.winRatePercent}%` : "—"}</span></div>`;
+            }).join("")}
+          </div>
+        </div>
+      </article>
+
+      <article class="prob-card">
+        <header class="prob-card__head">
+          <h4>Padroes de Candlestick (Ultimos ${points.length} Candles)</h4>
+          <span class="prob-card__hint">Taxa de acerto historica do proximo candle (>=5 ocorrencias para ativar)</span>
+        </header>
+        <div class="prob-candle-grid" id="prob-candle-patterns">
+          ${candlePatterns.map((pattern) => {
+            const tone = !pattern.ready ? "empty" : pattern.winRatePercent >= 55 ? "bull" : pattern.winRatePercent <= 45 ? "bear" : "neutral";
+            const biasLabel = pattern.bias === "bull" ? "Vies de alta" : pattern.bias === "bear" ? "Vies de baixa" : "Indecisao";
+            return `<div class="prob-candle-cell" data-tone="${tone}" title="${pattern.label}: ${pattern.occurrences} ocorrencias na janela">
+              <header><strong>${escapeHtml(pattern.label)}</strong><span>${pattern.occurrences}x</span></header>
+              <div class="prob-candle-cell__rate" id="prob-candle-${pattern.id}-rate">${pattern.ready ? `${pattern.winRatePercent}%` : "—"}</div>
+              <small>${escapeHtml(biasLabel)}${pattern.ready ? "" : " • Aquecendo"}</small>
+            </div>`;
+          }).join("")}
+        </div>
+      </article>
+
+      <article class="prob-card">
+        <header class="prob-card__head">
+          <h4>Distribuicao de Retornos</h4>
+          <span class="prob-card__hint">${stats.ready ? "Forma da distribuicao (assimetria + caudas)" : "Aquecendo"}</span>
+        </header>
+        <div class="prob-distribution-grid">
+          <div class="prob-distribution-cell" data-tone="${stats.ready ? "neutral" : "empty"}" title="Volatilidade anualizada (referencia)">
+            <strong id="prob-dist-vol">${stats.ready ? formatProbabilisticPercent(stats.annualizedVolatilityPercent) : "—"}</strong>
+            <span>Volatilidade</span>
+            <small>Dispersao anualizada</small>
+          </div>
+          <div class="prob-distribution-cell" data-tone="${skewness.ready ? (skewness.value > 0.1 ? "bull" : skewness.value < -0.1 ? "bear" : "neutral") : "empty"}" title="Skewness (assimetria): >0 cauda direita, <0 cauda esquerda">
+            <strong id="prob-dist-skewness">${skewness.ready ? skewness.value.toFixed(2) : "—"}</strong>
+            <span>Skewness (Assimetria)</span>
+            <small id="prob-dist-skewness-bias">${escapeHtml(skewness.bias)}</small>
+          </div>
+          <div class="prob-distribution-cell" data-tone="${kurtosis.ready ? (kurtosis.isFatTail ? "bear" : "neutral") : "empty"}" title="Curtose excess (>0 caudas gordas = risco de outliers)">
+            <strong id="prob-dist-kurtosis">${kurtosis.ready ? (kurtosis.value >= 0 ? "+" : "") + kurtosis.value.toFixed(2) : "—"}</strong>
+            <span>Curtose (Caudas)</span>
+            <small id="prob-dist-kurtosis-alert">${escapeHtml(kurtosis.alert)}</small>
           </div>
         </div>
       </article>

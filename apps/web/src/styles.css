@@ -6705,3 +6705,221 @@ body.sidebar-collapsed .app-shell {
 @media (prefers-reduced-motion: reduce) {
   .prob-scenario-fill { transition: none; }
 }
+
+/* ADR-074 Fase 2 — Header bipartido + Sazonalidade horaria/semanal + Padroes candle + Distribuicao */
+.prob-direction-header {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.85), rgba(30, 41, 59, 0.7));
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  backdrop-filter: blur(10px);
+}
+.prob-direction-header h4 {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #cbd5f5;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.prob-direction-bar {
+  display: flex;
+  height: 38px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.6);
+}
+.prob-direction-bar__bull,
+.prob-direction-bar__bear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  color: #f8fafc;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  cursor: help;
+}
+.prob-direction-bar__bull {
+  background: linear-gradient(90deg, #10b981, #059669);
+}
+.prob-direction-bar__bear {
+  background: linear-gradient(90deg, #dc2626, #991b1b);
+}
+.prob-direction-bar__edge {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+.prob-direction-bar__edge strong[data-tone="bull"] { color: #34d399; }
+.prob-direction-bar__edge strong[data-tone="bear"] { color: #f87171; }
+.prob-direction-bar__edge strong[data-tone="neutral"] { color: #cbd5f5; }
+
+.prob-season-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.prob-season-sub:first-child { margin-top: 0; }
+.prob-season-sub h5 {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #94a3b8;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.prob-season-hourly {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 4px;
+}
+.prob-season-weekday {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+.prob-season-hourly__cell,
+.prob-season-weekday__cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 4px;
+  border-radius: 6px;
+  background: rgba(30, 41, 59, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+  transition: transform 0.15s ease, border-color 0.2s ease;
+}
+.prob-season-hourly__cell strong,
+.prob-season-weekday__cell strong {
+  font-size: 0.72rem;
+  color: #cbd5f5;
+  font-weight: 600;
+}
+.prob-season-hourly__cell span,
+.prob-season-weekday__cell span {
+  font-size: 0.78rem;
+  color: #f1f5f9;
+  font-weight: 700;
+}
+.prob-season-hourly__cell[data-tone="bull"],
+.prob-season-weekday__cell[data-tone="bull"] {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(52, 211, 153, 0.35);
+}
+.prob-season-hourly__cell[data-tone="bull"] span,
+.prob-season-weekday__cell[data-tone="bull"] span { color: #34d399; }
+.prob-season-hourly__cell[data-tone="bear"],
+.prob-season-weekday__cell[data-tone="bear"] {
+  background: rgba(220, 38, 38, 0.18);
+  border-color: rgba(248, 113, 113, 0.35);
+}
+.prob-season-hourly__cell[data-tone="bear"] span,
+.prob-season-weekday__cell[data-tone="bear"] span { color: #f87171; }
+.prob-season-hourly__cell[data-tone="empty"] span,
+.prob-season-weekday__cell[data-tone="empty"] span { color: #475569; }
+.prob-season-hourly__cell--current,
+.prob-season-weekday__cell--current {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.45), 0 4px 12px rgba(56, 189, 248, 0.15);
+  transform: translateY(-1px);
+}
+
+.prob-candle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+.prob-candle-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(30, 41, 59, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  cursor: help;
+}
+.prob-candle-cell header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.82rem;
+}
+.prob-candle-cell header strong { color: #f1f5f9; font-weight: 600; }
+.prob-candle-cell header span {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+.prob-candle-cell__rate {
+  font-size: 1.4rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #cbd5f5;
+}
+.prob-candle-cell small { font-size: 0.72rem; color: #94a3b8; }
+.prob-candle-cell[data-tone="bull"] { border-color: rgba(52, 211, 153, 0.35); }
+.prob-candle-cell[data-tone="bull"] .prob-candle-cell__rate { color: #34d399; }
+.prob-candle-cell[data-tone="bear"] { border-color: rgba(248, 113, 113, 0.35); }
+.prob-candle-cell[data-tone="bear"] .prob-candle-cell__rate { color: #f87171; }
+.prob-candle-cell[data-tone="empty"] .prob-candle-cell__rate { color: #475569; }
+
+.prob-distribution-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+.prob-distribution-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(30, 41, 59, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  cursor: help;
+}
+.prob-distribution-cell strong {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #f1f5f9;
+}
+.prob-distribution-cell span {
+  font-size: 0.78rem;
+  color: #cbd5f5;
+  font-weight: 600;
+}
+.prob-distribution-cell small {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  line-height: 1.3;
+}
+.prob-distribution-cell[data-tone="bull"] { border-color: rgba(52, 211, 153, 0.35); }
+.prob-distribution-cell[data-tone="bull"] strong { color: #34d399; }
+.prob-distribution-cell[data-tone="bear"] { border-color: rgba(248, 113, 113, 0.35); }
+.prob-distribution-cell[data-tone="bear"] strong { color: #f87171; }
+.prob-distribution-cell[data-tone="empty"] strong { color: #475569; }
+
+@media (max-width: 768px) {
+  .prob-season-hourly { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .prob-direction-bar__bull,
+  .prob-direction-bar__bear,
+  .prob-season-hourly__cell,
+  .prob-season-weekday__cell { transition: none; }
+}
