@@ -11877,6 +11877,295 @@ function attachRiskLabHandlers(rootElement, { mode, currency }) {
   return { recompute, currency };
 }
 
+// ============================================================================
+// ADR-078 — Hub de Inteligencia Fundamentalista (refator da aba Noticias)
+// Camada de apresentacao 100% derivada: agrega dados ja existentes do
+// crypto-news-intelligence-service (items, summary) + institutional.macroRadar
+// (upcomingEvents). Zero chamadas externas adicionais. Fail-honest em todos
+// os blocos: se nao ha dado, exibe estado vazio explicativo (nao mocka).
+// ============================================================================
+
+const FUNDI_HUB_TAB_STORAGE_KEY = "fundi-hub:tab:v1";
+const FUNDI_HUB_PULSE_WINDOW_MIN = 30;
+
+function getFundiHubPersistedTab() {
+  try {
+    const raw = window.localStorage?.getItem(FUNDI_HUB_TAB_STORAGE_KEY);
+    if (raw === "news" || raw === "events") return raw;
+  } catch {
+    /* localStorage indisponivel: fallback silencioso */
+  }
+  return "news";
+}
+
+function setFundiHubPersistedTab(tab) {
+  try {
+    window.localStorage?.setItem(FUNDI_HUB_TAB_STORAGE_KEY, tab);
+  } catch {
+    /* quota/private mode: ignora */
+  }
+}
+
+function computeFundiHubSentiment(items) {
+  let positive = 0, negative = 0, neutral = 0;
+  for (const it of items) {
+    if (it?.sentiment === "positive") positive += 1;
+    else if (it?.sentiment === "negative") negative += 1;
+    else neutral += 1;
+  }
+  const total = positive + negative + neutral;
+  if (total === 0) {
+    return { score: 50, label: "Sem dados", tone: "neutral", positive: 0, negative: 0, neutral: 0 };
+  }
+  // Score 0-100 onde 0 = totalmente bearish, 100 = totalmente bullish.
+  const score = Math.round(((positive - negative) / total + 1) * 50);
+  let label = "Neutro";
+  let tone = "neutral";
+  if (score >= 65) { label = "Bullish"; tone = "bull"; }
+  else if (score >= 55) { label = "Levemente Bullish"; tone = "bull-soft"; }
+  else if (score <= 35) { label = "Bearish"; tone = "bear"; }
+  else if (score <= 45) { label = "Levemente Bearish"; tone = "bear-soft"; }
+  return { score, label, tone, positive, negative, neutral };
+}
+
+function computeFundiHubKeywords(items, limit = 10) {
+  const counts = new Map();
+  for (const it of items) {
+    if (!Array.isArray(it?.tags)) continue;
+    for (const tagRaw of it.tags) {
+      if (typeof tagRaw !== "string") continue;
+      const tag = tagRaw.trim().toLowerCase();
+      if (tag.length < 2 || tag.length > 24) continue;
+      counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    }
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([tag, count]) => ({ tag, count }));
+}
+
+function classifyFundiHubImpact(value) {
+  // Aceita string ("high"/"medium"/"low") ou numero (impactScore 0-10).
+  if (typeof value === "string") {
+    const v = value.toLowerCase();
+    if (v === "high" || v === "alto") return { key: "high", label: "Alto Impacto" };
+    if (v === "medium" || v === "moderate" || v === "medio" || v === "moderado") return { key: "medium", label: "Medio Impacto" };
+    return { key: "low", label: "Baixo Impacto" };
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (value >= 7) return { key: "high", label: "Alto Impacto" };
+    if (value >= 4) return { key: "medium", label: "Medio Impacto" };
+    return { key: "low", label: "Baixo Impacto" };
+  }
+  return { key: "low", label: "Baixo Impacto" };
+}
+
+function renderFundiHubNewsCard(item) {
+  const impact = classifyFundiHubImpact(Number(item.impactScore));
+  const sentimentTone = item.sentiment === "positive" ? "bull"
+    : item.sentiment === "negative" ? "bear"
+    : "neutral";
+  const sourceInitial = (item.source ?? "?").trim().charAt(0).toUpperCase();
+  const tagsHtml = Array.isArray(item.tags) && item.tags.length > 0
+    ? `<div class="fundi-hub-news-tags">${item.tags.slice(0, 4).map((t) => `<span>${escapeHtml(t)}</span>`).join("")}</div>`
+    : "";
+  return `
+    <article class="fundi-hub-news-card" data-impact="${impact.key}" data-sentiment="${sentimentTone}">
+      <div class="fundi-hub-news-avatar" aria-hidden="true">${escapeHtml(sourceInitial)}</div>
+      <div class="fundi-hub-news-body">
+        <header class="fundi-hub-news-header">
+          <strong class="fundi-hub-news-title">${escapeHtml(item.title)}</strong>
+          <a class="fundi-hub-news-link" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" aria-label="Abrir fonte">↗</a>
+        </header>
+        <p class="fundi-hub-news-summary">${escapeHtml(item.summary)}</p>
+        <footer class="fundi-hub-news-meta">
+          <span class="fundi-hub-news-source">${escapeHtml(item.source)}</span>
+          <span class="fundi-hub-news-time">${escapeHtml(formatShortTime(item.publishedAt))}</span>
+          <span class="fundi-hub-impact-badge" data-impact="${impact.key}">${impact.label}</span>
+        </footer>
+        ${tagsHtml}
+      </div>
+    </article>
+  `;
+}
+
+function renderFundiHubEventRow(eventItem) {
+  const name = typeof eventItem?.name === "string" ? eventItem.name : "Evento macro";
+  const impact = classifyFundiHubImpact(typeof eventItem?.impact === "string" ? eventItem.impact : 0);
+  const hours = typeof eventItem?.hoursToEvent === "number" && Number.isFinite(eventItem.hoursToEvent)
+    ? eventItem.hoursToEvent
+    : null;
+  const isImminent = hours !== null && hours >= 0 && hours * 60 <= FUNDI_HUB_PULSE_WINDOW_MIN;
+  const whenLabel = hours === null
+    ? "n/d"
+    : hours < 1
+      ? `em ${Math.max(0, Math.round(hours * 60))} min`
+      : hours < 24
+        ? `em ${hours.toFixed(0)}h`
+        : `em ${(hours / 24).toFixed(1)}d`;
+  const currency = typeof eventItem?.currency === "string" ? eventItem.currency : "";
+  const frequency = typeof eventItem?.frequency === "string" ? eventItem.frequency : "";
+  return `
+    <article class="fundi-hub-event-row${isImminent ? " is-imminent" : ""}" data-impact="${impact.key}">
+      <div class="fundi-hub-event-icon" aria-hidden="true">📅</div>
+      <div class="fundi-hub-event-info">
+        <strong>${escapeHtml(name)}</strong>
+        <span>${escapeHtml(currency || frequency || "Macro global")}</span>
+      </div>
+      <span class="fundi-hub-event-when">${escapeHtml(whenLabel)}</span>
+      <span class="fundi-hub-impact-badge" data-impact="${impact.key}">${impact.label}</span>
+    </article>
+  `;
+}
+
+function renderFundamentalistHubHtml({ payload, snapshot, analysis, currency: _currency }) {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const summary = payload?.summary ?? {};
+  const updatedAt = payload?.fetchedAt ? formatShortTime(payload.fetchedAt) : "n/d";
+  const sentiment = computeFundiHubSentiment(items);
+  const keywords = computeFundiHubKeywords(items);
+  const macroRadar = snapshot?.institutional?.macroRadar ?? null;
+  const upcomingEvents = Array.isArray(macroRadar?.upcomingEvents) ? macroRadar.upcomingEvents : [];
+  const radarAlertLevel = typeof macroRadar?.alertLevel === "string" ? macroRadar.alertLevel : "green";
+  const radarMessage = typeof macroRadar?.message === "string"
+    ? macroRadar.message
+    : "Sem risco macro critico identificado para a janela atual.";
+  const radarBlock = macroRadar?.blockDirectionalRisk === true;
+  const aiNarrativeRaw = typeof analysis?.summary === "string" && analysis.summary.length > 0
+    ? analysis.summary
+    : `Score de confluencia ${Number(analysis?.compositeScore ?? 0).toFixed(1)}/100 com ${String(analysis?.signal?.title ?? "leitura neutra").toLowerCase()}. Sentimento agregado de ${items.length} noticias indica leitura ${sentiment.label.toLowerCase()}.`;
+  const initialTab = getFundiHubPersistedTab();
+
+  const newsHtml = items.length > 0
+    ? items.slice(0, 12).map(renderFundiHubNewsCard).join("")
+    : `<p class="fundi-hub-empty">Sem noticias agregadas para o ativo no momento. As fontes RSS sao multi-provider e podem demorar segundos para preencher apos a primeira analise.</p>`;
+
+  const eventsHtml = upcomingEvents.length > 0
+    ? upcomingEvents.map(renderFundiHubEventRow).join("")
+    : `<p class="fundi-hub-empty">Sem eventos macro relevantes na janela atual. O Timing Desk (aba Timing) detalha sessoes e killzones em paralelo.</p>`;
+
+  const keywordsHtml = keywords.length > 0
+    ? keywords.map((k) => `<span class="fundi-hub-keyword-chip" title="${k.count} ocorrencia(s)">${escapeHtml(k.tag)}</span>`).join("")
+    : `<span class="fundi-hub-keyword-chip is-empty">Sem keywords agregadas</span>`;
+
+  return `
+    <section class="fundi-hub" data-active-tab="${initialTab}">
+      <article class="fundi-hub-card fundi-hub-sentiment-card">
+        <header class="fundi-hub-card-header">
+          <div>
+            <h4>Sentimento de Mercado (AI)</h4>
+            <span class="fundi-hub-card-subtitle">Powered by news aggregation • atualizado ${escapeHtml(updatedAt)}</span>
+          </div>
+          <button type="button" class="fundi-hub-refresh-btn" data-fundi-hub-refresh aria-label="Atualizar feed fundamentalista">↻</button>
+        </header>
+        <div class="fundi-hub-sentiment-body">
+          <div class="fundi-hub-sentiment-score" data-tone="${sentiment.tone}">
+            <strong>${sentiment.score}</strong>
+            <span>${escapeHtml(sentiment.label)}</span>
+          </div>
+          <div class="fundi-hub-sentiment-bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${sentiment.score}" aria-label="Sentimento de mercado: ${escapeHtml(sentiment.label)}">
+            <div class="fundi-hub-sentiment-bar-track">
+              <div class="fundi-hub-sentiment-bar-fill" style="width: ${sentiment.score}%"></div>
+              <div class="fundi-hub-sentiment-bar-marker" style="left: ${sentiment.score}%"></div>
+            </div>
+            <div class="fundi-hub-sentiment-legend">
+              <span>Bearish</span><span>Neutro</span><span>Bullish</span>
+            </div>
+          </div>
+        </div>
+        <div class="fundi-hub-keywords">
+          <span class="fundi-hub-keywords-label">Palavras-chave monitoradas</span>
+          <div class="fundi-hub-keywords-list">${keywordsHtml}</div>
+        </div>
+        <details class="fundi-hub-narrative" ${items.length > 0 ? "" : "open"}>
+          <summary>
+            <span class="fundi-hub-narrative-icon" aria-hidden="true">🌐</span>
+            Analise Macro Sintetica
+          </summary>
+          <p>${escapeHtml(aiNarrativeRaw)}</p>
+          <p class="fundi-hub-narrative-meta">Cobertura: ${summary.sourcesHealthy ?? 0}/${summary.totalSources ?? 0} fontes • impacto medio ${(summary.averageImpactScore ?? 0).toFixed(1)} • relevancia media ${(summary.averageRelevanceScore ?? 0).toFixed(1)} • ${items.length} item(s) agregados</p>
+        </details>
+      </article>
+
+      <article class="fundi-hub-card fundi-hub-radar-card" data-alert="${escapeHtml(radarAlertLevel)}">
+        <header class="fundi-hub-card-header">
+          <h4>Radar Macro Institucional</h4>
+          <span class="fundi-hub-radar-pill" data-alert="${escapeHtml(radarAlertLevel)}">${escapeHtml(radarAlertLevel.toUpperCase())}</span>
+        </header>
+        <p class="fundi-hub-radar-message">${escapeHtml(radarMessage)}</p>
+        <div class="fundi-hub-radar-flags">
+          <span class="fundi-hub-radar-flag" data-on="${radarBlock}">Bloqueio direcional: ${radarBlock ? "ATIVO" : "inativo"}</span>
+          <span class="fundi-hub-radar-flag">Refugio: ${escapeHtml(typeof macroRadar?.safeHavenBias === "string" ? macroRadar.safeHavenBias : "neutral")}</span>
+        </div>
+      </article>
+
+      <article class="fundi-hub-card fundi-hub-feed-card">
+        <nav class="fundi-hub-tabs" role="tablist" aria-label="Hub de inteligencia fundamentalista">
+          <button type="button" class="fundi-hub-tab" role="tab" data-fundi-hub-tab="news" aria-selected="${initialTab === "news"}" tabindex="${initialTab === "news" ? 0 : -1}">
+            <span aria-hidden="true">📰</span> Noticias <span class="fundi-hub-tab-count">(${items.length})</span>
+          </button>
+          <button type="button" class="fundi-hub-tab" role="tab" data-fundi-hub-tab="events" aria-selected="${initialTab === "events"}" tabindex="${initialTab === "events" ? 0 : -1}">
+            <span aria-hidden="true">📅</span> Eventos Economicos <span class="fundi-hub-tab-count">(${upcomingEvents.length})</span>
+          </button>
+        </nav>
+        <div class="fundi-hub-panel" role="tabpanel" data-fundi-hub-panel="news" ${initialTab === "news" ? "" : "hidden"}>
+          <div class="fundi-hub-news-list">${newsHtml}</div>
+        </div>
+        <div class="fundi-hub-panel" role="tabpanel" data-fundi-hub-panel="events" ${initialTab === "events" ? "" : "hidden"}>
+          <div class="fundi-hub-events-list">${eventsHtml}</div>
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function attachFundamentalistHubHandlers(rootElement) {
+  if (!(rootElement instanceof HTMLElement)) return;
+  const hub = rootElement.querySelector(".fundi-hub");
+  if (!(hub instanceof HTMLElement)) return;
+
+  hub.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const tabBtn = target.closest("[data-fundi-hub-tab]");
+    if (tabBtn instanceof HTMLElement) {
+      const tab = tabBtn.getAttribute("data-fundi-hub-tab");
+      if (tab !== "news" && tab !== "events") return;
+      hub.setAttribute("data-active-tab", tab);
+      const tabs = hub.querySelectorAll("[data-fundi-hub-tab]");
+      tabs.forEach((el) => {
+        const isActive = el.getAttribute("data-fundi-hub-tab") === tab;
+        el.setAttribute("aria-selected", String(isActive));
+        el.setAttribute("tabindex", isActive ? "0" : "-1");
+      });
+      const panels = hub.querySelectorAll("[data-fundi-hub-panel]");
+      panels.forEach((p) => {
+        if (p.getAttribute("data-fundi-hub-panel") === tab) p.removeAttribute("hidden");
+        else p.setAttribute("hidden", "");
+      });
+      setFundiHubPersistedTab(tab);
+      return;
+    }
+
+    const refreshBtn = target.closest("[data-fundi-hub-refresh]");
+    if (refreshBtn instanceof HTMLElement) {
+      refreshBtn.classList.add("is-spinning");
+      // Reusa pipeline existente: ao trocar/atualizar contexto, o ciclo
+      // de news intelligence eh disparado pelo orquestrador principal.
+      try {
+        if (typeof syncIntelligenceDeskForCurrentContext === "function") {
+          syncIntelligenceDeskForCurrentContext({ force: true });
+        }
+      } catch {
+        /* noop: fail silently */
+      }
+      window.setTimeout(() => refreshBtn.classList.remove("is-spinning"), 600);
+    }
+  });
+}
+
 function renderAnalysisTabContent(analysis, snapshot, options = {}) {
   if (!(analysisTabContentElement instanceof HTMLElement)) {
     return;
@@ -12449,38 +12738,16 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
     && newsIntelligencePayload.items.length > 0;
 
   if (hasLiveNews) {
-    const newsItems = newsIntelligencePayload.items.slice(0, 6);
-    const summary = newsIntelligencePayload.summary ?? {};
-    const updatedAt = formatShortTime(newsIntelligencePayload.fetchedAt);
-
-    analysisTabContentElement.innerHTML = `
-      <article class="analysis-block">
-        <h4>Noticias e eventos reais (multi-fonte)</h4>
-        <p>Cobertura: ${summary.sourcesHealthy ?? 0}/${summary.totalSources ?? 0} fontes • impacto medio ${(summary.averageImpactScore ?? 0).toFixed(1)} • relevancia media ${(summary.averageRelevanceScore ?? 0).toFixed(1)} • atualizado ${updatedAt}</p>
-        <div class="analysis-news-list">
-          ${newsItems
-            .map(
-              (item) => `
-            <article class="analysis-news-card">
-              <div class="analysis-news-top">
-                <strong>${escapeHtml(item.title)}</strong>
-                <span>${escapeHtml(item.source)}</span>
-              </div>
-              <p>${escapeHtml(item.summary)}</p>
-              <div class="analysis-news-meta">
-                <span>Impacto ${Number(item.impactScore).toFixed(1)}</span>
-                <span>Relevancia ${Number(item.relevanceScore).toFixed(1)}</span>
-                <span>Sentimento ${escapeHtml(item.sentiment)}</span>
-                <span>${escapeHtml(formatShortTime(item.publishedAt))}</span>
-              </div>
-              <div class="analysis-news-tags">${Array.isArray(item.tags) ? item.tags.map((tag) => escapeHtml(tag)).join(" • ") : ""}</div>
-              <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">Abrir fonte</a>
-            </article>`,
-            )
-            .join("")}
-        </div>
-      </article>
-    `;
+    // ADR-078 — Hub de Inteligencia Fundamentalista (sentimento + keywords +
+    // narrativa AI + tabs Noticias/Eventos + radar macro). Render derivado do
+    // payload existente + institutional.macroRadar; zero chamada externa nova.
+    analysisTabContentElement.innerHTML = renderFundamentalistHubHtml({
+      payload: newsIntelligencePayload,
+      snapshot,
+      analysis,
+      currency,
+    });
+    attachFundamentalistHubHandlers(analysisTabContentElement);
     return;
   }
 
