@@ -1732,6 +1732,7 @@ body.sidebar-collapsed .app-shell {
   border-radius: 14px;
   overflow: hidden;
   padding: 0.42rem;
+  position: relative;
 }
 
 .chart-viewport {
@@ -1745,6 +1746,17 @@ body.sidebar-collapsed .app-shell {
 .chart-viewport[data-execution-state="watch"] { box-shadow: inset 0 0 0 2px rgba(234, 179, 8, 0.38); }
 .chart-viewport[data-execution-state="blocked"],
 .chart-viewport[data-execution-state="incomplete"] { box-shadow: inset 0 0 0 2px rgba(248, 113, 113, 0.44); }
+
+.chart-execution-hud { background: rgba(2, 6, 23, 0.78); border: 1px solid rgba(148, 163, 184, 0.24); border-radius: 8px; box-shadow: 0 14px 36px rgba(2, 6, 23, 0.36); color: #e2e8f0; display: grid; gap: 0.4rem; max-width: min(320px, calc(100% - 1.4rem)); padding: 0.58rem 0.65rem; pointer-events: none; position: absolute; right: 0.78rem; top: 0.78rem; z-index: 4; }
+.chart-execution-hud[hidden] { display: none; }
+.chart-execution-hud[data-tone="bull"] { border-color: rgba(52, 211, 153, 0.48); background: rgba(2, 44, 34, 0.78); }
+.chart-execution-hud[data-tone="warn"] { border-color: rgba(234, 179, 8, 0.48); background: rgba(69, 45, 8, 0.78); }
+.chart-execution-hud[data-tone="danger"] { border-color: rgba(248, 113, 113, 0.52); background: rgba(69, 10, 10, 0.78); }
+.chart-execution-hud__head { align-items: center; display: flex; gap: 0.7rem; justify-content: space-between; }
+.chart-execution-hud__head span { color: #f8fafc; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.chart-execution-hud__head strong { color: #f8fafc; font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+.chart-execution-hud__body { display: grid; gap: 0.22rem 0.6rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.chart-execution-hud__body span { color: rgba(226, 232, 240, 0.88); font-size: 0.64rem; line-height: 1.25; overflow-wrap: anywhere; }
 
 .market-watch {
   background: rgba(5, 16, 30, 0.74);
@@ -4818,6 +4830,12 @@ body.sidebar-collapsed .app-shell {
     height: 340px;
   }
 
+  .chart-execution-hud {
+    left: 0.68rem;
+    max-width: none;
+    right: 0.68rem;
+  }
+
   .market-watch {
     max-height: none;
     min-height: 340px;
@@ -4995,6 +5013,10 @@ body.sidebar-collapsed .app-shell {
   .chart-viewport {
     min-height: 270px;
     height: 270px;
+  }
+
+  .chart-execution-hud__body {
+    grid-template-columns: 1fr;
   }
 
   .market-watch {

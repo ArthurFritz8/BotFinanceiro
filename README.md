@@ -155,6 +155,7 @@ Politica de retencao:
 69. ADR 097: `docs/ADR/ADR-097-execution-journal-ghost-score-timing.md`
 70. ADR 098: `docs/ADR/ADR-098-action-rail-visual-state-execution.md`
 71. ADR 099: `docs/ADR/ADR-099-score-qualidade-plano-execucao.md`
+72. ADR 100: `docs/ADR/ADR-100-hud-execucao-chart-lab.md`
 
 ## Relatorio completo desta entrega
 

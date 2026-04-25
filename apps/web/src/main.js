@@ -181,6 +181,7 @@ const prop3x7WinButton = document.querySelector("#prop-3x7-win");
 const prop3x7LossButton = document.querySelector("#prop-3x7-loss");
 const prop3x7ResetButton = document.querySelector("#prop-3x7-reset");
 const chartViewport = document.querySelector("#chart-viewport");
+const chartExecutionHudElement = document.querySelector("#chart-execution-hud");
 const chartMetricsElement = document.querySelector("#chart-metrics");
 const chartAnalyzeButton = document.querySelector("#chart-analyze-button");
 const analysisPanel = document.querySelector("#analysis-panel");
@@ -12831,6 +12832,57 @@ function renderTimingExecutionQualityPanel(executionQuality) {
   `;
 }
 
+function renderChartExecutionHud({ currency, currentPrice, executionGate, executionPlan, executionQuality }) {
+  if (!(chartExecutionHudElement instanceof HTMLElement)) {
+    return;
+  }
+
+  if (!executionPlan || !executionQuality) {
+    clearChartExecutionHud();
+    return;
+  }
+
+  const entry = executionPlan.entry ?? null;
+  const risk = executionPlan.risk ?? {};
+  const scoreLabel = Number.isFinite(executionQuality.score) ? executionQuality.score.toFixed(1) : "--";
+  const priceLabel = Number.isFinite(currentPrice) ? formatPrice(currentPrice, currency) : "n/d";
+  const entryLabel = entry
+    ? `${formatPrice(entry.low, currency)} - ${formatPrice(entry.high, currency)}`
+    : "n/d";
+  const riskLabel = Number.isFinite(risk.suggestedRiskPercent)
+    ? `${risk.suggestedRiskPercent.toFixed(2)}%`
+    : "0%";
+
+  chartExecutionHudElement.hidden = false;
+  chartExecutionHudElement.dataset.tone = executionQuality.tone ?? "warn";
+  chartExecutionHudElement.dataset.status = executionQuality.status ?? "watch";
+  chartExecutionHudElement.innerHTML = `
+    <div class="chart-execution-hud__head">
+      <span>${escapeHtml(executionQuality.label ?? "OBSERVAR")}</span>
+      <strong>${escapeHtml(scoreLabel)}/100</strong>
+    </div>
+    <div class="chart-execution-hud__body">
+      <span>Gate ${escapeHtml(executionGate?.label ?? "AGUARDAR")}</span>
+      <span>Plano ${escapeHtml(executionPlan.label ?? "AGUARDAR")}</span>
+      <span>Preco ${escapeHtml(priceLabel)}</span>
+      <span>Entrada ${escapeHtml(entryLabel)}</span>
+      <span>Risco ${escapeHtml(riskLabel)}</span>
+      <span>Amostra ${escapeHtml(executionQuality.sampleState ?? "Aquecendo")}</span>
+    </div>
+  `;
+}
+
+function clearChartExecutionHud() {
+  if (!(chartExecutionHudElement instanceof HTMLElement)) {
+    return;
+  }
+
+  chartExecutionHudElement.hidden = true;
+  chartExecutionHudElement.innerHTML = "";
+  delete chartExecutionHudElement.dataset.tone;
+  delete chartExecutionHudElement.dataset.status;
+}
+
 function resolveTimingCurrentPrice(snapshot) {
   const insightPrice = toFiniteNumber(snapshot?.insights?.currentPrice, Number.NaN);
 
@@ -13045,6 +13097,7 @@ function renderTimingDeskHtml(analysis, snapshot, currency) {
     journalSummary: executionJournal.summary,
   });
   updateExecutionChartVisualState(executionGate, executionPlan, executionJournal.summary, executionQuality);
+  renderChartExecutionHud({ currency, currentPrice, executionGate, executionPlan, executionQuality });
   const utcHourNow = new Date(nowMs).getUTCHours();
 
   const macroRadar = snapshot?.institutional?.macroRadar;
@@ -13209,6 +13262,7 @@ function renderDeepAnalysisPanelImmediate(snapshot) {
     clearEnsembleEngine();
     clearInstitutionalSummary();
     clearExecutionChartVisualState();
+    clearChartExecutionHud();
 
     if (analysisTabsElement instanceof HTMLElement) {
       analysisTabsElement.innerHTML = "";

@@ -36,6 +36,7 @@ test("index.html move risk desk para painel de analise profunda", async () => {
   assert.match(html, /grid grid-cols-1 md:grid-cols-3 gap-6/);
   assert.match(html, /id="watchlist-risk-summary"/);
   assert.match(html, /id="chart-fallback-badge"/);
+  assert.match(html, /id="chart-execution-hud"/);
   assert.match(html, /Alt\+G gestao de risco/);
   assert.doesNotMatch(watchlistMarkup, /id="prop-desk"/);
 });
@@ -251,6 +252,9 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /function updateExecutionChartVisualState\(executionGate, executionPlan, journal, quality\)/);
   assert.match(mainSource, /chartViewport\.dataset\.executionState/);
   assert.match(mainSource, /chartViewport\.dataset\.executionQuality/);
+  assert.match(mainSource, /function renderChartExecutionHud\(\{ currency, currentPrice, executionGate, executionPlan, executionQuality \}\)/);
+  assert.match(mainSource, /chartExecutionHudElement\.dataset\.status/);
+  assert.match(mainSource, /function clearChartExecutionHud\(\)/);
   assert.match(mainSource, /renderOrderFlowStrip\(orderFlow\)/);
   assert.match(mainSource, /renderTimingOrderFlowPanel\(orderFlow\)/);
   assert.match(
