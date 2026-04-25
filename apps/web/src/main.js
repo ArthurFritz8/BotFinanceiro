@@ -48,6 +48,7 @@ import {
   persistPositionCalcState,
   POSITION_CALC_PROFILES,
 } from "./modules/chart-lab/quant/position-calculator.js";
+import { createChartLabStore } from "./modules/chart-lab/chart-lab-store.js";
 import "./styles.css";
 
 const chatForm = document.querySelector("#chat-form");
@@ -1864,7 +1865,47 @@ let isMobileSidebarOpen = false;
 let authMode = AUTH_MODE_SIGN_IN;
 let activeAuthUser = null;
 let conversationItems = [];
-let currentChartSnapshot = null;
+const chartLabStore = createChartLabStore({
+  operationalMode: CHART_OPERATIONAL_MODE_SPOT_MARGIN,
+});
+const chartLabState = {
+  get snapshot() {
+    return chartLabStore.getSnapshot();
+  },
+  set snapshot(snapshot) {
+    chartLabStore.setSnapshot(snapshot);
+  },
+  get isLoading() {
+    return chartLabStore.getLoading();
+  },
+  set isLoading(isLoading) {
+    chartLabStore.setLoading(isLoading);
+  },
+  get viewMode() {
+    return chartLabStore.getViewMode();
+  },
+  set viewMode(viewMode) {
+    chartLabStore.setViewMode(viewMode);
+  },
+  get operationalMode() {
+    return chartLabStore.getOperationalMode();
+  },
+  set operationalMode(operationalMode) {
+    chartLabStore.setOperationalMode(operationalMode);
+  },
+  get symbolSourceModule() {
+    return chartLabStore.getSymbolSourceModule();
+  },
+  set symbolSourceModule(symbolSourceModule) {
+    chartLabStore.setSymbolSourceModule(symbolSourceModule);
+  },
+  get strategy() {
+    return chartLabStore.getStrategy();
+  },
+  set strategy(strategy) {
+    chartLabStore.setStrategy(strategy);
+  },
+};
 let chartAutoRefreshTimer = null;
 let chartLiveStream = null;
 let chartLiveStreamBackoffTimer = null;
@@ -1902,7 +1943,6 @@ let intelligenceSyncMetrics = {
   success: 0,
   successRatePercent: 0,
 };
-let isChartLoading = false;
 let chartApi = null;
 let chartBaseSeries = null;
 let chartBaseSeriesStyle = "";
@@ -1914,13 +1954,9 @@ let chartResizeObserver = null;
 let chartLatestCandles = [];
 let chartCandleByTime = new Map();
 let chartHasInitialFit = false;
-let chartViewMode = "tv";
-let chartOperationalMode = CHART_OPERATIONAL_MODE_SPOT_MARGIN;
 let activeTerminalInterval = TERMINAL_INTERVAL_DEFAULT;
 let favoriteTerminalIntervals = new Set(TERMINAL_INTERVAL_FAVORITE_DEFAULTS);
 let isChartIntervalMenuOpen = false;
-let chartSymbolSourceModule = "crypto";
-let currentChartStrategy = "crypto";
 let tvMountIdCounter = 0;
 let terminalRefreshTimer = null;
 let watchlistAutoRefreshTimer = null;
@@ -2164,12 +2200,12 @@ function shouldUseCryptoChartPipeline(symbol) {
     return true;
   }
 
-  if (chartSymbolSourceModule === "crypto" || chartSymbolSourceModule === "defi") {
+  if (chartLabState.symbolSourceModule === "crypto" || chartLabState.symbolSourceModule === "defi") {
     return true;
   }
 
   if (
-    chartSymbolSourceModule === "futures"
+    chartLabState.symbolSourceModule === "futures"
     && /(?:USDT|BUSD|USD)$/.test(normalizedSymbol)
     && !isLikelyForexPairSymbol(normalizedSymbol)
   ) {
@@ -2188,7 +2224,7 @@ function resolveChartPipelineStrategy(symbol) {
     return "crypto";
   }
 
-  if (INSTITUTIONAL_MACRO_MODULES.has(chartSymbolSourceModule)) {
+  if (INSTITUTIONAL_MACRO_MODULES.has(chartLabState.symbolSourceModule)) {
     return "institutional_macro";
   }
 
@@ -2208,7 +2244,7 @@ function canRunInstitutionalMacroForSymbol(symbol) {
     return true;
   }
 
-  return INSTITUTIONAL_MACRO_MODULES.has(chartSymbolSourceModule);
+  return INSTITUTIONAL_MACRO_MODULES.has(chartLabState.symbolSourceModule);
 }
 
 function normalizeChartOperationalMode(value) {
@@ -2226,15 +2262,15 @@ function getChartOperationalModeLabel(mode) {
   return CHART_OPERATIONAL_MODE_LABELS[mode] ?? CHART_OPERATIONAL_MODE_LABELS[CHART_OPERATIONAL_MODE_SPOT_MARGIN];
 }
 
-function isBinaryOptionsOperationalMode(mode = chartOperationalMode) {
+function isBinaryOptionsOperationalMode(mode = chartLabState.operationalMode) {
   return normalizeChartOperationalMode(mode) === CHART_OPERATIONAL_MODE_BINARY_OPTIONS;
 }
 
-function isSpotMarginOperationalMode(mode = chartOperationalMode) {
+function isSpotMarginOperationalMode(mode = chartLabState.operationalMode) {
   return normalizeChartOperationalMode(mode) === CHART_OPERATIONAL_MODE_SPOT_MARGIN;
 }
 
-function resolveGhostAuditOperationalMode(mode = chartOperationalMode) {
+function resolveGhostAuditOperationalMode(mode = chartLabState.operationalMode) {
   if (isBinaryOptionsOperationalMode(mode)) {
     return GHOST_AUDIT_OPERATIONAL_MODE_BINARY_OPTIONS;
   }
@@ -2246,7 +2282,7 @@ function resolveGhostAuditOperationalMode(mode = chartOperationalMode) {
   return null;
 }
 
-function isAnalysisTabVisible(tabId, mode = chartOperationalMode) {
+function isAnalysisTabVisible(tabId, mode = chartLabState.operationalMode) {
   const normalizedMode = normalizeChartOperationalMode(mode);
 
   if (tabId === "micro_timing") {
@@ -2260,12 +2296,12 @@ function isAnalysisTabVisible(tabId, mode = chartOperationalMode) {
   return true;
 }
 
-function resolveVisibleAnalysisTabs(mode = chartOperationalMode) {
+function resolveVisibleAnalysisTabs(mode = chartLabState.operationalMode) {
   const normalizedMode = normalizeChartOperationalMode(mode);
   return ANALYSIS_TAB_DEFINITIONS.filter((tab) => isAnalysisTabVisible(tab.id, normalizedMode));
 }
 
-function ensureActiveAnalysisTabForOperationalMode(mode = chartOperationalMode) {
+function ensureActiveAnalysisTabForOperationalMode(mode = chartLabState.operationalMode) {
   if (isAnalysisTabVisible(activeAnalysisTabId, mode)) {
     return;
   }
@@ -2279,7 +2315,7 @@ function updateOperationalModeTag() {
     return;
   }
 
-  chartOperationalModeTagElement.dataset.operationalMode = chartOperationalMode;
+  chartOperationalModeTagElement.dataset.operationalMode = chartLabState.operationalMode;
   chartOperationalModeTagElement.textContent = isBinaryOptionsOperationalMode()
     ? "Micro-Timing Desk"
     : "Live Desk";
@@ -2287,8 +2323,8 @@ function updateOperationalModeTag() {
 
 function setChartOperationalMode(nextMode, options = {}) {
   const normalizedMode = normalizeChartOperationalMode(nextMode);
-  const hasChanged = normalizedMode !== chartOperationalMode;
-  chartOperationalMode = normalizedMode;
+  const hasChanged = normalizedMode !== chartLabState.operationalMode;
+  chartLabState.operationalMode = normalizedMode;
 
   if (hasChanged) {
     setChartFallbackBadge("", "");
@@ -2307,14 +2343,14 @@ function setChartOperationalMode(nextMode, options = {}) {
   updateOperationalModeTag();
 
   ensureActiveAnalysisTabForOperationalMode(normalizedMode);
-  renderDeepAnalysisPanel(currentChartSnapshot);
+  renderDeepAnalysisPanel(chartLabState.snapshot);
 
   if (hasChanged && options.refreshChart === true) {
     void loadChart({
       silent: true,
     });
 
-    if (chartViewMode === "tv") {
+    if (chartLabState.viewMode === "tv") {
       scheduleTradingViewRefresh();
     }
   }
@@ -2332,10 +2368,13 @@ function applyExternalSymbolChartState(symbol, options = {}) {
   const normalizedSymbol = sanitizeTerminalSymbol(symbol);
   const silent = options.silent === true;
 
-  currentChartSnapshot = null;
+  chartLabState.snapshot = null;
+  chartLabStore.patchSelection({
+    symbol: normalizedSymbol,
+  });
   setChartFallbackBadge("", "");
 
-  if (chartViewMode === "copilot") {
+  if (chartLabState.viewMode === "copilot") {
     clearChartSurface();
   }
 
@@ -2426,7 +2465,7 @@ function setIntelligenceSyncInternalToken(token, options = {}) {
   binaryOptionsGhostAuditBackendState.requestKey = "";
 
   renderIntelligenceSyncOpsPanel();
-  renderDeepAnalysisPanel(currentChartSnapshot);
+  renderDeepAnalysisPanel(chartLabState.snapshot);
 
   if (activeAppRoute !== APP_ROUTE_CHART_LAB) {
     return;
@@ -2437,8 +2476,8 @@ function setIntelligenceSyncInternalToken(token, options = {}) {
       reschedule: true,
     });
 
-    if (currentChartSnapshot) {
-      void refreshBinaryOptionsGhostAuditHistory(currentChartSnapshot, {
+    if (chartLabState.snapshot) {
+      void refreshBinaryOptionsGhostAuditHistory(chartLabState.snapshot, {
         force: true,
       });
     }
@@ -6026,7 +6065,7 @@ function openMarketItemInChart(item) {
     chartAssetSelect.value = target.assetId;
   }
 
-  chartSymbolSourceModule = target.hasNativeAsset
+  chartLabState.symbolSourceModule = target.hasNativeAsset
     ? "crypto"
     : typeof target.module === "string"
       ? target.module
@@ -7599,10 +7638,10 @@ function setBinaryOptionsGhostAuditViewMode(nextMode, options = {}) {
   binaryOptionsGhostAuditBackendState.history = null;
   binaryOptionsGhostAuditBackendState.requestKey = "";
 
-  renderDeepAnalysisPanel(currentChartSnapshot);
+  renderDeepAnalysisPanel(chartLabState.snapshot);
 
-  if (options.refresh !== false && currentChartSnapshot) {
-    void refreshBinaryOptionsGhostAuditHistory(currentChartSnapshot, {
+  if (options.refresh !== false && chartLabState.snapshot) {
+    void refreshBinaryOptionsGhostAuditHistory(chartLabState.snapshot, {
       force: true,
     });
   }
@@ -7881,11 +7920,11 @@ async function refreshBinaryOptionsGhostAuditHistory(snapshot, options = {}) {
     binaryOptionsGhostAuditBackendState.fetchedAtMs = Date.now();
     binaryOptionsGhostAuditBackendState.history = payloadData;
     binaryOptionsGhostAuditBackendState.requestKey = requestKey;
-    renderDeepAnalysisPanel(currentChartSnapshot);
+    renderDeepAnalysisPanel(chartLabState.snapshot);
   } catch (error) {
     binaryOptionsGhostAuditBackendState.error = error instanceof Error ? error.message : "ghost-audit-history-failed";
     binaryOptionsGhostAuditBackendState.fetchedAtMs = Date.now();
-    renderDeepAnalysisPanel(currentChartSnapshot);
+    renderDeepAnalysisPanel(chartLabState.snapshot);
   } finally {
     binaryOptionsGhostAuditBackendState.inFlight = false;
   }
@@ -7905,7 +7944,7 @@ function buildBinaryOptionsGhostAuditSettlementPayload(input) {
 
   const signal = input?.signal;
   const snapshot = input?.snapshot;
-  const operationalMode = resolveGhostAuditOperationalMode(input?.operationalMode ?? chartOperationalMode);
+  const operationalMode = resolveGhostAuditOperationalMode(input?.operationalMode ?? chartLabState.operationalMode);
   const settledAtMs = toFiniteNumber(input?.nowMs, Date.now());
   const expiryPrice = toFiniteNumber(input?.currentPrice, Number.NaN);
 
@@ -8490,9 +8529,9 @@ function renderAnalysisTabs() {
 
   analysisTabsElement.innerHTML = "";
 
-  ensureActiveAnalysisTabForOperationalMode(chartOperationalMode);
+  ensureActiveAnalysisTabForOperationalMode(chartLabState.operationalMode);
 
-  for (const tab of resolveVisibleAnalysisTabs(chartOperationalMode)) {
+  for (const tab of resolveVisibleAnalysisTabs(chartLabState.operationalMode)) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `analysis-tab-button${activeAnalysisTabId === tab.id ? " is-active" : ""}`;
@@ -11496,7 +11535,7 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
     return;
   }
 
-  ensureActiveAnalysisTabForOperationalMode(chartOperationalMode);
+  ensureActiveAnalysisTabForOperationalMode(chartLabState.operationalMode);
 
   const currency = snapshot?.currency ?? "usd";
   const isBinaryMode = isBinaryOptionsOperationalMode();
@@ -12357,7 +12396,7 @@ function renderDeepAnalysisPanelImmediate(snapshot) {
   // ADR-076 — para o relogio UTC ao re-renderizar; reinicia se a aba ativa for "timing".
   stopTimingUtcClock();
 
-  ensureActiveAnalysisTabForOperationalMode(chartOperationalMode);
+  ensureActiveAnalysisTabForOperationalMode(chartLabState.operationalMode);
 
   const analysis = buildQuantitativeAnalysis(snapshot);
 
@@ -12435,7 +12474,7 @@ function renderDeepAnalysisPanelImmediate(snapshot) {
   renderTriggerNarrative(analysis);
   renderEnsembleEngine(analysis, snapshot, {
     microTiming: precomputedMicroTiming,
-    operationalMode: chartOperationalMode,
+    operationalMode: chartLabState.operationalMode,
   });
 
   if (analysisContextCardElement instanceof HTMLElement) {
@@ -12560,7 +12599,7 @@ function renderEnsembleEngine(analysis, snapshot, options = {}) {
   }
 
   const microTiming = options?.microTiming ?? null;
-  const operationalMode = options?.operationalMode ?? chartOperationalMode;
+  const operationalMode = options?.operationalMode ?? chartLabState.operationalMode;
   const isBinary = operationalMode === CHART_OPERATIONAL_MODE_BINARY_OPTIONS;
   const directionalBias = analysis.signal?.tone === "sell"
     ? "bear"
@@ -12834,7 +12873,7 @@ function renderInstitutionalSummary(analysis, snapshot, options = {}) {
   }
 
   const microTiming = options?.microTiming ?? null;
-  const operationalMode = chartOperationalMode;
+  const operationalMode = chartLabState.operationalMode;
 
   // KPI 1 — Assertividade real (Ghost Tracker, fail-honest)
   const ghostStats = isBinaryOptionsOperationalMode()
@@ -13132,7 +13171,7 @@ function saveChartPreferences() {
     favoriteIntervals: getOrderedFavoriteTerminalIntervals(),
     interval: getSelectedTerminalInterval(),
     mode: chartModeSelect instanceof HTMLSelectElement ? chartModeSelect.value : "delayed",
-    operationalMode: chartOperationalMode,
+    operationalMode: chartLabState.operationalMode,
     overlayEma:
       chartOverlayEmaToggle instanceof HTMLInputElement ? chartOverlayEmaToggle.checked : true,
     overlayLevels:
@@ -13143,7 +13182,7 @@ function saveChartPreferences() {
       chartSymbolInput instanceof HTMLInputElement
         ? sanitizeTerminalSymbol(chartSymbolInput.value)
         : "BTCUSDT",
-    viewMode: chartViewMode,
+    viewMode: chartLabState.viewMode,
   };
 
   try {
@@ -13177,11 +13216,11 @@ function hydrateChartPreferences() {
   }
 
   if (typeof preferences.operationalMode === "string") {
-    chartOperationalMode = normalizeChartOperationalMode(preferences.operationalMode);
+    chartLabState.operationalMode = normalizeChartOperationalMode(preferences.operationalMode);
   }
 
   if (chartOperationalModeSelect instanceof HTMLSelectElement) {
-    chartOperationalModeSelect.value = chartOperationalMode;
+    chartOperationalModeSelect.value = chartLabState.operationalMode;
   }
 
   if (
@@ -13253,7 +13292,7 @@ function hydrateChartPreferences() {
   });
 
   if (preferences.viewMode === "copilot" || preferences.viewMode === "tv") {
-    chartViewMode = preferences.viewMode;
+    chartLabState.viewMode = preferences.viewMode;
   }
 }
 
@@ -15057,7 +15096,7 @@ async function syncIntelligenceDeskForCurrentContext(options = {}) {
     ? options.reason
     : "context-sync";
 
-  if (isChartLoading) {
+  if (chartLabState.isLoading) {
     scheduleChartContextSync({
       delayMs: 140,
       reason,
@@ -15073,10 +15112,10 @@ async function syncIntelligenceDeskForCurrentContext(options = {}) {
   });
 
   const hasSnapshot =
-    currentChartSnapshot !== null
-    && typeof currentChartSnapshot === "object"
-    && Array.isArray(currentChartSnapshot.points)
-    && currentChartSnapshot.points.length > 0;
+    chartLabState.snapshot !== null
+    && typeof chartLabState.snapshot === "object"
+    && Array.isArray(chartLabState.snapshot.points)
+    && chartLabState.snapshot.points.length > 0;
   const statusIsError =
     chartStatusElement instanceof HTMLElement
     && chartStatusElement.getAttribute("data-mode") === "error";
@@ -15127,7 +15166,7 @@ function resolveTradingViewExchangePrefix(symbol) {
     return getTradingViewTerminalExchange();
   }
 
-  if (chartSymbolSourceModule === "b3" || chartSymbolSourceModule === "fiis") {
+  if (chartLabState.symbolSourceModule === "b3" || chartLabState.symbolSourceModule === "fiis") {
     return "BMFBOVESPA";
   }
 
@@ -15135,7 +15174,7 @@ function resolveTradingViewExchangePrefix(symbol) {
     return "BMFBOVESPA";
   }
 
-  if (chartSymbolSourceModule === "forex" || isLikelyForexPairSymbol(normalizedSymbol)) {
+  if (chartLabState.symbolSourceModule === "forex" || isLikelyForexPairSymbol(normalizedSymbol)) {
     return "FX_IDC";
   }
 
@@ -15148,19 +15187,19 @@ function resolveTradingViewExchangePrefix(symbol) {
   }
 
   if (
-    chartSymbolSourceModule === "equities"
-    || chartSymbolSourceModule === "wall-street"
-    || chartSymbolSourceModule === "etfs"
-    || chartSymbolSourceModule === "options"
+    chartLabState.symbolSourceModule === "equities"
+    || chartLabState.symbolSourceModule === "wall-street"
+    || chartLabState.symbolSourceModule === "etfs"
+    || chartLabState.symbolSourceModule === "options"
   ) {
     return "NASDAQ";
   }
 
   if (
-    chartSymbolSourceModule === "fixed-income"
-    || chartSymbolSourceModule === "macro-rates"
-    || chartSymbolSourceModule === "commodities"
-    || chartSymbolSourceModule === "futures"
+    chartLabState.symbolSourceModule === "fixed-income"
+    || chartLabState.symbolSourceModule === "macro-rates"
+    || chartLabState.symbolSourceModule === "commodities"
+    || chartLabState.symbolSourceModule === "futures"
   ) {
     return "TVC";
   }
@@ -15192,7 +15231,7 @@ function syncTerminalSymbolWithAsset() {
     return;
   }
 
-  chartSymbolSourceModule = "crypto";
+  chartLabState.symbolSourceModule = "crypto";
   chartSymbolInput.value = mapSymbolToExchange(mappedSymbol, getSelectedTerminalExchange());
 }
 
@@ -15834,7 +15873,7 @@ function configureWatchlistAutoRefresh() {
 }
 
 function setChartViewMode(nextMode) {
-  chartViewMode = nextMode === "copilot" ? "copilot" : "tv";
+  chartLabState.viewMode = nextMode === "copilot" ? "copilot" : "tv";
 
   if (chartViewSwitch instanceof HTMLElement) {
     const buttons = chartViewSwitch.querySelectorAll(".view-chip");
@@ -15844,21 +15883,21 @@ function setChartViewMode(nextMode) {
         return;
       }
 
-      const isActive = button.dataset.view === chartViewMode;
+      const isActive = button.dataset.view === chartLabState.viewMode;
       button.classList.toggle("is-active", isActive);
       button.setAttribute("aria-selected", isActive ? "true" : "false");
     });
   }
 
   if (tvStage instanceof HTMLElement) {
-    tvStage.classList.toggle("is-hidden", chartViewMode !== "tv");
+    tvStage.classList.toggle("is-hidden", chartLabState.viewMode !== "tv");
   }
 
   if (chartCopilotStage instanceof HTMLElement) {
-    chartCopilotStage.classList.toggle("is-hidden", chartViewMode !== "copilot");
+    chartCopilotStage.classList.toggle("is-hidden", chartLabState.viewMode !== "copilot");
   }
 
-  if (chartViewMode === "tv") {
+  if (chartLabState.viewMode === "tv") {
     setChartLegend(
       "Modo Terminal PRO ativo. Use a barra lateral para desenhar linha, texto, fibo e anotacoes.",
     );
@@ -15867,8 +15906,8 @@ function setChartViewMode(nextMode) {
     return;
   }
 
-  if (currentChartSnapshot) {
-    renderInteractiveChart(currentChartSnapshot);
+  if (chartLabState.snapshot) {
+    renderInteractiveChart(chartLabState.snapshot);
   }
 
   saveChartPreferences();
@@ -15910,7 +15949,7 @@ function buildTradingViewEmbedUrl(input) {
 }
 
 async function mountTradingViewWidget() {
-  if (chartViewMode !== "tv" || !(tvWidgetContainer instanceof HTMLElement)) {
+  if (chartLabState.viewMode !== "tv" || !(tvWidgetContainer instanceof HTMLElement)) {
     return;
   }
 
@@ -15948,7 +15987,7 @@ async function mountTradingViewWidget() {
 }
 
 function scheduleTradingViewRefresh() {
-  if (chartViewMode !== "tv") {
+  if (chartLabState.viewMode !== "tv") {
     return;
   }
 
@@ -16541,21 +16580,21 @@ function ensureInteractiveChart() {
   ensureChartOverlaySeries();
 
   chartApi.subscribeCrosshairMove((param) => {
-    if (!currentChartSnapshot) {
+    if (!chartLabState.snapshot) {
       return;
     }
 
     const time = parseTimeToUnixSeconds(param.time, Number.NaN);
 
     if (Number.isFinite(time) && chartCandleByTime.has(time)) {
-      updateChartLegendFromCandle(chartCandleByTime.get(time), currentChartSnapshot, true);
+      updateChartLegendFromCandle(chartCandleByTime.get(time), chartLabState.snapshot, true);
       return;
     }
 
     if (chartLatestCandles.length > 0) {
       updateChartLegendFromCandle(
         chartLatestCandles[chartLatestCandles.length - 1],
-        currentChartSnapshot,
+        chartLabState.snapshot,
       );
       return;
     }
@@ -17706,10 +17745,10 @@ function applyChartSnapshot(snapshot, options = {}) {
     throw new Error("Resposta de grafico invalida");
   }
 
-  currentChartSnapshot = snapshot;
-  currentChartStrategy = snapshot?.strategy === "institutional_macro" ? "institutional_macro" : "crypto";
+  chartLabState.snapshot = snapshot;
+  chartLabState.strategy = snapshot?.strategy === "institutional_macro" ? "institutional_macro" : "crypto";
 
-  if (currentChartStrategy === "crypto") {
+  if (chartLabState.strategy === "crypto") {
     void loadNewsIntelligence(snapshot.assetId);
   } else {
     newsIntelligencePayload = null;
@@ -17717,7 +17756,7 @@ function applyChartSnapshot(snapshot, options = {}) {
     newsIntelligenceLastFetchedAtMs = 0;
   }
 
-  if (chartViewMode === "copilot") {
+  if (chartLabState.viewMode === "copilot") {
     renderInteractiveChart(snapshot);
   }
 
@@ -17737,11 +17776,11 @@ function applyChartSnapshot(snapshot, options = {}) {
   const rangeLabel = CHART_RANGE_LABELS[snapshot.range] ?? snapshot.range;
   const modeLabel = CHART_MODE_LABELS[snapshot.mode] ?? snapshot.mode;
   const intervalLabel = getTerminalIntervalDisplayLabel(getSelectedTerminalInterval());
-  const styleLabel = chartViewMode === "tv"
+  const styleLabel = chartLabState.viewMode === "tv"
     ? CHART_STYLE_LABELS[getSelectedTerminalStyle()] ?? getSelectedTerminalStyle()
     : CHART_STYLE_LABELS[resolveChartStyle()] ?? resolveChartStyle();
-  const strategyLabel = currentChartStrategy === "institutional_macro" ? "institucional" : "crypto";
-  const operationalModeLabel = getChartOperationalModeLabel(chartOperationalMode);
+  const strategyLabel = chartLabState.strategy === "institutional_macro" ? "institucional" : "crypto";
+  const operationalModeLabel = getChartOperationalModeLabel(chartLabState.operationalMode);
   const displayProvider = typeof options.displayProvider === "string"
     ? options.displayProvider
     : snapshot.provider;
@@ -17793,7 +17832,7 @@ function applyChartSnapshot(snapshot, options = {}) {
     statusMode,
   );
 
-  if (chartViewMode !== "tv" && hasFallbackReason) {
+  if (chartLabState.viewMode !== "tv" && hasFallbackReason) {
     const fallbackLegendMessage = hasDelayedFallback
       ? `Fallback ativo: ${combinedFallbackReason}. Exibindo delayed temporariamente.`
       : hasIntervalFallback
@@ -17941,7 +17980,7 @@ function connectBinaryOptionsLiveStream(intervalMs) {
     startChartLiveFallbackPolling();
     const normalizedMessage = normalizeChartApiErrorMessage(message, "Stream de binarias reportou falha");
 
-    if (chartViewMode === "tv" && currentChartSnapshot) {
+    if (chartLabState.viewMode === "tv" && chartLabState.snapshot) {
       setChartLegendTransient(`Stream com oscilacao: ${normalizedMessage}`, "warn");
     } else {
       setChartStatus(normalizedMessage, "error");
@@ -17962,7 +18001,7 @@ function connectBinaryOptionsLiveStream(intervalMs) {
     chartLiveStreamReconnectAttempt += 1;
     const backoffMs = Math.min(30000, 1200 * 2 ** chartLiveStreamReconnectAttempt);
 
-    if (chartViewMode === "tv" && currentChartSnapshot) {
+    if (chartLabState.viewMode === "tv" && chartLabState.snapshot) {
       setChartLegendTransient(`Reconectando stream live em ${Math.round(backoffMs / 1000)}s...`, "warn");
     } else {
       setChartStatus(`Reconectando stream live em ${Math.round(backoffMs / 1000)}s...`, "loading");
@@ -18115,7 +18154,7 @@ function connectChartLiveStream(intervalMs) {
     startChartLiveFallbackPolling();
     const normalizedMessage = normalizeBrokerApiErrorMessage(message, "Stream de chart reportou falha");
 
-    if (chartViewMode === "tv" && currentChartSnapshot) {
+    if (chartLabState.viewMode === "tv" && chartLabState.snapshot) {
       if (chartStreamErrorLegendTimer !== null) {
         clearTimeout(chartStreamErrorLegendTimer);
       }
@@ -18155,7 +18194,7 @@ function connectChartLiveStream(intervalMs) {
     chartLiveStreamReconnectAttempt += 1;
     const backoffMs = Math.min(30000, 1200 * 2 ** chartLiveStreamReconnectAttempt);
 
-    if (chartViewMode === "tv" && currentChartSnapshot) {
+    if (chartLabState.viewMode === "tv" && chartLabState.snapshot) {
       setChartLegendTransient(`Reconectando stream live em ${Math.round(backoffMs / 1000)}s...`, "warn");
     } else {
       setChartStatus(`Reconectando stream live em ${Math.round(backoffMs / 1000)}s...`, "loading");
@@ -18230,7 +18269,7 @@ async function loadNewsIntelligence(assetId, options = {}) {
 
   if (!shouldRefreshNewsIntelligence(assetId, forceRefresh)) {
     if (activeAnalysisTabId === "noticias") {
-      renderDeepAnalysisPanel(currentChartSnapshot);
+      renderDeepAnalysisPanel(chartLabState.snapshot);
     }
 
     return;
@@ -18264,7 +18303,7 @@ async function loadNewsIntelligence(assetId, options = {}) {
     }
   } finally {
     if (activeAnalysisTabId === "noticias") {
-      renderDeepAnalysisPanel(currentChartSnapshot);
+      renderDeepAnalysisPanel(chartLabState.snapshot);
     }
   }
 }
@@ -18386,7 +18425,7 @@ async function loadChart(options = {}) {
     return;
   }
 
-  if (isChartLoading) {
+  if (chartLabState.isLoading) {
     queuePendingChartLoadRequest(options);
     return;
   }
@@ -18419,6 +18458,16 @@ async function loadChart(options = {}) {
   const range = options.range ?? chartRangeSelect.value;
   const silent = options.silent === true;
 
+  chartLabStore.patchSelection({
+    assetId,
+    broker: selectedBroker,
+    exchange: selectedExchange,
+    interval: selectedInterval,
+    mode,
+    range,
+    symbol: selectedTerminalSymbol,
+  });
+
   if (pipelineStrategy === "institutional_macro" && !canRunInstitutionalMacroForSymbol(selectedTerminalSymbol)) {
     stopChartLiveStream();
     applyExternalSymbolChartState(selectedTerminalSymbol, {
@@ -18427,7 +18476,7 @@ async function loadChart(options = {}) {
     return;
   }
 
-  isChartLoading = true;
+  chartLabState.isLoading = true;
 
   if (chartRefreshButton instanceof HTMLButtonElement && !silent) {
     chartRefreshButton.disabled = true;
@@ -18441,7 +18490,7 @@ async function loadChart(options = {}) {
   }
 
   try {
-    currentChartStrategy = pipelineStrategy;
+    chartLabState.strategy = pipelineStrategy;
     const binaryOperationalMode = isBinaryOptionsOperationalMode();
 
     if (pipelineStrategy === "institutional_macro") {
@@ -18453,7 +18502,7 @@ async function loadChart(options = {}) {
         selectedTerminalSymbol,
         range,
         mode,
-        chartSymbolSourceModule,
+        chartLabState.symbolSourceModule,
         selectedInterval,
       );
 
@@ -18546,7 +18595,7 @@ async function loadChart(options = {}) {
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Erro ao carregar grafico";
-    const shouldSurfaceStatusError = !silent || chartViewMode !== "tv";
+    const shouldSurfaceStatusError = !silent || chartLabState.viewMode !== "tv";
 
     if (pipelineStrategy === "institutional_macro") {
       if (!shouldSurfaceStatusError) {
@@ -18555,14 +18604,14 @@ async function loadChart(options = {}) {
 
       setChartStatus(errorMessage, "error");
 
-      if (currentChartSnapshot && chartViewMode === "copilot") {
-        renderInteractiveChart(currentChartSnapshot);
+      if (chartLabState.snapshot && chartLabState.viewMode === "copilot") {
+        renderInteractiveChart(chartLabState.snapshot);
         setChartLegend("Falha na atualizacao institucional. Mantendo ultimo snapshot valido.", "error");
       } else {
         clearChartSurface();
         setChartLegend("Falha ao carregar o motor institucional. Tente atualizar.", "error");
         renderChartMetrics(null);
-        currentChartSnapshot = null;
+        chartLabState.snapshot = null;
       }
 
       return;
@@ -18587,10 +18636,10 @@ async function loadChart(options = {}) {
         range,
       });
 
-      currentChartSnapshot = contingencySnapshot;
+      chartLabState.snapshot = contingencySnapshot;
       void loadNewsIntelligence(assetId);
 
-      if (chartViewMode === "copilot") {
+      if (chartLabState.viewMode === "copilot") {
         renderInteractiveChart(contingencySnapshot);
       }
 
@@ -18608,14 +18657,14 @@ async function loadChart(options = {}) {
 
       setChartStatus(errorMessage, "error");
 
-      if (currentChartSnapshot && chartViewMode === "copilot") {
-        renderInteractiveChart(currentChartSnapshot);
+      if (chartLabState.snapshot && chartLabState.viewMode === "copilot") {
+        renderInteractiveChart(chartLabState.snapshot);
         setChartLegend("Falha na atualizacao. Mantendo ultimo snapshot valido.", "error");
       } else {
         clearChartSurface();
         setChartLegend("Falha ao carregar o grafico. Tente atualizar.", "error");
         renderChartMetrics(null);
-        currentChartSnapshot = null;
+        chartLabState.snapshot = null;
       }
     }
   } finally {
@@ -18624,7 +18673,7 @@ async function loadChart(options = {}) {
       chartRefreshButton.textContent = "Atualizar grafico";
     }
 
-    isChartLoading = false;
+    chartLabState.isLoading = false;
 
     if (pendingChartLoadRequest !== null) {
       const nextRequest = pendingChartLoadRequest;
@@ -19339,7 +19388,7 @@ function openRiskManagementTab(options = {}) {
   }
 
   activeAnalysisTabId = "gestao_risco";
-  renderDeepAnalysisPanel(currentChartSnapshot);
+  renderDeepAnalysisPanel(chartLabState.snapshot);
 
   if (options.scroll === true && analysisPanel instanceof HTMLElement) {
     analysisPanel.scrollIntoView({
@@ -19422,8 +19471,8 @@ function setupChartKeyboardShortcuts() {
 
     if (lowerKey === "v") {
       event.preventDefault();
-      setChartViewMode(chartViewMode === "tv" ? "copilot" : "tv");
-      setChartLegend(`Atalho ativo: modo ${chartViewMode === "tv" ? "Terminal PRO" : "Insights IA"}.`);
+      setChartViewMode(chartLabState.viewMode === "tv" ? "copilot" : "tv");
+      setChartLegend(`Atalho ativo: modo ${chartLabState.viewMode === "tv" ? "Terminal PRO" : "Insights IA"}.`);
       return;
     }
 
@@ -19434,7 +19483,7 @@ function setupChartKeyboardShortcuts() {
         silent: true,
       });
 
-      if (chartViewMode === "tv") {
+      if (chartLabState.viewMode === "tv") {
         scheduleTradingViewRefresh();
       }
 
@@ -19445,7 +19494,7 @@ function setupChartKeyboardShortcuts() {
     if (lowerKey === "f") {
       event.preventDefault();
 
-      if (chartViewMode === "copilot") {
+      if (chartLabState.viewMode === "copilot") {
         fitChartContent();
       } else {
         scheduleTradingViewRefresh();
@@ -19464,7 +19513,7 @@ function setupChartLab() {
   hydrateChartPreferences();
   binaryOptionsRiskState = readStoredBinaryOptionsRiskState();
   updateOperationalModeTag();
-  ensureActiveAnalysisTabForOperationalMode(chartOperationalMode);
+  ensureActiveAnalysisTabForOperationalMode(chartLabState.operationalMode);
 
   if (
     chartSymbolInput instanceof HTMLInputElement
@@ -19504,7 +19553,7 @@ function setupChartLab() {
       silent: true,
     });
 
-    if (chartViewMode === "tv") {
+    if (chartLabState.viewMode === "tv") {
       scheduleTradingViewRefresh();
     }
 
@@ -19513,7 +19562,7 @@ function setupChartLab() {
 
   chartAssetSelect.addEventListener("change", () => {
     chartHasInitialFit = false;
-    chartSymbolSourceModule = "crypto";
+    chartLabState.symbolSourceModule = "crypto";
     syncTerminalSymbolWithAsset();
     renderWatchlist();
     configureChartAutoRefresh();
@@ -19522,7 +19571,7 @@ function setupChartLab() {
       silent: true,
     });
 
-    if (chartViewMode === "tv") {
+    if (chartLabState.viewMode === "tv") {
       scheduleTradingViewRefresh();
     }
 
@@ -19551,7 +19600,7 @@ function setupChartLab() {
         silent: true,
       });
 
-      if (chartViewMode === "tv") {
+      if (chartLabState.viewMode === "tv") {
         scheduleTradingViewRefresh();
       }
 
@@ -19573,11 +19622,11 @@ function setupChartLab() {
     chartStyleSelect.addEventListener("change", () => {
       chartHasInitialFit = false;
 
-      if (chartViewMode === "copilot" && currentChartSnapshot) {
-        renderInteractiveChart(currentChartSnapshot);
+      if (chartLabState.viewMode === "copilot" && chartLabState.snapshot) {
+        renderInteractiveChart(chartLabState.snapshot);
       }
 
-      if (chartViewMode === "tv") {
+      if (chartLabState.viewMode === "tv") {
         scheduleTradingViewRefresh();
       }
 
@@ -19619,7 +19668,7 @@ function setupChartLab() {
 
   if (chartSymbolInput) {
     chartSymbolInput.addEventListener("input", () => {
-      chartSymbolSourceModule = "";
+      chartLabState.symbolSourceModule = "";
       chartSymbolInput.value = mapSymbolToExchange(
         sanitizeTerminalSymbol(chartSymbolInput.value),
         getSelectedTerminalExchange(),
@@ -19663,7 +19712,7 @@ function setupChartLab() {
         });
       }
 
-      if (chartViewMode === "tv") {
+      if (chartLabState.viewMode === "tv") {
         scheduleTradingViewRefresh();
       }
 
@@ -19673,8 +19722,8 @@ function setupChartLab() {
 
   if (chartOverlayEmaToggle) {
     chartOverlayEmaToggle.addEventListener("change", () => {
-      if (chartViewMode === "copilot" && currentChartSnapshot) {
-        renderInteractiveChart(currentChartSnapshot);
+      if (chartLabState.viewMode === "copilot" && chartLabState.snapshot) {
+        renderInteractiveChart(chartLabState.snapshot);
       }
 
       saveChartPreferences();
@@ -19683,8 +19732,8 @@ function setupChartLab() {
 
   if (chartOverlayLevelsToggle) {
     chartOverlayLevelsToggle.addEventListener("change", () => {
-      if (chartViewMode === "copilot" && currentChartSnapshot) {
-        renderInteractiveChart(currentChartSnapshot);
+      if (chartLabState.viewMode === "copilot" && chartLabState.snapshot) {
+        renderInteractiveChart(chartLabState.snapshot);
       }
 
       saveChartPreferences();
@@ -19693,11 +19742,11 @@ function setupChartLab() {
 
   if (chartFitButton) {
     chartFitButton.addEventListener("click", () => {
-      if (chartViewMode === "copilot") {
+      if (chartLabState.viewMode === "copilot") {
         fitChartContent();
       }
 
-      if (chartViewMode === "tv") {
+      if (chartLabState.viewMode === "tv") {
         scheduleTradingViewRefresh();
       }
 
@@ -19885,7 +19934,7 @@ function setupChartLab() {
         chartExchangeSelect.value = exchange;
       }
 
-      chartSymbolSourceModule = "crypto";
+      chartLabState.symbolSourceModule = "crypto";
 
       renderWatchlist();
       chartHasInitialFit = false;
@@ -19921,9 +19970,9 @@ function setupChartLab() {
       const exchange = getSelectedTerminalExchange();
       const modeLabel = CHART_MODE_LABELS[mode] ?? mode;
       const rangeLabel = CHART_RANGE_LABELS[range] ?? range;
-      const operationalModeLabel = getChartOperationalModeLabel(chartOperationalMode);
-      const trend = currentChartSnapshot?.insights?.trend
-        ? formatTrendLabel(currentChartSnapshot.insights.trend).toLowerCase()
+      const operationalModeLabel = getChartOperationalModeLabel(chartLabState.operationalMode);
+      const trend = chartLabState.snapshot?.insights?.trend
+        ? formatTrendLabel(chartLabState.snapshot.insights.trend).toLowerCase()
         : "viés indefinido";
 
       if (isBinaryOptionsOperationalMode()) {
@@ -19948,16 +19997,16 @@ function setupChartLab() {
       }
 
       const tabId = target.dataset.tab;
-      const availableTabs = resolveVisibleAnalysisTabs(chartOperationalMode);
+      const availableTabs = resolveVisibleAnalysisTabs(chartLabState.operationalMode);
 
       if (!tabId || !availableTabs.some((item) => item.id === tabId)) {
         return;
       }
 
       activeAnalysisTabId = tabId;
-      renderDeepAnalysisPanel(currentChartSnapshot);
+      renderDeepAnalysisPanel(chartLabState.snapshot);
 
-      if (tabId === "noticias" && currentChartStrategy === "crypto" && chartAssetSelect instanceof HTMLSelectElement) {
+      if (tabId === "noticias" && chartLabState.strategy === "crypto" && chartAssetSelect instanceof HTMLSelectElement) {
         void loadNewsIntelligence(chartAssetSelect.value);
       }
     });
@@ -19982,8 +20031,8 @@ function setupChartLab() {
   renderIntelligenceSyncOpsPanel();
 
   ensureInteractiveChart();
-  setChartViewMode(chartViewMode);
-  setChartOperationalMode(chartOperationalMode, {
+  setChartViewMode(chartLabState.viewMode);
+  setChartOperationalMode(chartLabState.operationalMode, {
     announce: false,
     persist: false,
     refreshChart: false,

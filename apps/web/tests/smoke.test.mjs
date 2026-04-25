@@ -82,7 +82,7 @@ test("main.js prioriza prefixo cripto no TradingView e reseta modulo na watchlis
   const mainSource = await readWebFile("src/main.js");
 
   const cryptoPrefixIndex = mainSource.indexOf("if (isLikelyCryptoTerminalSymbol(normalizedSymbol)) {");
-  const fixedIncomePrefixIndex = mainSource.indexOf("chartSymbolSourceModule === \"fixed-income\"");
+  const fixedIncomePrefixIndex = mainSource.indexOf("chartLabState.symbolSourceModule === \"fixed-income\"");
 
   assert.ok(cryptoPrefixIndex >= 0, "bloco de prefixo cripto nao encontrado");
   assert.ok(fixedIncomePrefixIndex >= 0, "bloco de prefixo institucional nao encontrado");
@@ -93,7 +93,7 @@ test("main.js prioriza prefixo cripto no TradingView e reseta modulo na watchlis
 
   assert.match(
     mainSource,
-    /watchlistGrid\.addEventListener\("click", \(event\) => \{[\s\S]*chartSymbolSourceModule = "crypto";/,
+    /watchlistGrid\.addEventListener\("click", \(event\) => \{[\s\S]*chartLabState\.symbolSourceModule = "crypto";/,
   );
 });
 
@@ -160,8 +160,8 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /let binaryOptionsGhostAuditBackendState = createBinaryOptionsGhostAuditBackendState\(\);/);
   assert.match(mainSource, /let binaryOptionsGhostAuditViewMode = BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION;/);
   assert.match(mainSource, /function resolveAutoChartPrimaryBroker\(\)/);
-  assert.match(mainSource, /function isSpotMarginOperationalMode\(mode = chartOperationalMode\)/);
-  assert.match(mainSource, /function resolveGhostAuditOperationalMode\(mode = chartOperationalMode\)/);
+  assert.match(mainSource, /function isSpotMarginOperationalMode\(mode = chartLabState\.operationalMode\)/);
+  assert.match(mainSource, /function resolveGhostAuditOperationalMode\(mode = chartLabState\.operationalMode\)/);
   assert.match(mainSource, /function resolveChartRangeForTerminalInterval\(interval\)/);
   assert.match(mainSource, /function syncChartRangeWithTerminalInterval\(interval, options = \{\}\)/);
   assert.match(mainSource, /function queuePendingChartLoadRequest\(options = \{\}\)/);
@@ -207,7 +207,7 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /"x-intelligence-correlation-id": correlationId/);
   assert.match(mainSource, /buildApiUrl\(INTELLIGENCE_SYNC_TELEMETRY_ENDPOINT\)/);
   assert.match(mainSource, /if \(pipelineStrategy === "institutional_macro" && !canRunInstitutionalMacroForSymbol\(selectedTerminalSymbol\)\)/);
-  assert.match(mainSource, /if \(isChartLoading\) \{[\s\S]*queuePendingChartLoadRequest\(options\);[\s\S]*return;[\s\S]*\}/);
+  assert.match(mainSource, /if \(chartLabState\.isLoading\) \{[\s\S]*queuePendingChartLoadRequest\(options\);[\s\S]*return;[\s\S]*\}/);
   assert.match(mainSource, /if \(pendingChartLoadRequest !== null\) \{[\s\S]*const nextRequest = pendingChartLoadRequest;[\s\S]*pendingChartLoadRequest = null;[\s\S]*void loadChart\(nextRequest\);[\s\S]*\}/);
   assert.match(mainSource, /function updateAutoChartPreferredBroker\(nextBroker, options = \{\}\)/);
   assert.match(mainSource, /if \(requestedBroker === "auto"\) \{/);
