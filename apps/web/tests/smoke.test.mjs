@@ -218,6 +218,10 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /function resetChartAssetScopedState\(nextContext, options = \{\}\)/);
   assert.match(mainSource, /deriveSmcConfluence/);
   assert.match(mainSource, /smcConfluence\.checks\.fvgAligned/);
+  assert.match(mainSource, /buildLiquidityHeatmapSnapshot/);
+  assert.match(mainSource, /function renderSmcLiquidityHeatmapPanel\(view, currency\)/);
+  assert.match(mainSource, /liquidityHeatmap\.zones/);
+  assert.match(mainSource, /id="smc-liquidity-heatmap-panel"/);
   assert.match(mainSource, /buildVisualIntelligenceEvidence/);
   assert.match(mainSource, /function renderVisualIntelligenceTab\(evidence\)/);
   assert.match(mainSource, /buildTimingOrderFlowSnapshot/);

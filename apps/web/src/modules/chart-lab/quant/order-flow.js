@@ -126,8 +126,8 @@ export function buildTimingOrderFlowSnapshot(input = {}) {
   const baseline = volumes.slice(Math.max(0, volumes.length - lookback - 1), Math.max(0, volumes.length - 1));
   const volumeMean = computeMean(baseline);
   const volumeStdDev = computeStdDev(baseline, volumeMean);
-  const volumeZScore = volumeStdDev > 0 ? (latestVolume - volumeMean) / volumeStdDev : 0;
   const volumeReady = baseline.length >= 10 && volumeMean > 0 && volumeStdDev > 0;
+  const volumeZScore = volumeReady ? (latestVolume - volumeMean) / volumeStdDev : 0;
   const volumeAnomaly = volumeReady && Math.abs(volumeZScore) >= 2;
   const volumeTone = !volumeReady
     ? "neutral"

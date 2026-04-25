@@ -148,6 +148,7 @@ Politica de retencao:
 62. ADR 090: `docs/ADR/ADR-090-calculadora-posicao-multi-asset.md`
 63. ADR 091: `docs/ADR/ADR-091-visual-ia-evidencia-quantitativa.md`
 64. ADR 092: `docs/ADR/ADR-092-order-flow-cvd-volume-zscore-timing.md`
+65. ADR 093: `docs/ADR/ADR-093-heatmap-liquidez-price-zones.md`
 
 ## Relatorio completo desta entrega
 

@@ -49,6 +49,7 @@ import {
   persistPositionCalcState,
   POSITION_CALC_PROFILES,
 } from "./modules/chart-lab/quant/position-calculator.js";
+import { buildLiquidityHeatmapSnapshot } from "./modules/chart-lab/quant/liquidity-heatmap.js";
 import { buildTimingOrderFlowSnapshot } from "./modules/chart-lab/quant/order-flow.js";
 import { deriveSmcConfluence } from "./modules/chart-lab/quant/smc-derivations.js";
 import { buildVisualIntelligenceEvidence } from "./modules/chart-lab/quant/visual-intelligence.js";
@@ -9026,6 +9027,7 @@ function smcZoneTone(zone) {
 function buildSmcInstitutionalView(analysis, snapshot, currency) {
   const insights = snapshot?.insights ?? {};
   const ms = insights.marketStructure ?? {};
+  const liquidityHeatmap = buildLiquidityHeatmapSnapshot({ snapshot });
   const currentPrice = Number(insights.currentPrice ?? 0);
   const swingHigh = Number(ms.lastSwingHigh ?? 0);
   const swingLow = Number(ms.lastSwingLow ?? 0);
@@ -9122,6 +9124,7 @@ function buildSmcInstitutionalView(analysis, snapshot, currency) {
     ssl: Number.isFinite(Number(ssl)) ? Number(ssl) : null,
     swingRangePercent: Number(ms.swingRangePercent ?? 0),
     invalidationLevel: analysis?.timing?.invalidationLevel ?? null,
+    liquidityHeatmap,
     smcText: {
       structure: analysis?.smc?.structure ?? "",
       liquidity: analysis?.smc?.liquidity ?? "",
@@ -9271,6 +9274,40 @@ function renderSmcLiquidityPanel(view, currency) {
         </li>
       </ul>
       <p class="smc-narrative">${escapeHtml(view.smcText.sweepRisk || "Sem leitura de risco de sweep no momento.")}</p>
+    </article>
+  `;
+}
+
+function renderSmcLiquidityHeatmapPanel(view, currency) {
+  const heatmap = view?.liquidityHeatmap ?? { ready: false, zones: [], sampleSize: 0 };
+  const zones = Array.isArray(heatmap.zones) ? heatmap.zones : [];
+  const rows = zones.length === 0
+    ? `<li class="smc-empty">Heatmap em aquecimento: aguardando OHLCV suficiente para clusterizar liquidez.</li>`
+    : zones.map((zone, index) => {
+        const tone = zone.tone === "bull" || zone.tone === "bear" ? zone.tone : "neutral";
+        const priceLabel = Number.isFinite(zone.center) ? formatPrice(zone.center, currency) : "—";
+        const distanceLabel = Number.isFinite(zone.distancePercent)
+          ? `${zone.distancePercent > 0 ? "+" : ""}${zone.distancePercent.toFixed(2)}%`
+          : "n/d";
+        return `
+          <li class="smc-liq-row" data-tone="${tone}" id="smc-liq-heatmap-${index}" title="touches=${Number(zone.touchCount ?? 0)}; volumeWeight=${Number(zone.volumeWeight ?? 0).toFixed(2)}; side=${escapeHtml(zone.side)}">
+            <span class="smc-liq-row__kind">${escapeHtml(zone.label)} · ${escapeHtml(zone.density)}</span>
+            <span class="smc-mono">${escapeHtml(priceLabel)}</span>
+            <span class="smc-liq-row__tag" data-tone="neutral">${escapeHtml(distanceLabel)}</span>
+          </li>
+        `;
+      }).join("");
+  const nearestAbove = heatmap.nearestAbove?.center != null ? formatPrice(heatmap.nearestAbove.center, currency) : "—";
+  const nearestBelow = heatmap.nearestBelow?.center != null ? formatPrice(heatmap.nearestBelow.center, currency) : "—";
+
+  return `
+    <article class="analysis-block smc-panel" id="smc-liquidity-heatmap-panel">
+      <header class="smc-panel__head">
+        <h4>Heatmap de Liquidez</h4>
+        <span class="smc-panel__hint" title="Derivado de clusters de high/low/close ponderados por volume local">${heatmap.ready ? "Ativo" : "Aquecendo"}</span>
+      </header>
+      <ul class="smc-list" role="list">${rows}</ul>
+      <p class="smc-narrative">BSL mais proxima: <span class="smc-mono">${escapeHtml(nearestAbove)}</span> · SSL mais proxima: <span class="smc-mono">${escapeHtml(nearestBelow)}</span> · Amostra ${Number(heatmap.sampleSize ?? 0)} candles.</p>
     </article>
   `;
 }
@@ -10119,6 +10156,7 @@ function renderInstitutionalSmcTab(analysis, snapshot, currency) {
         ${renderSmcFvgPanel(view, currency)}
       </div>
       ${renderSmcLiquidityPanel(view, currency)}
+      ${renderSmcLiquidityHeatmapPanel(view, currency)}
       ${renderSmcConfluenceChecklist(smcConfluence)}
       ${renderSmcTopDownDrillDown(snapshot, currency)}
     </section>
@@ -16606,6 +16644,7 @@ function applyChartLevels(snapshot, enabled) {
   const insights = snapshot.insights;
   const tradeLevels = insights.tradeLevels ?? {};
   const ms = insights.marketStructure ?? {};
+  const liquidityHeatmap = buildLiquidityHeatmapSnapshot({ snapshot });
   const currentPrice = Number(insights.currentPrice ?? snapshot.currentPrice ?? 0);
   const intervalLabel = (typeof activeTerminalInterval === "string" ? activeTerminalInterval : "").toUpperCase();
   const entryLow = Number(tradeLevels.entryZoneLow);
@@ -16713,6 +16752,19 @@ function applyChartLevels(snapshot, enabled) {
       label: `FVG${intervalLabel ? " " + intervalLabel : ""}`,
       labelColor: ANNO_PALETTE.fvg,
       dashed: true,
+    });
+  }
+
+  for (const zone of liquidityHeatmap.zones) {
+    if (!Number.isFinite(zone.bottom) || !Number.isFinite(zone.top) || zone.top <= zone.bottom) continue;
+    zones.push({
+      bottom: zone.bottom,
+      dashed: true,
+      fill: zone.fill,
+      label: zone.label,
+      labelColor: zone.labelColor,
+      stroke: zone.stroke,
+      top: zone.top,
     });
   }
 

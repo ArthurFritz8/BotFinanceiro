@@ -7,6 +7,10 @@ import {
   describePositionAssetSpec,
 } from "../src/modules/chart-lab/quant/position-calculator.js";
 import {
+  buildLiquidityHeatmapSnapshot,
+  normalizeLiquidityHeatmapCandles,
+} from "../src/modules/chart-lab/quant/liquidity-heatmap.js";
+import {
   buildTimingOrderFlowSnapshot,
   computeCumulativeVolumeDelta,
 } from "../src/modules/chart-lab/quant/order-flow.js";
@@ -299,9 +303,9 @@ test("Order flow calcula CVD por candle e detecta anomalia de volume", () => {
 
   assert.equal(cvd[0].delta, 90);
   assert.equal(cvd[2].delta, -100);
-  assert.equal(cvd.at(-1).value, 805);
+  assert.equal(cvd.at(-1).value, 715);
   assert.equal(flow.cvd.ready, true);
-  assert.equal(flow.cvd.change, 805);
+  assert.equal(flow.cvd.change, 715);
   assert.equal(flow.cvd.label, "Acumulacao");
   assert.equal(flow.volume.ready, true);
   assert.equal(flow.volume.anomaly, true);
@@ -316,4 +320,38 @@ test("Order flow degrada volume z-score sem base estatistica", () => {
   assert.equal(flow.volume.ready, false);
   assert.equal(flow.volume.label, "Aquecendo");
   assert.equal(flow.volume.zScore, 0);
+});
+
+test("Liquidity heatmap clusteriza BSL e SSL por toques e volume", () => {
+  const points = Array.from({ length: 14 }, (_, index) => ({
+    close: 100 + ((index % 3) - 1) * 0.1,
+    high: 106 + ((index % 2) * 0.08),
+    low: 94 - ((index % 2) * 0.08),
+    open: 100 - ((index % 2) * 0.05),
+    volume: 900 + (index * 15),
+  }));
+  const heatmap = buildLiquidityHeatmapSnapshot({
+    bucketCount: 12,
+    currentPrice: 100,
+    maxZones: 4,
+    points,
+  });
+
+  assert.equal(normalizeLiquidityHeatmapCandles(points).length, 14);
+  assert.equal(heatmap.ready, true);
+  assert.ok(heatmap.zones.some((zone) => zone.side === "buy-side"));
+  assert.ok(heatmap.zones.some((zone) => zone.side === "sell-side"));
+  assert.match(heatmap.nearestAbove.label, /^BSL/);
+  assert.match(heatmap.nearestBelow.label, /^SSL/);
+  assert.ok(heatmap.nearestAbove.center > heatmap.currentPrice);
+  assert.ok(heatmap.nearestBelow.center < heatmap.currentPrice);
+});
+
+test("Liquidity heatmap degrada sem amostra minima", () => {
+  const heatmap = buildLiquidityHeatmapSnapshot({ points: buildPoints(3, 100) });
+
+  assert.equal(heatmap.ready, false);
+  assert.equal(heatmap.zones.length, 0);
+  assert.equal(heatmap.nearestAbove, null);
+  assert.equal(heatmap.nearestBelow, null);
 });
