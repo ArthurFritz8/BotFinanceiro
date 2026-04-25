@@ -20,6 +20,7 @@ import {
   deriveSmcConfluence,
   normalizeSmcCandles,
 } from "../src/modules/chart-lab/quant/smc-derivations.js";
+import { buildVisualIntelligenceEvidence } from "../src/modules/chart-lab/quant/visual-intelligence.js";
 
 function buildPoints(count, start = 100) {
   return Array.from({ length: count }, (_, index) => {
@@ -34,6 +35,17 @@ function buildPoints(count, start = 100) {
       volume: 1000 + index,
     };
   });
+}
+
+function buildHammerTrainingPoints(count = 6) {
+  const points = [];
+  for (let index = 0; index < count; index += 1) {
+    const base = 100 + index;
+    points.push({ open: base, high: base + 0.6, low: base - 0.2, close: base - 0.1 });
+    points.push({ open: base, high: base + 0.25, low: base - 1, close: base + 0.2 });
+    points.push({ open: base + 0.2, high: base + 1.2, low: base + 0.1, close: base + 1 });
+  }
+  return points;
 }
 
 test("Risk Lab calcula stake escalonado com teto de recuperacao", () => {
@@ -214,4 +226,51 @@ test("SMC derivations detecta FVG bullish mitigado e alinhado", () => {
   assert.equal(smc.fvg.bias, "bullish");
   assert.equal(smc.fvg.mitigated, true);
   assert.equal(smc.checks.fvgAligned, true);
+});
+
+test("Visual IA deriva evidencia real de candle estatistico e harmonico alinhado", () => {
+  const evidence = buildVisualIntelligenceEvidence({
+    analysis: {
+      signal: {
+        confidence: 72,
+        riskReward: 1.8,
+        tone: "buy",
+      },
+    },
+    harmonicScanner: {
+      bestPattern: {
+        confidence: 82,
+        name: "Gartley",
+        ratiosValidation: { XD: { status: "ok" } },
+        state: { label: "Formado", tone: "ok" },
+      },
+      confluenceCount: 1,
+      tone: "buy",
+    },
+    points: buildHammerTrainingPoints(6),
+  });
+
+  assert.equal(evidence.primaryCandle.id, "hammer");
+  assert.equal(evidence.primaryCandle.ready, true);
+  assert.equal(evidence.primaryCandle.winRatePercent, 100);
+  assert.equal(evidence.harmonic.pattern, "Gartley");
+  assert.equal(evidence.score, 100);
+  assert.equal(evidence.verdict.label, "Setup visual ativo");
+  assert.equal(evidence.cards.find((card) => card.id === "execution").value, "Validado");
+});
+
+test("Visual IA degrada sem amostra minima de candle", () => {
+  const evidence = buildVisualIntelligenceEvidence({
+    analysis: {
+      signal: {
+        confidence: 40,
+        tone: "neutral",
+      },
+    },
+    points: buildPoints(3),
+  });
+
+  assert.equal(evidence.score, 0);
+  assert.equal(evidence.verdict.label, "Aguardar leitura visual");
+  assert.equal(evidence.cards.find((card) => card.id === "candle").tone, "empty");
 });

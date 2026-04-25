@@ -50,6 +50,7 @@ import {
   POSITION_CALC_PROFILES,
 } from "./modules/chart-lab/quant/position-calculator.js";
 import { deriveSmcConfluence } from "./modules/chart-lab/quant/smc-derivations.js";
+import { buildVisualIntelligenceEvidence } from "./modules/chart-lab/quant/visual-intelligence.js";
 import { createChartLabStore } from "./modules/chart-lab/chart-lab-store.js";
 import { createChartLoadController } from "./modules/chart-lab/chart-load-controller.js";
 import { createChartLiveStreamController } from "./modules/chart-lab/chart-live-stream-controller.js";
@@ -10815,6 +10816,78 @@ function renderHarmonicScanner(scanner) {
   `;
 }
 
+function renderVisualAiEvidenceCard(card) {
+  return `
+    <article class="visual-ai-card" data-tone="${escapeHtml(card.tone)}" title="${escapeHtml(card.audit)}">
+      <span class="visual-ai-card__label">${escapeHtml(card.label)}</span>
+      <strong class="visual-ai-card__value">${escapeHtml(card.value)}</strong>
+      <small>${escapeHtml(card.detail)}</small>
+    </article>
+  `;
+}
+
+function renderVisualAiChecklist(checks) {
+  return checks.map((check) => `
+    <li class="visual-ai-check" data-ok="${check.ok ? "true" : "false"}" title="${escapeHtml(check.detail)}">
+      <span class="visual-ai-check__icon" aria-hidden="true">${check.ok ? "✓" : "✕"}</span>
+      <span class="visual-ai-check__label">${escapeHtml(check.label)}</span>
+      <span class="visual-ai-check__detail">${escapeHtml(check.detail)}</span>
+    </li>
+  `).join("");
+}
+
+function renderVisualIntelligenceTab(evidence) {
+  const cards = Array.isArray(evidence?.cards) ? evidence.cards : [];
+  const checks = Array.isArray(evidence?.checks) ? evidence.checks : [];
+  const verdict = evidence?.verdict ?? { label: "Aguardar leitura visual", tone: "neutral", detail: "Evidencia indisponivel." };
+  const score = Number.isFinite(evidence?.score) ? evidence.score : 0;
+  const candleLabel = evidence?.primaryCandle?.label ?? "n/d";
+  const harmonicLabel = evidence?.harmonic?.pattern ?? "n/d";
+  const signalConfidence = Number.isFinite(evidence?.signal?.confidence) ? evidence.signal.confidence.toFixed(0) : "0";
+  const riskReward = Number.isFinite(evidence?.signal?.riskReward) && evidence.signal.riskReward > 0
+    ? evidence.signal.riskReward.toFixed(2)
+    : "n/d";
+
+  return `
+    <section class="visual-ai-desk" data-tone="${escapeHtml(verdict.tone)}" aria-label="Leitura Visual Quantitativa">
+      <header class="visual-ai-head">
+        <div>
+          <h3>Leitura Visual Quantitativa</h3>
+          <p>${escapeHtml(verdict.detail)}</p>
+        </div>
+        <div class="visual-ai-score" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${score}">
+          <strong>${score}</strong>
+          <span>/100</span>
+        </div>
+      </header>
+
+      <div class="visual-ai-verdict" data-tone="${escapeHtml(verdict.tone)}">
+        <strong>${escapeHtml(verdict.label)}</strong>
+        <span>Amostra ${Number(evidence?.sampleSize ?? 0)} candles - sinal ${escapeHtml(String(evidence?.signal?.bias ?? "neutral"))}</span>
+      </div>
+
+      <div class="visual-ai-grid" role="list">
+        ${cards.map(renderVisualAiEvidenceCard).join("")}
+      </div>
+
+      <div class="visual-ai-body">
+        <ul class="visual-ai-checklist" role="list">
+          ${renderVisualAiChecklist(checks)}
+        </ul>
+        <article class="visual-ai-audit">
+          <h4>Auditoria da leitura</h4>
+          <dl>
+            <div><dt>Candle primario</dt><dd>${escapeHtml(candleLabel)}</dd></div>
+            <div><dt>Padrao harmonico</dt><dd>${escapeHtml(harmonicLabel)}</dd></div>
+            <div><dt>Confianca do sinal</dt><dd>${escapeHtml(signalConfidence)}%</dd></div>
+            <div><dt>Risco/recompensa</dt><dd>${escapeHtml(riskReward)}</dd></div>
+          </dl>
+        </article>
+      </div>
+    </section>
+  `;
+}
+
 function renderFibonacciAuxiliary(fib) {
   if (!fib || !Array.isArray(fib.levels) || fib.levels.length === 0) {
     return "";
@@ -12110,14 +12183,13 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
   }
 
   if (activeAnalysisTabId === "visual_ia") {
-    analysisTabContentElement.innerHTML = `
-      <article class="analysis-block">
-        <h4>Checklist visual inteligente</h4>
-        <ul class="analysis-list">
-          ${analysis.visualChecklist.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-        </ul>
-      </article>
-    `;
+    const harmonicScanner = buildHarmonicGeometryScanner(analysis, currency);
+    const visualEvidence = buildVisualIntelligenceEvidence({
+      analysis,
+      harmonicScanner,
+      points: snapshot?.points,
+    });
+    analysisTabContentElement.innerHTML = renderVisualIntelligenceTab(visualEvidence);
     return;
   }
 
