@@ -216,6 +216,8 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /chartAssetGeneration\.assertCurrent\(assetGenerationToken\)/);
   assert.match(mainSource, /resetChartAssetContext/);
   assert.match(mainSource, /function resetChartAssetScopedState\(nextContext, options = \{\}\)/);
+  assert.match(mainSource, /deriveSmcConfluence/);
+  assert.match(mainSource, /smcConfluence\.checks\.fvgAligned/);
   assert.match(mainSource, /if \(pipelineStrategy === "institutional_macro" && !canRunInstitutionalMacroForSymbol\(selectedTerminalSymbol\)\)/);
   assert.match(mainSource, /if \(chartLoadController\.queueIfBusy\(loadOptions\)\) \{[\s\S]*return;[\s\S]*\}/);
   assert.match(mainSource, /chartLoadController\.start\(\);/);

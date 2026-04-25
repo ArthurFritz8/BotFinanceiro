@@ -48,6 +48,7 @@ import {
   persistPositionCalcState,
   POSITION_CALC_PROFILES,
 } from "./modules/chart-lab/quant/position-calculator.js";
+import { deriveSmcConfluence } from "./modules/chart-lab/quant/smc-derivations.js";
 import { createChartLabStore } from "./modules/chart-lab/chart-lab-store.js";
 import { createChartLoadController } from "./modules/chart-lab/chart-load-controller.js";
 import { createChartLiveStreamController } from "./modules/chart-lab/chart-live-stream-controller.js";
@@ -8901,29 +8902,15 @@ function buildScenarioHtml(label, scenario, currency) {
   `;
 }
 
-function buildSmcPriceActionConfluence(analysis) {
-  const smc = analysis?.smc ?? {};
-  const structure = String(smc.structure ?? "").toLowerCase();
-  const liquidity = String(smc.liquidity ?? "").toLowerCase();
-  const sweepRisk = String(smc.sweepRisk ?? "").toLowerCase();
-  const tone = analysis?.signal?.tone;
-  const zonePos = Number(analysis?.context?.zonePositionPercent ?? 50) / 100;
-
-  const pinbarDetected =
-    /rejeic|pavio|pinbar|martelo|estrela cadente/.test(structure)
-    || (tone !== "neutral" && (zonePos <= 0.18 || zonePos >= 0.82));
-  const engulfingDetected =
-    /engolfo|engulfing/.test(structure)
-    || (tone === "buy" && /baix|fundo/.test(liquidity))
-    || (tone === "sell" && /alta|topo/.test(liquidity));
-  const orderBlockTouch =
-    /order ?block|\bob\b|toque|mitig/.test(structure + " " + liquidity)
-    || /proximo da liquidez/.test(liquidity);
-  const pdhPdlSweep =
-    /sweep|varrid|pdh|pdl/.test(liquidity + " " + sweepRisk)
-    || zonePos <= 0.12
-    || zonePos >= 0.88;
-
+function buildSmcPriceActionConfluence(analysis, snapshot) {
+  const confluence = deriveSmcConfluence({
+    analysis,
+    snapshot,
+  });
+  const pinbarDetected = confluence.checks.rejectionAligned;
+  const engulfingDetected = confluence.checks.trendAligned && confluence.checks.fvgAligned;
+  const orderBlockTouch = confluence.checks.fvgAligned;
+  const pdhPdlSweep = confluence.checks.sweepConfirmed;
   const rejectionActive = pinbarDetected || engulfingDetected;
   const liquidityActive = orderBlockTouch || pdhPdlSweep;
 
@@ -8932,24 +8919,28 @@ function buildSmcPriceActionConfluence(analysis) {
       {
         label: "Pinbar (Martelo / Estrela Cadente)",
         ok: pinbarDetected,
-        hint: pinbarDetected ? "Pavio dominante em extremo do range" : "Sem rejeicao clara em extremo",
+        hint: pinbarDetected
+          ? `Pavio dominante ${confluence.rejection.direction} (${Math.round(confluence.rejection.wickRatio * 100)}% do candle)`
+          : "Sem rejeicao clara por pavio real",
       },
       {
         label: "Engolfo institucional",
         ok: engulfingDetected,
-        hint: engulfingDetected ? "Vela de absorcao alinhada ao bias" : "Sem engolfo na direcao do sinal",
+        hint: engulfingDetected ? "Impulso alinhado a FVG mitigado" : "Sem absorcao numerica alinhada ao FVG",
       },
     ],
     liquidity: [
       {
         label: "Toque em Order Block",
         ok: orderBlockTouch,
-        hint: orderBlockTouch ? "Preco testando OB / zona de liquidez" : "Sem toque registrado em OB",
+        hint: orderBlockTouch ? "Preco mitigou zona FVG institucional" : "Sem mitigacao objetiva de desequilibrio",
       },
       {
         label: "Varredura de PDH/PDL",
         ok: pdhPdlSweep,
-        hint: pdhPdlSweep ? "Liquidez de sessao varrida" : "Liquidez de sessao intacta",
+        hint: pdhPdlSweep
+          ? `Extremo ${confluence.sweep.direction} varrido e rejeitado`
+          : "Liquidez recente intacta pelos candles",
       },
     ],
     rejectionActive,
@@ -10087,7 +10078,7 @@ function renderInstitutionalSmcTab(analysis, snapshot, currency) {
     view = null;
   }
 
-  const smcConfluence = buildSmcPriceActionConfluence(analysis);
+  const smcConfluence = buildSmcPriceActionConfluence(analysis, snapshot);
 
   // Graceful degradation: se não temos marketStructure, cai no checklist + texto base
   if (!view || (!view.swingHigh && !view.swingLow && !view.fvg.active)) {
@@ -12670,7 +12661,15 @@ function renderEnsembleEngine(analysis, snapshot, options = {}) {
   const smcStructure = typeof analysis.smc?.structure === "string" ? analysis.smc.structure.trim() : "";
   const smcLiquidity = typeof analysis.smc?.liquidity === "string" ? analysis.smc.liquidity.trim() : "";
   const smcSweep = typeof analysis.smc?.sweepRisk === "string" ? analysis.smc.sweepRisk.trim() : "";
-  const smcSignals = (smcStructure ? 1 : 0) + (smcLiquidity ? 1 : 0) + (smcSweep ? 1 : 0);
+  const smcConfluence = deriveSmcConfluence({
+    analysis,
+    snapshot,
+  });
+  const smcSignals = [
+    smcConfluence.checks.sweepConfirmed,
+    smcConfluence.checks.fvgAligned,
+    smcConfluence.checks.trendAligned,
+  ].filter(Boolean).length;
   const smcConfidence = Math.round((smcSignals / 3) * 100);
 
   const hftConfidence = isBinary && microTiming
@@ -13022,32 +13021,31 @@ function renderInstitutionalSummary(analysis, snapshot, options = {}) {
     </article>
   `).join("");
 
-  // Checklist HFT+SMC (flags derivadas de campos reais)
-  const smcStructure = String(analysis?.smc?.structure ?? "").toLowerCase();
-  const smcLiquidity = String(analysis?.smc?.liquidity ?? "").toLowerCase();
-  const smcSweepRisk = String(analysis?.smc?.sweepRisk ?? "").toLowerCase();
-  const trend = String(analysis?.context?.trend ?? "").toLowerCase();
-  const fearGreedLabel = String(analysis?.fearGreed?.label ?? "").toLowerCase();
-
-  const sweepConfirmed = /varrid|sweep|execut/.test(smcLiquidity)
-    || /varrid|sweep/.test(smcSweepRisk);
-  const fvgAligned = /fvg|fair value gap|mitigad/.test(smcStructure)
-    || /fvg|mitigad/.test(smcLiquidity);
-  const trendAligned = (analysis?.signal?.tone === "buy" && trend === "alta")
-    || (analysis?.signal?.tone === "sell" && trend === "baixa");
-  const fearGreedOk = !/extreme/i.test(fearGreedLabel);
-  const volatilityOk = rangePct >= 0.5 && rangePct <= 15;
+  // Checklist HFT+SMC (flags numericas derivadas dos candles do snapshot)
+  const smcConfluence = deriveSmcConfluence({
+    analysis,
+    snapshot,
+  });
+  const sweepConfirmed = smcConfluence.checks.sweepConfirmed;
+  const fvgAligned = smcConfluence.checks.fvgAligned;
+  const trendAligned = smcConfluence.checks.trendAligned;
+  const fearGreedOk = smcConfluence.checks.fearGreedOk;
+  const volatilityOk = smcConfluence.checks.volatilityOk;
 
   const checks = [
     {
       label: "Sweep de liquidez (PDL/PDH varridos)",
       ok: sweepConfirmed,
-      hint: sweepConfirmed ? "Liquidez coletada" : "Aguardando varredura de extremos",
+      hint: sweepConfirmed
+        ? `Extremo ${smcConfluence.sweep.direction} varrido e rejeitado`
+        : "Aguardando varredura real de extremos",
     },
     {
       label: "Mitigacao de FVG (Fair Value Gap)",
       ok: fvgAligned,
-      hint: fvgAligned ? "FVG alinhado a direcao" : "Sem FVG relevante na janela",
+      hint: fvgAligned
+        ? `FVG ${smcConfluence.fvg.bias} mitigado na janela`
+        : "Sem FVG mitigado alinhado ao sinal",
     },
     {
       label: "Tendencia e sinal alinhados",

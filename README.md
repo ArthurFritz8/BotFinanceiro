@@ -144,6 +144,7 @@ Politica de retencao:
 58. ADR 086: `docs/ADR/ADR-086-helpers-failover-live-chart-lab.md`
 59. ADR 087: `docs/ADR/ADR-087-token-geracao-ativo-chart-lab.md`
 60. ADR 088: `docs/ADR/ADR-088-reset-contexto-ativo-chart-lab.md`
+61. ADR 089: `docs/ADR/ADR-089-derivacoes-smc-confluencia-chart-lab.md`
 
 ## Relatorio completo desta entrega
 

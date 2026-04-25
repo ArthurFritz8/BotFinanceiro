@@ -15,6 +15,10 @@ import {
   nextRiskLabStake,
   runMonteCarloRiskSimulation,
 } from "../src/modules/chart-lab/quant/risk-lab.js";
+import {
+  deriveSmcConfluence,
+  normalizeSmcCandles,
+} from "../src/modules/chart-lab/quant/smc-derivations.js";
 
 function buildPoints(count, start = 100) {
   return Array.from({ length: count }, (_, index) => {
@@ -103,4 +107,49 @@ test("Probabilistico deriva retornos, stats e Monte Carlo deterministicos", () =
   assert.ok(monteCarlo.bearPrice > 140);
   assert.equal(monteCarlo.bearPrice, monteCarlo.basePrice);
   assert.equal(monteCarlo.basePrice, monteCarlo.bullPrice);
+});
+
+test("SMC derivations detecta sweep bullish e rejeicao por wick real", () => {
+  const points = [
+    { open: 100, high: 102, low: 99, close: 101 },
+    { open: 101, high: 103, low: 100, close: 102 },
+    { open: 102, high: 104, low: 101, close: 103 },
+    { open: 103, high: 104, low: 98, close: 102 },
+  ];
+  const smc = deriveSmcConfluence({
+    analysis: {
+      context: { rangeHigh: 104, rangeLow: 98, trend: "Alta" },
+      fearGreed: { score: 50 },
+      signal: { tone: "buy" },
+    },
+    points,
+  });
+
+  assert.equal(normalizeSmcCandles(points).length, 4);
+  assert.equal(smc.sweep.direction, "bullish");
+  assert.equal(smc.checks.sweepConfirmed, true);
+  assert.equal(smc.rejection.direction, "bullish");
+  assert.equal(smc.checks.rejectionAligned, true);
+});
+
+test("SMC derivations detecta FVG bullish mitigado e alinhado", () => {
+  const points = [
+    { open: 100, high: 101, low: 99, close: 100.5 },
+    { open: 100.5, high: 102, low: 100, close: 101.5 },
+    { open: 104, high: 106, low: 103, close: 105 },
+    { open: 105, high: 105.5, low: 102.5, close: 104 },
+  ];
+  const smc = deriveSmcConfluence({
+    analysis: {
+      context: { rangeHigh: 106, rangeLow: 99, trend: "Alta" },
+      fearGreed: { score: 55 },
+      signal: { tone: "buy" },
+    },
+    points,
+  });
+
+  assert.equal(smc.fvg.active, true);
+  assert.equal(smc.fvg.bias, "bullish");
+  assert.equal(smc.fvg.mitigated, true);
+  assert.equal(smc.checks.fvgAligned, true);
 });
