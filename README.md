@@ -157,12 +157,24 @@ Politica de retencao:
 71. ADR 099: `docs/ADR/ADR-099-score-qualidade-plano-execucao.md`
 72. ADR 100: `docs/ADR/ADR-100-hud-execucao-chart-lab.md`
 73. ADR 101: `docs/ADR/ADR-101-auto-guard-execucao-controlada.md`
+74. ADR 102: `docs/ADR/ADR-102-rota-operador-paper-trading-auto-signal.md`
 
 ## Relatorio completo desta entrega
 
 1. `docs/runbooks/relatorio-completo-publicacao-e-resiliencia-2026-04-01.md`
 2. `docs/runbooks/checklist-deploy-macro-radar-institucional-2026-04-14.md`
 3. `docs/runbooks/checklist-mudanca-strategy-routing-macro-radar-2026-04-14.md`
+
+## Exemplo de operador Paper Trading
+
+Configure `PAPER_TRADING_OPERATOR_TOKEN` no backend e use `x-paper-trading-operator-token` apenas para abertura simulada versionada. Nao reutilize `INTERNAL_API_TOKEN` no frontend.
+
+```bash
+curl -X POST "http://localhost:3000/v1/paper-trading/operator/auto-signal" \
+	-H "content-type: application/json" \
+	-H "x-paper-trading-operator-token: $PAPER_TRADING_OPERATOR_TOKEN" \
+	-d '{"asset":"bitcoin","side":"long","entryPrice":100,"stopPrice":95,"targetPrice":112,"confluenceScore":88,"tier":"high"}'
+```
 
 ## Exemplos de chamadas internas
 

@@ -269,7 +269,11 @@ export function buildApp() {
       registerWallStreetRoutes(instance);
       registerNotificationsPublicRoutes(instance, notificationsController);
       if (env.PAPER_TRADING_ENABLED) {
-        registerPaperTradingPublicRoutes(instance, paperTradingController);
+        registerPaperTradingPublicRoutes(
+          instance,
+          paperTradingController,
+          env.AUTO_PAPER_TRADING_ENABLED ? autoPaperTradingController : undefined,
+        );
       }
       done();
     },

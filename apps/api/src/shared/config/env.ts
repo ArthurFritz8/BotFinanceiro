@@ -49,6 +49,7 @@ const environmentSchema = z
     VAPID_SUBJECT: z.string().default("mailto:notifications@botfinanceiro.local"),
     PAPER_TRADING_ENABLED: booleanFromString.default("true"),
     PAPER_TRADING_DATA_FILE: z.string().default("apps/api/data/paper-trading.jsonl"),
+    PAPER_TRADING_OPERATOR_TOKEN: z.string().trim().default(""),
     AUTO_PAPER_TRADING_ENABLED: booleanFromString.default("true"),
     AUTO_PAPER_TRADING_INTERVAL_SECONDS: z.coerce.number().int().min(10).max(3600).default(60),
     AUTO_PAPER_TRADING_MIN_TIER: z.enum(["high", "medium"]).default("high"),

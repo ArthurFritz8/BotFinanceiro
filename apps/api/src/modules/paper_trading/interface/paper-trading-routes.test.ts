@@ -10,6 +10,7 @@ process.env.NODE_ENV ??= "test";
 process.env.COINGECKO_API_BASE_URL ??= "https://api.coingecko.com/api/v3";
 process.env.YAHOO_FINANCE_API_BASE_URL ??= "https://query1.finance.yahoo.com";
 process.env.INTERNAL_API_TOKEN ??= "test_internal_token_12345";
+process.env.PAPER_TRADING_OPERATOR_TOKEN ??= "test_operator_token_12345";
 
 const { JsonlTradeStore } = await import(
   "../infrastructure/jsonl-trade-store.js"
@@ -18,6 +19,12 @@ const { PaperTradingService } = await import(
   "../application/paper-trading-service.js"
 );
 const { PaperTradingController } = await import("./paper-trading-controller.js");
+const { AutoPaperTradingBridge } = await import(
+  "../application/auto-paper-trading-bridge.js"
+);
+const { AutoPaperTradingController } = await import(
+  "./auto-paper-trading-controller.js"
+);
 const {
   registerPaperTradingInternalRoutes,
   registerPaperTradingPublicRoutes,
@@ -31,12 +38,17 @@ function buildTestApp() {
   const store = new JsonlTradeStore(join(tmpDir, "trades.jsonl"));
   const service = new PaperTradingService({ store });
   const controller = new PaperTradingController(service);
+  const autoBridge = new AutoPaperTradingBridge({
+    paperTradingService: service,
+    priceProvider: () => Promise.resolve(100),
+  });
+  const autoController = new AutoPaperTradingController(autoBridge);
   const app = Fastify({ logger: false });
   app.setErrorHandler(httpErrorHandler);
-  registerPaperTradingInternalRoutes(app, controller);
+  registerPaperTradingInternalRoutes(app, controller, autoController);
   void app.register(
     (instance, _, done) => {
-      registerPaperTradingPublicRoutes(instance, controller);
+      registerPaperTradingPublicRoutes(instance, controller, autoController);
       done();
     },
     { prefix: "/v1" },
@@ -156,6 +168,83 @@ void describe("PaperTradingRoutes", () => {
       assert.equal(body.data.length, 1);
       assert.equal(body.data[0]?.asset, "bitcoin");
       assert.equal(body.data[0]?.status, "open");
+    } finally {
+      await app.close();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  void it("POST /v1/paper-trading/operator/auto-signal exige token de operador", async () => {
+    const { app, tmpDir } = buildTestApp();
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/paper-trading/operator/auto-signal",
+        payload: {
+          asset: "bitcoin",
+          confluenceScore: 88,
+          entryPrice: 100,
+          side: "long",
+          stopPrice: 95,
+          targetPrice: 112,
+          tier: "high",
+        },
+      });
+      assert.equal(response.statusCode, 401);
+    } finally {
+      await app.close();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  void it("POST /v1/paper-trading/operator/auto-signal rejeita token invalido", async () => {
+    const { app, tmpDir } = buildTestApp();
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/paper-trading/operator/auto-signal",
+        headers: { "x-paper-trading-operator-token": "invalid_operator_token" },
+        payload: {
+          asset: "bitcoin",
+          confluenceScore: 88,
+          entryPrice: 100,
+          side: "long",
+          stopPrice: 95,
+          targetPrice: 112,
+          tier: "high",
+        },
+      });
+      assert.equal(response.statusCode, 401);
+    } finally {
+      await app.close();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  void it("POST /v1/paper-trading/operator/auto-signal abre trade com token valido", async () => {
+    const { app, tmpDir } = buildTestApp();
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/paper-trading/operator/auto-signal",
+        headers: { "x-paper-trading-operator-token": "test_operator_token_12345" },
+        payload: {
+          asset: "bitcoin",
+          confluenceScore: 88,
+          entryPrice: 100,
+          side: "long",
+          stopPrice: 95,
+          targetPrice: 112,
+          tier: "high",
+        },
+      });
+      assert.equal(response.statusCode, 201);
+      const body = JSON.parse(response.payload) as {
+        data: { action: string; trade?: { asset: string; status: string } };
+      };
+      assert.equal(body.data.action, "opened");
+      assert.equal(body.data.trade?.asset, "bitcoin");
+      assert.equal(body.data.trade?.status, "open");
     } finally {
       await app.close();
       rmSync(tmpDir, { recursive: true, force: true });
