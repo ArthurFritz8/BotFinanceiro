@@ -8,6 +8,7 @@ import {
 } from "../src/modules/chart-lab/quant/position-calculator.js";
 import { buildExecutionGateSnapshot } from "../src/modules/chart-lab/quant/execution-gate.js";
 import { buildExecutionPlanSnapshot } from "../src/modules/chart-lab/quant/execution-plan.js";
+import { buildExecutionQualitySnapshot } from "../src/modules/chart-lab/quant/execution-quality.js";
 import {
   appendExecutionJournalEntry,
   createExecutionJournalEntry,
@@ -665,4 +666,82 @@ test("Execution journal zera score institucional antes de cinco planos fechados"
   assert.equal(summary.resolved, 4);
   assert.equal(summary.score, 0);
   assert.equal(summary.sampleState, "Aquecendo");
+});
+
+test("Execution quality classifica plano prime com journal validado", () => {
+  const plan = buildExecutionPlanSnapshot({
+    currentPrice: 100.5,
+    executionGate: { riskScale: 0.85, status: "armed" },
+    signal: {
+      entryHigh: 101,
+      entryLow: 100,
+      riskReward: 2.2,
+      stopLoss: 98,
+      takeProfit1: 103,
+      takeProfit2: 106,
+      tone: "buy",
+    },
+  });
+  const quality = buildExecutionQualitySnapshot({
+    executionGate: { score: 92, status: "armed" },
+    executionPlan: plan,
+    journalSummary: { resolved: 8, sampleState: "Moderado", score: 76 },
+  });
+
+  assert.equal(quality.status, "prime");
+  assert.equal(quality.grade, "A");
+  assert.equal(quality.journalReady, true);
+  assert.ok(quality.score >= 82);
+});
+
+test("Execution quality rejeita plano bloqueado mesmo com score parcial", () => {
+  const plan = buildExecutionPlanSnapshot({
+    currentPrice: 100,
+    executionGate: { riskScale: 0, status: "blocked" },
+    signal: {
+      entryHigh: 101,
+      entryLow: 100,
+      riskReward: 2,
+      stopLoss: 98,
+      takeProfit1: 103,
+      takeProfit2: 105,
+      tone: "buy",
+    },
+  });
+  const quality = buildExecutionQualitySnapshot({
+    executionGate: { score: 70, status: "blocked" },
+    executionPlan: plan,
+    journalSummary: { resolved: 10, sampleState: "Moderado", score: 80 },
+  });
+
+  assert.equal(quality.status, "reject");
+  assert.equal(quality.tone, "danger");
+  assert.ok(quality.score <= 34);
+});
+
+test("Execution quality limita grade enquanto journal ainda aquece", () => {
+  const plan = buildExecutionPlanSnapshot({
+    currentPrice: 100.5,
+    executionGate: { riskScale: 0.85, status: "armed" },
+    signal: {
+      entryHigh: 101,
+      entryLow: 100,
+      riskReward: 2.2,
+      stopLoss: 98,
+      takeProfit1: 103,
+      takeProfit2: 106,
+      tone: "buy",
+    },
+  });
+  const quality = buildExecutionQualitySnapshot({
+    executionGate: { score: 92, status: "armed" },
+    executionPlan: plan,
+    journalSummary: { resolved: 2, sampleState: "Aquecendo", score: 0 },
+  });
+
+  assert.equal(quality.status, "qualified");
+  assert.equal(quality.grade, "B+");
+  assert.equal(quality.sampleState, "Aquecendo");
+  assert.equal(quality.journalReady, false);
+  assert.equal(quality.score, 78);
 });

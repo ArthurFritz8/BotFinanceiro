@@ -7298,6 +7298,27 @@ body.sidebar-collapsed .app-shell {
 .timing-plan-check strong { color: #94a3b8; font-size: 0.64rem; letter-spacing: 0.06em; text-transform: uppercase; }
 .timing-plan-check[data-ok="true"] strong { color: #86efac; }
 
+.timing-execution-quality { gap: 0.7rem; }
+.timing-execution-quality[data-tone="bull"] { border-color: rgba(52, 211, 153, 0.36); background: rgba(6, 78, 59, 0.12); }
+.timing-execution-quality[data-tone="warn"] { border-color: rgba(234, 179, 8, 0.36); background: rgba(113, 63, 18, 0.12); }
+.timing-execution-quality[data-tone="danger"] { border-color: rgba(248, 113, 113, 0.42); background: rgba(69, 10, 10, 0.24); }
+.timing-execution-quality__head { align-items: flex-start; display: flex; gap: 1rem; justify-content: space-between; }
+.timing-execution-quality__head h4 { margin-bottom: 0.25rem; }
+.timing-execution-quality__badge { align-items: flex-end; background: rgba(15, 23, 42, 0.66); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 8px; display: flex; flex-direction: column; flex: 0 0 auto; gap: 0.1rem; min-width: 116px; padding: 0.45rem 0.58rem; }
+.timing-execution-quality__badge strong { color: #f8fafc; font-size: 0.78rem; letter-spacing: 0.06em; }
+.timing-execution-quality__badge span { color: rgba(148, 163, 184, 0.9); font-size: 0.68rem; font-variant-numeric: tabular-nums; }
+.timing-execution-quality__grid { display: grid; gap: 0.55rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.timing-execution-quality__grid article { background: rgba(15, 23, 42, 0.54); border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 8px; display: flex; flex-direction: column; gap: 0.15rem; min-height: 72px; overflow-wrap: anywhere; padding: 0.6rem 0.68rem; }
+.timing-execution-quality__grid span { color: rgba(148, 163, 184, 0.9); font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.timing-execution-quality__grid strong { color: #f8fafc; font-size: 0.95rem; font-variant-numeric: tabular-nums; }
+.timing-execution-quality__grid small { color: rgba(203, 213, 225, 0.82); font-size: 0.68rem; }
+.timing-quality-checks { display: grid; gap: 0.42rem; grid-template-columns: repeat(3, minmax(0, 1fr)); list-style: none; margin: 0; padding: 0; }
+.timing-quality-check { align-items: center; background: rgba(15, 23, 42, 0.44); border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 8px; display: flex; gap: 0.45rem; justify-content: space-between; min-height: 42px; padding: 0.44rem 0.55rem; }
+.timing-quality-check[data-ok="true"] { border-color: rgba(52, 211, 153, 0.3); }
+.timing-quality-check span { color: #cbd5e1; font-size: 0.72rem; }
+.timing-quality-check strong { color: #94a3b8; font-size: 0.64rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.timing-quality-check[data-ok="true"] strong { color: #86efac; }
+
 .timing-execution-journal { gap: 0.7rem; }
 .timing-execution-journal[data-tone="bull"] { border-color: rgba(52, 211, 153, 0.34); background: rgba(6, 78, 59, 0.12); }
 .timing-execution-journal[data-tone="warn"] { border-color: rgba(234, 179, 8, 0.36); background: rgba(113, 63, 18, 0.12); }
@@ -7402,6 +7423,8 @@ body.sidebar-collapsed .app-shell {
   .timing-execution-gate__head { flex-direction: column; }
   .timing-execution-plan__grid, .timing-plan-checks { grid-template-columns: 1fr; }
   .timing-execution-plan__head { flex-direction: column; }
+  .timing-execution-quality__grid, .timing-quality-checks { grid-template-columns: 1fr; }
+  .timing-execution-quality__head { flex-direction: column; }
   .timing-execution-journal__head { flex-direction: column; }
   .timing-execution-journal__grid { grid-template-columns: 1fr; }
   .timing-journal-row { grid-template-columns: 0.8fr 0.8fr 1fr 0.8fr; }
@@ -7413,7 +7436,7 @@ body.sidebar-collapsed .app-shell {
   .timing-event-when, .timing-event-currency { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .timing-context-card, .timing-session-row, .timing-killzone-card, .timing-regime-cell, .timing-regime-check, .timing-execution-check, .timing-plan-check { transition: none; }
+  .timing-context-card, .timing-session-row, .timing-killzone-card, .timing-regime-cell, .timing-regime-check, .timing-execution-check, .timing-plan-check, .timing-quality-check { transition: none; }
   .timing-killzone-card:hover { transform: none; }
 }
 

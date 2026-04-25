@@ -36,6 +36,7 @@ import {
 } from "./modules/chart-lab/quant/probabilistic.js";
 import { buildExecutionGateSnapshot } from "./modules/chart-lab/quant/execution-gate.js";
 import { buildExecutionPlanSnapshot } from "./modules/chart-lab/quant/execution-plan.js";
+import { buildExecutionQualitySnapshot } from "./modules/chart-lab/quant/execution-quality.js";
 import {
   appendExecutionJournalEntry,
   createExecutionJournalEntry,
@@ -12785,6 +12786,51 @@ function renderTimingExecutionPlanPanel(executionPlan, currency) {
   `;
 }
 
+function renderTimingExecutionQualityPanel(executionQuality) {
+  const quality = executionQuality ?? { contributions: [], grade: "--", guidance: "Aguardando score de qualidade.", label: "AQUECENDO", sampleState: "Aquecendo", score: 0, status: "watch", tone: "warn" };
+  const scoreLabel = Number.isFinite(quality.score) ? quality.score.toFixed(1) : "--";
+  const contributions = Array.isArray(quality.contributions) ? quality.contributions : [];
+  const contributionsHtml = contributions.map((contribution) => `
+    <li class="timing-quality-check" data-ok="${contribution.ok ? "true" : "false"}" title="${escapeHtml(contribution.detail)}">
+      <span>${escapeHtml(contribution.label)}</span>
+      <strong>${escapeHtml(String(contribution.score ?? "--"))}/${escapeHtml(String(contribution.weight ?? "--"))}</strong>
+    </li>
+  `).join("");
+
+  return `
+    <article class="analysis-block timing-block timing-execution-quality" data-tone="${escapeHtml(quality.tone)}" data-status="${escapeHtml(quality.status)}" id="timing-execution-quality-panel">
+      <header class="timing-execution-quality__head">
+        <div>
+          <h4>Score de Qualidade</h4>
+          <p>${escapeHtml(quality.guidance)}</p>
+        </div>
+        <div class="timing-execution-quality__badge" id="timing-execution-quality-score">
+          <strong>${escapeHtml(quality.label)}</strong>
+          <span>${escapeHtml(scoreLabel)}/100 - ${escapeHtml(quality.grade)}</span>
+        </div>
+      </header>
+      <div class="timing-execution-quality__grid">
+        <article>
+          <span>Grade</span>
+          <strong>${escapeHtml(quality.grade)}</strong>
+          <small>estado ${escapeHtml(quality.status)}</small>
+        </article>
+        <article>
+          <span>Amostra</span>
+          <strong>${escapeHtml(quality.sampleState)}</strong>
+          <small>${quality.journalReady ? "journal validado" : "fail-honest"}</small>
+        </article>
+        <article>
+          <span>Score</span>
+          <strong>${escapeHtml(scoreLabel)}</strong>
+          <small>ponderado por gate, risco e journal</small>
+        </article>
+      </div>
+      <ul class="timing-quality-checks" role="list">${contributionsHtml}</ul>
+    </article>
+  `;
+}
+
 function resolveTimingCurrentPrice(snapshot) {
   const insightPrice = toFiniteNumber(snapshot?.insights?.currentPrice, Number.NaN);
 
@@ -12893,7 +12939,7 @@ function openPaperTradingFromTiming() {
   setChartStatus("Paper Trading aberto para acompanhar simulacoes.", "ok");
 }
 
-function updateExecutionChartVisualState(executionGate, executionPlan, journal) {
+function updateExecutionChartVisualState(executionGate, executionPlan, journal, quality) {
   if (!(chartViewport instanceof HTMLElement)) {
     return;
   }
@@ -12901,6 +12947,7 @@ function updateExecutionChartVisualState(executionGate, executionPlan, journal) 
   chartViewport.dataset.executionGate = typeof executionGate?.status === "string" ? executionGate.status : "watch";
   chartViewport.dataset.executionState = typeof executionPlan?.state === "string" ? executionPlan.state : "none";
   chartViewport.dataset.executionJournalTone = typeof journal?.tone === "string" ? journal.tone : "neutral";
+  chartViewport.dataset.executionQuality = typeof quality?.grade === "string" ? quality.grade : "n/a";
 }
 
 function clearExecutionChartVisualState() {
@@ -12911,6 +12958,7 @@ function clearExecutionChartVisualState() {
   delete chartViewport.dataset.executionGate;
   delete chartViewport.dataset.executionState;
   delete chartViewport.dataset.executionJournalTone;
+  delete chartViewport.dataset.executionQuality;
 }
 
 function formatExecutionJournalStatus(status) {
@@ -12991,7 +13039,12 @@ function renderTimingDeskHtml(analysis, snapshot, currency) {
   const currentPrice = resolveTimingCurrentPrice(snapshot);
   const executionPlan = buildExecutionPlanSnapshot({ analysis, currentPrice, executionGate });
   const executionJournal = syncExecutionJournalFromTiming({ analysis, currentPrice, executionGate, executionPlan, snapshot });
-  updateExecutionChartVisualState(executionGate, executionPlan, executionJournal.summary);
+  const executionQuality = buildExecutionQualitySnapshot({
+    executionGate,
+    executionPlan,
+    journalSummary: executionJournal.summary,
+  });
+  updateExecutionChartVisualState(executionGate, executionPlan, executionJournal.summary, executionQuality);
   const utcHourNow = new Date(nowMs).getUTCHours();
 
   const macroRadar = snapshot?.institutional?.macroRadar;
@@ -13084,6 +13137,8 @@ function renderTimingDeskHtml(analysis, snapshot, currency) {
       ${renderTimingExecutionGatePanel(executionGate)}
 
       ${renderTimingExecutionPlanPanel(executionPlan, currency)}
+
+      ${renderTimingExecutionQualityPanel(executionQuality)}
 
       ${renderTimingExecutionJournalPanel(executionJournal.summary, executionJournal.recentEntries, currency)}
 
