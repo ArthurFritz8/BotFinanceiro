@@ -149,6 +149,7 @@ Politica de retencao:
 63. ADR 091: `docs/ADR/ADR-091-visual-ia-evidencia-quantitativa.md`
 64. ADR 092: `docs/ADR/ADR-092-order-flow-cvd-volume-zscore-timing.md`
 65. ADR 093: `docs/ADR/ADR-093-heatmap-liquidez-price-zones.md`
+66. ADR 094: `docs/ADR/ADR-094-regime-institucional-market-regime.md`
 
 ## Relatorio completo desta entrega
 

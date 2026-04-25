@@ -228,6 +228,10 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /function renderOrderFlowStrip\(flow\)/);
   assert.match(mainSource, /function renderTimingOrderFlowPanel\(flow\)/);
   assert.match(mainSource, /const orderFlow = buildTimingOrderFlowSnapshot\(\{ snapshot \}\);/);
+  assert.match(mainSource, /buildMarketRegimeSnapshot/);
+  assert.match(mainSource, /function renderTimingMarketRegimePanel\(marketRegime\)/);
+  assert.match(mainSource, /id="timing-market-regime-panel"/);
+  assert.match(mainSource, /marketRegime\.riskMultiplier/);
   assert.match(mainSource, /renderOrderFlowStrip\(orderFlow\)/);
   assert.match(mainSource, /renderTimingOrderFlowPanel\(orderFlow\)/);
   assert.match(

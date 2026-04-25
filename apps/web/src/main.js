@@ -50,6 +50,7 @@ import {
   POSITION_CALC_PROFILES,
 } from "./modules/chart-lab/quant/position-calculator.js";
 import { buildLiquidityHeatmapSnapshot } from "./modules/chart-lab/quant/liquidity-heatmap.js";
+import { buildMarketRegimeSnapshot } from "./modules/chart-lab/quant/market-regime.js";
 import { buildTimingOrderFlowSnapshot } from "./modules/chart-lab/quant/order-flow.js";
 import { deriveSmcConfluence } from "./modules/chart-lab/quant/smc-derivations.js";
 import { buildVisualIntelligenceEvidence } from "./modules/chart-lab/quant/visual-intelligence.js";
@@ -6960,6 +6961,7 @@ function buildQuantitativeAnalysis(snapshot) {
     return null;
   }
 
+  const marketRegime = buildMarketRegimeSnapshot({ snapshot });
   const currentPrice = toFiniteNumber(insights.currentPrice, 0);
   const supportLevel = toFiniteNumber(insights.supportLevel, currentPrice);
   const resistanceLevel = toFiniteNumber(insights.resistanceLevel, currentPrice);
@@ -7157,6 +7159,7 @@ function buildQuantitativeAnalysis(snapshot) {
       pattern: harmonic.pattern,
       ratio: harmonic.ratio,
     },
+    marketRegime,
     neutralProbability,
     newsProxy: proxyNews,
     scenarios: {
@@ -12536,6 +12539,68 @@ function renderTimingOrderFlowPanel(flow) {
   `;
 }
 
+function formatRegimeMetric(value, suffix = "") {
+  if (!Number.isFinite(value)) {
+    return "n/d";
+  }
+
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}${suffix}`;
+}
+
+function renderTimingMarketRegimePanel(marketRegime) {
+  const regime = marketRegime ?? { ready: false, checks: [], label: "Aquecendo", tone: "neutral", metrics: {}, riskMultiplier: 0, score: 0 };
+  const metrics = regime.metrics ?? {};
+  const checks = Array.isArray(regime.checks) ? regime.checks : [];
+  const scoreLabel = Number.isFinite(regime.score) ? regime.score.toFixed(0) : "0";
+  const riskLabel = Number.isFinite(regime.riskMultiplier) ? `${Math.round(regime.riskMultiplier * 100)}%` : "n/d";
+  const checksHtml = checks.length === 0
+    ? `<li class="timing-regime-check" data-ok="false"><span>Amostra</span><strong>${Number(regime.sampleSize ?? 0)}/${Number(regime.warmupTarget ?? 12)}</strong></li>`
+    : checks.map((check) => `
+        <li class="timing-regime-check" data-ok="${check.ok ? "true" : "false"}" title="${escapeHtml(check.detail)}">
+          <span>${escapeHtml(check.label)}</span>
+          <strong>${check.ok ? "OK" : "Pendente"}</strong>
+        </li>
+      `).join("");
+
+  return `
+    <article class="analysis-block timing-block timing-regime-panel" data-tone="${escapeHtml(regime.tone)}" id="timing-market-regime-panel">
+      <header class="timing-regime-panel__head">
+        <div>
+          <h4>Regime Institucional</h4>
+          <p>${escapeHtml(regime.guidance ?? "Aguardando leitura de regime.")}</p>
+        </div>
+        <div class="timing-regime-score" id="timing-market-regime-score" title="Score de regime derivado de eficiencia, slope, volatilidade e volume">
+          <strong>${escapeHtml(scoreLabel)}</strong>
+          <span>/100</span>
+        </div>
+      </header>
+      <div class="timing-regime-grid">
+        <div class="timing-regime-cell">
+          <span>Fase</span>
+          <strong id="timing-market-regime-label">${escapeHtml(regime.label)}</strong>
+          <small>${escapeHtml(regime.executionMode ?? "Aguardar")}</small>
+        </div>
+        <div class="timing-regime-cell">
+          <span>Risco tatico</span>
+          <strong>${escapeHtml(riskLabel)}</strong>
+          <small>multiplicador da posicao base</small>
+        </div>
+        <div class="timing-regime-cell">
+          <span>Efficiency Ratio</span>
+          <strong>${Number.isFinite(metrics.efficiencyRatio) ? metrics.efficiencyRatio.toFixed(3) : "n/d"}</strong>
+          <small>Slope ${escapeHtml(formatRegimeMetric(metrics.trendSlopePercent, "%"))}</small>
+        </div>
+        <div class="timing-regime-cell">
+          <span>Volatilidade</span>
+          <strong>${Number.isFinite(metrics.volatilityPercent) ? `${metrics.volatilityPercent.toFixed(2)}%` : "n/d"}</strong>
+          <small>Volume ${escapeHtml(formatRegimeMetric(metrics.volumeZScore, "σ"))}</small>
+        </div>
+      </div>
+      <ul class="timing-regime-checks" role="list">${checksHtml}</ul>
+    </article>
+  `;
+}
+
 function renderTimingDeskHtml(analysis, snapshot, currency) {
   const nowMs = Date.now();
   const session = getCurrentTradingSessionUtc(nowMs);
@@ -12543,6 +12608,7 @@ function renderTimingDeskHtml(analysis, snapshot, currency) {
   const assetClass = detectAssetClassForTiming(snapshot?.assetId);
   const killzones = getKillzonesForAssetClass(assetClass);
   const orderFlow = buildTimingOrderFlowSnapshot({ snapshot });
+  const marketRegime = buildMarketRegimeSnapshot({ snapshot, orderFlow });
   const utcHourNow = new Date(nowMs).getUTCHours();
 
   const macroRadar = snapshot?.institutional?.macroRadar;
@@ -12621,9 +12687,16 @@ function renderTimingDeskHtml(analysis, snapshot, currency) {
           <strong>${escapeHtml(orderFlow.cvd.label)}</strong>
           <span class="timing-context-meta">Vol z ${escapeHtml(orderFlow.volume.ready ? `${orderFlow.volume.zScore >= 0 ? "+" : ""}${orderFlow.volume.zScore.toFixed(2)}σ` : "n/d")}</span>
         </article>
+        <article class="timing-context-card" data-tone="${escapeHtml(marketRegime.tone)}">
+          <span class="timing-context-label">Regime</span>
+          <strong id="timing-market-regime-status">${escapeHtml(marketRegime.label)}</strong>
+          <span class="timing-context-meta">Risco ${Number.isFinite(marketRegime.riskMultiplier) ? Math.round(marketRegime.riskMultiplier * 100) : 0}%</span>
+        </article>
       </header>
 
       ${binaryWarnHtml}
+
+      ${renderTimingMarketRegimePanel(marketRegime)}
 
       ${renderTimingOrderFlowPanel(orderFlow)}
 

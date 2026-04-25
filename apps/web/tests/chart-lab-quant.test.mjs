@@ -11,6 +11,10 @@ import {
   normalizeLiquidityHeatmapCandles,
 } from "../src/modules/chart-lab/quant/liquidity-heatmap.js";
 import {
+  buildMarketRegimeSnapshot,
+  normalizeMarketRegimeCandles,
+} from "../src/modules/chart-lab/quant/market-regime.js";
+import {
   buildTimingOrderFlowSnapshot,
   computeCumulativeVolumeDelta,
 } from "../src/modules/chart-lab/quant/order-flow.js";
@@ -354,4 +358,60 @@ test("Liquidity heatmap degrada sem amostra minima", () => {
   assert.equal(heatmap.zones.length, 0);
   assert.equal(heatmap.nearestAbove, null);
   assert.equal(heatmap.nearestBelow, null);
+});
+
+test("Market regime classifica tendencia institucional com fluxo alinhado", () => {
+  const points = Array.from({ length: 24 }, (_, index) => {
+    const open = 100 + (index * 0.82);
+    const close = open + 0.55;
+    return {
+      close,
+      high: close + 0.22,
+      low: open - 0.18,
+      open,
+      volume: 1000 + (index * 6),
+    };
+  });
+  const regime = buildMarketRegimeSnapshot({
+    orderFlow: { cvd: { tone: "bull" } },
+    points,
+  });
+
+  assert.equal(normalizeMarketRegimeCandles(points).length, 24);
+  assert.equal(regime.ready, true);
+  assert.equal(regime.key, "trend");
+  assert.equal(regime.direction, "bullish");
+  assert.equal(regime.tone, "bull");
+  assert.ok(regime.riskMultiplier > 0.8);
+  assert.equal(regime.checks.find((check) => check.id === "flow").ok, true);
+});
+
+test("Market regime detecta squeeze com baixa direcionalidade", () => {
+  const points = Array.from({ length: 18 }, (_, index) => {
+    const drift = index % 2 === 0 ? 0.08 : -0.08;
+    const open = 100 + drift;
+    const close = 100 - drift;
+    return {
+      close,
+      high: 100.18,
+      low: 99.82,
+      open,
+      volume: 900 + (index % 3),
+    };
+  });
+  const regime = buildMarketRegimeSnapshot({ points });
+
+  assert.equal(regime.ready, true);
+  assert.equal(regime.key, "squeeze");
+  assert.equal(regime.tone, "cool");
+  assert.ok(regime.score > 50);
+});
+
+test("Market regime degrada sem amostra minima", () => {
+  const regime = buildMarketRegimeSnapshot({ points: buildPoints(5, 100) });
+
+  assert.equal(regime.ready, false);
+  assert.equal(regime.key, "warming");
+  assert.equal(regime.sampleSize, 5);
+  assert.equal(regime.riskMultiplier, 0);
 });
