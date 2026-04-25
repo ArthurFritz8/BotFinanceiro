@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   classifyPositionAssetSpec,
   computePositionCalc,
+  describePositionAssetSpec,
 } from "../src/modules/chart-lab/quant/position-calculator.js";
 import {
   computeProbabilisticHistoricalStats,
@@ -84,6 +85,67 @@ test("Calculadora de posicao calcula lote forex e cenarios por perfil", () => {
   assert.equal(result.exceedsRisk, false);
   assert.equal(result.tps[0].riskReward, 2);
   assert.equal(result.scenarios.length, 3);
+});
+
+test("Calculadora de posicao cobre indices com valor por ponto honesto", () => {
+  const spec = classifyPositionAssetSpec("NAS100", "usd");
+  const result = computePositionCalc({
+    capital: 10000,
+    riskPct: 1,
+    spreadPips: spec.defaultSpreadPips,
+    spec,
+    signal: {
+      entryLow: 18000,
+      stopLoss: 17950,
+      takeProfit1: 18100,
+      takeProfit2: 18150,
+    },
+  });
+
+  assert.equal(spec.kind, "index");
+  assert.equal(spec.pipSize, 1);
+  assert.equal(spec.contractSize, 1);
+  assert.equal(result.stopDistancePips, 50);
+  assert.equal(result.recommendedLot, 2);
+  assert.equal(result.actualRisk, 100);
+  assert.equal(result.spreadCost, 3);
+});
+
+test("Calculadora de posicao cobre ouro com contrato e tick de commodity", () => {
+  const spec = classifyPositionAssetSpec("XAUUSD", "usd");
+  const result = computePositionCalc({
+    capital: 10000,
+    riskPct: 1,
+    spreadPips: spec.defaultSpreadPips,
+    spec,
+    signal: {
+      entryLow: 2000,
+      stopLoss: 1990,
+      takeProfit1: 2020,
+      takeProfit2: 2030,
+    },
+  });
+
+  assert.equal(spec.kind, "commodity");
+  assert.equal(spec.pipSize, 0.01);
+  assert.equal(spec.contractSize, 100);
+  assert.equal(result.stopDistancePips, 1000);
+  assert.equal(result.pipValuePerLot, 1);
+  assert.equal(result.recommendedLot, 0.1);
+  assert.equal(result.actualRisk, 100);
+  assert.equal(result.spreadCost, 3);
+});
+
+test("Calculadora de posicao explicita fallback para ativo sem especificacao", () => {
+  const cryptoSpec = classifyPositionAssetSpec("bitcoin", "usd");
+  const spec = classifyPositionAssetSpec("ativo-exotico", "usd");
+  const description = describePositionAssetSpec(spec);
+
+  assert.equal(cryptoSpec.kind, "crypto");
+  assert.equal(cryptoSpec.isFallback, false);
+  assert.equal(spec.kind, "generic");
+  assert.equal(spec.isFallback, true);
+  assert.match(description, /Sem especificacao cadastrada/);
 });
 
 test("Probabilistico deriva retornos, stats e Monte Carlo deterministicos", () => {
