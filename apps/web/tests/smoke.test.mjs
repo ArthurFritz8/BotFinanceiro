@@ -244,6 +244,9 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /function renderTimingExecutionJournalPanel\(journal, recentEntries, currency\)/);
   assert.match(mainSource, /id="timing-execution-journal-panel"/);
   assert.match(mainSource, /data-execution-journal-action="record"/);
+  assert.match(mainSource, /data-execution-journal-action="paper"/);
+  assert.match(mainSource, /function updateExecutionChartVisualState\(executionGate, executionPlan, journal\)/);
+  assert.match(mainSource, /chartViewport\.dataset\.executionState/);
   assert.match(mainSource, /renderOrderFlowStrip\(orderFlow\)/);
   assert.match(mainSource, /renderTimingOrderFlowPanel\(orderFlow\)/);
   assert.match(

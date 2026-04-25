@@ -12888,6 +12888,31 @@ function clearExecutionJournalState() {
   renderDeepAnalysisPanel(chartLabState.snapshot);
 }
 
+function openPaperTradingFromTiming() {
+  navigateToRoute(APP_ROUTE_PAPER);
+  setChartStatus("Paper Trading aberto para acompanhar simulacoes.", "ok");
+}
+
+function updateExecutionChartVisualState(executionGate, executionPlan, journal) {
+  if (!(chartViewport instanceof HTMLElement)) {
+    return;
+  }
+
+  chartViewport.dataset.executionGate = typeof executionGate?.status === "string" ? executionGate.status : "watch";
+  chartViewport.dataset.executionState = typeof executionPlan?.state === "string" ? executionPlan.state : "none";
+  chartViewport.dataset.executionJournalTone = typeof journal?.tone === "string" ? journal.tone : "neutral";
+}
+
+function clearExecutionChartVisualState() {
+  if (!(chartViewport instanceof HTMLElement)) {
+    return;
+  }
+
+  delete chartViewport.dataset.executionGate;
+  delete chartViewport.dataset.executionState;
+  delete chartViewport.dataset.executionJournalTone;
+}
+
 function formatExecutionJournalStatus(status) {
   switch (status) {
     case "target2": return "TP2";
@@ -12938,6 +12963,7 @@ function renderTimingExecutionJournalPanel(journal, recentEntries, currency) {
         </div>
         <div class="timing-execution-journal__actions">
           <button type="button" data-execution-journal-action="record">Registrar plano</button>
+          <button type="button" data-execution-journal-action="paper">Abrir Paper</button>
           <button type="button" data-execution-journal-action="clear">Limpar</button>
         </div>
       </header>
@@ -12965,6 +12991,7 @@ function renderTimingDeskHtml(analysis, snapshot, currency) {
   const currentPrice = resolveTimingCurrentPrice(snapshot);
   const executionPlan = buildExecutionPlanSnapshot({ analysis, currentPrice, executionGate });
   const executionJournal = syncExecutionJournalFromTiming({ analysis, currentPrice, executionGate, executionPlan, snapshot });
+  updateExecutionChartVisualState(executionGate, executionPlan, executionJournal.summary);
   const utcHourNow = new Date(nowMs).getUTCHours();
 
   const macroRadar = snapshot?.institutional?.macroRadar;
@@ -13126,6 +13153,7 @@ function renderDeepAnalysisPanelImmediate(snapshot) {
     clearTriggerNarrative();
     clearEnsembleEngine();
     clearInstitutionalSummary();
+    clearExecutionChartVisualState();
 
     if (analysisTabsElement instanceof HTMLElement) {
       analysisTabsElement.innerHTML = "";
@@ -20759,6 +20787,11 @@ function setupChartLab() {
 
       if (action === "record") {
         registerCurrentExecutionPlan("manual");
+        return;
+      }
+
+      if (action === "paper") {
+        openPaperTradingFromTiming();
         return;
       }
 

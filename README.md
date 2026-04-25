@@ -153,6 +153,7 @@ Politica de retencao:
 67. ADR 095: `docs/ADR/ADR-095-execution-gate-timing-desk.md`
 68. ADR 096: `docs/ADR/ADR-096-plano-execucao-timing-desk.md`
 69. ADR 097: `docs/ADR/ADR-097-execution-journal-ghost-score-timing.md`
+70. ADR 098: `docs/ADR/ADR-098-action-rail-visual-state-execution.md`
 
 ## Relatorio completo desta entrega
 
