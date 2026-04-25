@@ -150,6 +150,7 @@ Politica de retencao:
 64. ADR 092: `docs/ADR/ADR-092-order-flow-cvd-volume-zscore-timing.md`
 65. ADR 093: `docs/ADR/ADR-093-heatmap-liquidez-price-zones.md`
 66. ADR 094: `docs/ADR/ADR-094-regime-institucional-market-regime.md`
+67. ADR 095: `docs/ADR/ADR-095-execution-gate-timing-desk.md`
 
 ## Relatorio completo desta entrega
 

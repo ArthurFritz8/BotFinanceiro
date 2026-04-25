@@ -232,6 +232,10 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /function renderTimingMarketRegimePanel\(marketRegime\)/);
   assert.match(mainSource, /id="timing-market-regime-panel"/);
   assert.match(mainSource, /marketRegime\.riskMultiplier/);
+  assert.match(mainSource, /buildExecutionGateSnapshot/);
+  assert.match(mainSource, /function renderTimingExecutionGatePanel\(executionGate\)/);
+  assert.match(mainSource, /id="timing-execution-gate-panel"/);
+  assert.match(mainSource, /gate\.riskScale/);
   assert.match(mainSource, /renderOrderFlowStrip\(orderFlow\)/);
   assert.match(mainSource, /renderTimingOrderFlowPanel\(orderFlow\)/);
   assert.match(

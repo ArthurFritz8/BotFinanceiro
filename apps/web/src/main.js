@@ -34,6 +34,7 @@ import {
   PROBABILISTIC_WEEKDAY_LABELS,
   runProbabilisticMonteCarloProjection,
 } from "./modules/chart-lab/quant/probabilistic.js";
+import { buildExecutionGateSnapshot } from "./modules/chart-lab/quant/execution-gate.js";
 import {
   classifyRiskLabRuinTone,
   loadRiskLabState,
@@ -12601,6 +12602,54 @@ function renderTimingMarketRegimePanel(marketRegime) {
   `;
 }
 
+function renderTimingExecutionGatePanel(executionGate) {
+  const gate = executionGate ?? { checks: [], guidance: "Aguardando gate de execucao.", label: "AGUARDAR", metrics: {}, riskScale: 0, score: 0, signalTone: "neutral", status: "watch", tone: "warn" };
+  const checks = Array.isArray(gate.checks) ? gate.checks : [];
+  const scoreLabel = Number.isFinite(gate.score) ? gate.score.toFixed(0) : "0";
+  const riskScaleLabel = Number.isFinite(gate.riskScale) ? `${Math.round(gate.riskScale * 100)}%` : "0%";
+  const riskReward = Number.isFinite(gate.metrics?.riskReward) ? gate.metrics.riskReward.toFixed(2) : "n/d";
+  const confidence = Number.isFinite(gate.metrics?.confidence) ? `${gate.metrics.confidence.toFixed(0)}%` : "n/d";
+  const checksHtml = checks.map((check) => `
+    <li class="timing-execution-check" data-ok="${check.ok ? "true" : "false"}" data-blocking="${check.blocking ? "true" : "false"}" title="${escapeHtml(check.detail)}">
+      <span>${escapeHtml(check.label)}</span>
+      <strong>${check.ok ? "OK" : check.blocking ? "BLOCK" : "WAIT"}</strong>
+    </li>
+  `).join("");
+
+  return `
+    <article class="analysis-block timing-block timing-execution-gate" data-tone="${escapeHtml(gate.tone)}" data-status="${escapeHtml(gate.status)}" id="timing-execution-gate-panel">
+      <header class="timing-execution-gate__head">
+        <div>
+          <h4>Execution Gate</h4>
+          <p>${escapeHtml(gate.guidance)}</p>
+        </div>
+        <div class="timing-execution-gate__badge" id="timing-execution-gate-status">
+          <strong>${escapeHtml(gate.label)}</strong>
+          <span>${escapeHtml(scoreLabel)}/100</span>
+        </div>
+      </header>
+      <div class="timing-execution-gate__grid">
+        <article>
+          <span>Direcao</span>
+          <strong>${escapeHtml(String(gate.signalTone ?? "neutral").toUpperCase())}</strong>
+          <small>confianca ${escapeHtml(confidence)}</small>
+        </article>
+        <article>
+          <span>Risco liberado</span>
+          <strong>${escapeHtml(riskScaleLabel)}</strong>
+          <small>do tamanho base ajustado</small>
+        </article>
+        <article>
+          <span>Assimetria</span>
+          <strong>R:R ${escapeHtml(riskReward)}</strong>
+          <small>minimo institucional 1.20</small>
+        </article>
+      </div>
+      <ul class="timing-execution-checks" role="list">${checksHtml}</ul>
+    </article>
+  `;
+}
+
 function renderTimingDeskHtml(analysis, snapshot, currency) {
   const nowMs = Date.now();
   const session = getCurrentTradingSessionUtc(nowMs);
@@ -12609,6 +12658,8 @@ function renderTimingDeskHtml(analysis, snapshot, currency) {
   const killzones = getKillzonesForAssetClass(assetClass);
   const orderFlow = buildTimingOrderFlowSnapshot({ snapshot });
   const marketRegime = buildMarketRegimeSnapshot({ snapshot, orderFlow });
+  const liquidityHeatmap = buildLiquidityHeatmapSnapshot({ snapshot });
+  const executionGate = buildExecutionGateSnapshot({ analysis, liquidityHeatmap, marketRegime, orderFlow });
   const utcHourNow = new Date(nowMs).getUTCHours();
 
   const macroRadar = snapshot?.institutional?.macroRadar;
@@ -12697,6 +12748,8 @@ function renderTimingDeskHtml(analysis, snapshot, currency) {
       ${binaryWarnHtml}
 
       ${renderTimingMarketRegimePanel(marketRegime)}
+
+      ${renderTimingExecutionGatePanel(executionGate)}
 
       ${renderTimingOrderFlowPanel(orderFlow)}
 

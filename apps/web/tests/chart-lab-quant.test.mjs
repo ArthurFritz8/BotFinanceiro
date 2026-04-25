@@ -6,6 +6,7 @@ import {
   computePositionCalc,
   describePositionAssetSpec,
 } from "../src/modules/chart-lab/quant/position-calculator.js";
+import { buildExecutionGateSnapshot } from "../src/modules/chart-lab/quant/execution-gate.js";
 import {
   buildLiquidityHeatmapSnapshot,
   normalizeLiquidityHeatmapCandles,
@@ -414,4 +415,95 @@ test("Market regime degrada sem amostra minima", () => {
   assert.equal(regime.key, "warming");
   assert.equal(regime.sampleSize, 5);
   assert.equal(regime.riskMultiplier, 0);
+});
+
+test("Execution gate arma setup quando sinal, regime, fluxo e liquidez alinham", () => {
+  const gate = buildExecutionGateSnapshot({
+    liquidityHeatmap: {
+      nearestBelow: { distancePercent: -1.4, label: "SSL 92%" },
+      ready: true,
+    },
+    marketRegime: {
+      direction: "bullish",
+      key: "trend",
+      label: "Tendencia Institucional",
+      ready: true,
+      riskMultiplier: 0.85,
+    },
+    orderFlow: {
+      cvd: { ready: true, tone: "bull" },
+      volume: { anomaly: false, label: "Normal", ready: true, tone: "neutral" },
+    },
+    signal: {
+      confidence: 82,
+      riskReward: 1.9,
+      tone: "buy",
+    },
+  });
+
+  assert.equal(gate.status, "armed");
+  assert.equal(gate.tone, "bull");
+  assert.equal(gate.hardBlocked, false);
+  assert.equal(gate.checks.every((check) => check.ok), true);
+  assert.ok(gate.riskScale > 0.8);
+});
+
+test("Execution gate bloqueia stress mesmo com sinal direcional", () => {
+  const gate = buildExecutionGateSnapshot({
+    liquidityHeatmap: {
+      nearestBelow: { distancePercent: -1.2, label: "SSL 88%" },
+      ready: true,
+    },
+    marketRegime: {
+      direction: "bullish",
+      key: "stress",
+      label: "Stress / Expansao",
+      ready: true,
+      riskMultiplier: 0.35,
+    },
+    orderFlow: {
+      cvd: { ready: true, tone: "bull" },
+      volume: { anomaly: false, label: "Normal", ready: true, tone: "neutral" },
+    },
+    signal: {
+      confidence: 86,
+      riskReward: 2.1,
+      tone: "buy",
+    },
+  });
+
+  assert.equal(gate.status, "blocked");
+  assert.equal(gate.tone, "danger");
+  assert.equal(gate.riskScale, 0);
+  assert.equal(gate.checks.find((check) => check.id === "regime").ok, false);
+});
+
+test("Execution gate aguarda quando CVD ainda nao confirma", () => {
+  const gate = buildExecutionGateSnapshot({
+    liquidityHeatmap: {
+      nearestAbove: { distancePercent: 9.2, label: "BSL 80%" },
+      ready: true,
+    },
+    marketRegime: {
+      direction: "neutral",
+      key: "range",
+      label: "Range / Mean Reversion",
+      ready: true,
+      riskMultiplier: 0.65,
+    },
+    orderFlow: {
+      cvd: { ready: true, tone: "neutral" },
+      volume: { anomaly: false, label: "Normal", ready: true, tone: "neutral" },
+    },
+    signal: {
+      confidence: 72,
+      riskReward: 1.5,
+      tone: "sell",
+    },
+  });
+
+  assert.equal(gate.status, "watch");
+  assert.equal(gate.hardBlocked, false);
+  assert.equal(gate.checks.find((check) => check.id === "flow").ok, false);
+  assert.ok(gate.score >= 60 && gate.score < 76);
 });
