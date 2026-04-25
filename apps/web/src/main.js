@@ -37,6 +37,15 @@ import {
 import { buildExecutionGateSnapshot } from "./modules/chart-lab/quant/execution-gate.js";
 import { buildExecutionPlanSnapshot } from "./modules/chart-lab/quant/execution-plan.js";
 import {
+  appendExecutionJournalEntry,
+  createExecutionJournalEntry,
+  createExecutionJournalState,
+  getRecentExecutionJournalEntries,
+  sanitizeExecutionJournalState,
+  settleExecutionJournalEntries,
+  summarizeExecutionJournal,
+} from "./modules/chart-lab/quant/execution-journal.js";
+import {
   classifyRiskLabRuinTone,
   loadRiskLabState,
   persistRiskLabState,
@@ -2075,12 +2084,17 @@ let binaryOptionsGhostTrackerState = createBinaryOptionsGhostTrackerState();
 let spotMarginGhostTrackerState = createSpotMarginGhostTrackerState();
 let binaryOptionsGhostAuditBackendState = createBinaryOptionsGhostAuditBackendState();
 let binaryOptionsGhostAuditViewMode = BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION;
+let executionJournalState = createExecutionJournalState();
+let latestTimingExecutionContext = null;
 let isPropDeskInitialized = false;
 let isWatchlistRiskSummaryCollapsed = false;
 
 const GHOST_TRACKER_PERSISTENCE_KEY = "botfinanceiro:ghost-tracker:v1";
 const GHOST_TRACKER_PERSIST_DEBOUNCE_MS = 180;
 let ghostTrackerPersistTimer = null;
+const EXECUTION_JOURNAL_PERSISTENCE_KEY = "botfinanceiro:execution-journal:v1";
+const EXECUTION_JOURNAL_PERSIST_DEBOUNCE_MS = 180;
+let executionJournalPersistTimer = null;
 
 function sanitizePersistedGhostTrackerState(candidate, factory) {
   const base = factory();
@@ -2167,6 +2181,46 @@ function schedulePersistGhostTrackerStates() {
 }
 
 hydrateGhostTrackerStatesFromStorage();
+
+function hydrateExecutionJournalStateFromStorage() {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(EXECUTION_JOURNAL_PERSISTENCE_KEY);
+
+    if (!raw) {
+      return;
+    }
+
+    executionJournalState = sanitizeExecutionJournalState(JSON.parse(raw));
+  } catch {
+    executionJournalState = createExecutionJournalState();
+  }
+}
+
+function schedulePersistExecutionJournalState() {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return;
+  }
+
+  if (executionJournalPersistTimer !== null) {
+    return;
+  }
+
+  executionJournalPersistTimer = window.setTimeout(() => {
+    executionJournalPersistTimer = null;
+
+    try {
+      window.localStorage.setItem(EXECUTION_JOURNAL_PERSISTENCE_KEY, JSON.stringify(executionJournalState));
+    } catch {
+      // Quota excedida ou modo privado: journal permanece apenas em memoria.
+    }
+  }, EXECUTION_JOURNAL_PERSIST_DEBOUNCE_MS);
+}
+
+hydrateExecutionJournalStateFromStorage();
 
 function mapSymbolToExchange(symbol, exchange) {
   const normalizedSymbol = sanitizeTerminalSymbol(symbol);
@@ -12731,6 +12785,173 @@ function renderTimingExecutionPlanPanel(executionPlan, currency) {
   `;
 }
 
+function resolveTimingCurrentPrice(snapshot) {
+  const insightPrice = toFiniteNumber(snapshot?.insights?.currentPrice, Number.NaN);
+
+  if (Number.isFinite(insightPrice)) {
+    return insightPrice;
+  }
+
+  const points = Array.isArray(snapshot?.points) ? snapshot.points : [];
+  const lastPoint = points[points.length - 1];
+  return toFiniteNumber(lastPoint?.close, Number.NaN);
+}
+
+function syncExecutionJournalFromTiming({ analysis, currentPrice, executionGate, executionPlan, snapshot }) {
+  latestTimingExecutionContext = {
+    analysis,
+    currentPrice,
+    executionGate,
+    executionPlan,
+    snapshot,
+  };
+
+  const nowMs = Date.now();
+  let changed = false;
+
+  if (Number.isFinite(currentPrice)) {
+    const settled = settleExecutionJournalEntries(executionJournalState, currentPrice, nowMs);
+    executionJournalState = settled.state;
+    changed = changed || settled.changed;
+  }
+
+  if (
+    isSpotMarginOperationalMode()
+    && snapshot?.mode === "live"
+    && executionGate?.status === "armed"
+    && executionPlan?.state === "trigger"
+  ) {
+    const entry = createExecutionJournalEntry({
+      analysis,
+      currentPrice,
+      executionGate,
+      executionPlan,
+      nowMs,
+      snapshot,
+      source: "auto",
+    });
+    const appended = appendExecutionJournalEntry(executionJournalState, entry, {
+      nowMs,
+      preventDuplicate: true,
+    });
+    executionJournalState = appended.state;
+    changed = changed || appended.appended;
+  }
+
+  if (changed) {
+    schedulePersistExecutionJournalState();
+  }
+
+  return {
+    recentEntries: getRecentExecutionJournalEntries(executionJournalState, 5),
+    summary: summarizeExecutionJournal(executionJournalState),
+  };
+}
+
+function registerCurrentExecutionPlan(source = "manual") {
+  const context = latestTimingExecutionContext;
+
+  if (!context || !context.snapshot || !context.executionPlan) {
+    setChartStatus("Sem plano de execucao ativo para registrar.", "warn");
+    return;
+  }
+
+  const nowMs = Date.now();
+  const entry = createExecutionJournalEntry({
+    ...context,
+    nowMs,
+    source,
+  });
+  const appended = appendExecutionJournalEntry(executionJournalState, entry, {
+    nowMs,
+    preventDuplicate: true,
+  });
+  executionJournalState = appended.state;
+
+  if (!appended.appended) {
+    const message = appended.reason === "duplicate"
+      ? "Plano ja esta no journal desta janela."
+      : "Plano ainda nao esta pronto para registro.";
+    setChartStatus(message, "warn");
+    return;
+  }
+
+  schedulePersistExecutionJournalState();
+  setChartStatus("Plano registrado no Execution Journal.", "ok");
+  renderDeepAnalysisPanel(chartLabState.snapshot);
+}
+
+function clearExecutionJournalState() {
+  executionJournalState = createExecutionJournalState();
+  schedulePersistExecutionJournalState();
+  setChartStatus("Execution Journal limpo.", "ok");
+  renderDeepAnalysisPanel(chartLabState.snapshot);
+}
+
+function formatExecutionJournalStatus(status) {
+  switch (status) {
+    case "target2": return "TP2";
+    case "stopped": return "STOP";
+    case "partial": return "TP1";
+    case "entered": return "EM TRADE";
+    case "watch": return "WATCH";
+    case "blocked": return "BLOCK";
+    case "invalid": return "INVALIDO";
+    default: return "MONITOR";
+  }
+}
+
+function renderTimingExecutionJournalPanel(journal, recentEntries, currency) {
+  const summary = journal ?? summarizeExecutionJournal(executionJournalState);
+  const entries = Array.isArray(recentEntries) ? recentEntries : getRecentExecutionJournalEntries(executionJournalState, 5);
+  const scoreLabel = summary.resolved >= 5 ? summary.score.toFixed(0) : "--";
+  const winRateLabel = summary.resolved > 0 ? `${summary.winRate.toFixed(1)}%` : "n/d";
+  const averageRLabel = summary.resolved > 0 ? `${summary.averageR >= 0 ? "+" : ""}${summary.averageR.toFixed(2)}R` : "n/d";
+  const entriesHtml = entries.length > 0
+    ? entries.map((entry) => {
+        const openedAt = Number.isFinite(entry.openedAtMs)
+          ? new Date(entry.openedAtMs).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+          : "--:--";
+        const outcome = Number.isFinite(entry.outcomeR)
+          ? `${entry.outcomeR >= 0 ? "+" : ""}${entry.outcomeR.toFixed(2)}R`
+          : entry.status === "partial"
+            ? "TP1"
+            : "aberto";
+
+        return `
+          <li class="timing-journal-row" data-status="${escapeHtml(entry.status)}">
+            <span>${escapeHtml(openedAt)}</span>
+            <strong>${escapeHtml(String(entry.side ?? "neutral").toUpperCase())}</strong>
+            <span>${escapeHtml(formatExecutionJournalStatus(entry.status))}</span>
+            <span>${escapeHtml(outcome)}</span>
+          </li>
+        `;
+      }).join("")
+    : `<li class="timing-journal-row" data-status="empty"><span>Sem planos registrados ainda.</span></li>`;
+
+  return `
+    <article class="analysis-block timing-block timing-execution-journal" data-tone="${escapeHtml(summary.tone)}" id="timing-execution-journal-panel">
+      <header class="timing-execution-journal__head">
+        <div>
+          <h4>Execution Journal</h4>
+          <p>${escapeHtml(summary.guidance)}</p>
+        </div>
+        <div class="timing-execution-journal__actions">
+          <button type="button" data-execution-journal-action="record">Registrar plano</button>
+          <button type="button" data-execution-journal-action="clear">Limpar</button>
+        </div>
+      </header>
+      <div class="timing-execution-journal__grid">
+        <article><span>Score</span><strong>${escapeHtml(scoreLabel)}</strong><small>${escapeHtml(summary.sampleState)}</small></article>
+        <article><span>Win rate ghost</span><strong>${escapeHtml(winRateLabel)}</strong><small>${summary.resolved} fechados</small></article>
+        <article><span>Payoff medio</span><strong>${escapeHtml(averageRLabel)}</strong><small>${summary.open} abertos</small></article>
+        <article><span>Total auditado</span><strong>${summary.total}</strong><small>${escapeHtml(formatPrice(resolveTimingCurrentPrice(chartLabState.snapshot), currency))}</small></article>
+      </div>
+      <ul class="timing-journal-list" role="list">${entriesHtml}</ul>
+    </article>
+  `;
+}
+
 function renderTimingDeskHtml(analysis, snapshot, currency) {
   const nowMs = Date.now();
   const session = getCurrentTradingSessionUtc(nowMs);
@@ -12741,7 +12962,9 @@ function renderTimingDeskHtml(analysis, snapshot, currency) {
   const marketRegime = buildMarketRegimeSnapshot({ snapshot, orderFlow });
   const liquidityHeatmap = buildLiquidityHeatmapSnapshot({ snapshot });
   const executionGate = buildExecutionGateSnapshot({ analysis, liquidityHeatmap, marketRegime, orderFlow });
-  const executionPlan = buildExecutionPlanSnapshot({ analysis, currentPrice: snapshot?.insights?.currentPrice, executionGate });
+  const currentPrice = resolveTimingCurrentPrice(snapshot);
+  const executionPlan = buildExecutionPlanSnapshot({ analysis, currentPrice, executionGate });
+  const executionJournal = syncExecutionJournalFromTiming({ analysis, currentPrice, executionGate, executionPlan, snapshot });
   const utcHourNow = new Date(nowMs).getUTCHours();
 
   const macroRadar = snapshot?.institutional?.macroRadar;
@@ -12834,6 +13057,8 @@ function renderTimingDeskHtml(analysis, snapshot, currency) {
       ${renderTimingExecutionGatePanel(executionGate)}
 
       ${renderTimingExecutionPlanPanel(executionPlan, currency)}
+
+      ${renderTimingExecutionJournalPanel(executionJournal.summary, executionJournal.recentEntries, currency)}
 
       ${renderTimingOrderFlowPanel(orderFlow)}
 
@@ -20520,6 +20745,28 @@ function setupChartLab() {
   }
 
   if (analysisTabContentElement instanceof HTMLElement) {
+    analysisTabContentElement.addEventListener("click", (event) => {
+      const target = event.target;
+      const button = target instanceof HTMLElement
+        ? target.closest("button[data-execution-journal-action]")
+        : null;
+
+      if (!(button instanceof HTMLButtonElement)) {
+        return;
+      }
+
+      const action = button.dataset.executionJournalAction;
+
+      if (action === "record") {
+        registerCurrentExecutionPlan("manual");
+        return;
+      }
+
+      if (action === "clear") {
+        clearExecutionJournalState();
+      }
+    });
+
     analysisTabContentElement.addEventListener("input", (event) => {
       const target = event.target;
 

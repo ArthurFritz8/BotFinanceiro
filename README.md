@@ -152,6 +152,7 @@ Politica de retencao:
 66. ADR 094: `docs/ADR/ADR-094-regime-institucional-market-regime.md`
 67. ADR 095: `docs/ADR/ADR-095-execution-gate-timing-desk.md`
 68. ADR 096: `docs/ADR/ADR-096-plano-execucao-timing-desk.md`
+69. ADR 097: `docs/ADR/ADR-097-execution-journal-ghost-score-timing.md`
 
 ## Relatorio completo desta entrega
 

@@ -9,6 +9,13 @@ import {
 import { buildExecutionGateSnapshot } from "../src/modules/chart-lab/quant/execution-gate.js";
 import { buildExecutionPlanSnapshot } from "../src/modules/chart-lab/quant/execution-plan.js";
 import {
+  appendExecutionJournalEntry,
+  createExecutionJournalEntry,
+  createExecutionJournalState,
+  settleExecutionJournalEntries,
+  summarizeExecutionJournal,
+} from "../src/modules/chart-lab/quant/execution-journal.js";
+import {
   buildLiquidityHeatmapSnapshot,
   normalizeLiquidityHeatmapCandles,
 } from "../src/modules/chart-lab/quant/liquidity-heatmap.js";
@@ -583,4 +590,79 @@ test("Execution plan bloqueia risco quando geometria esta incompleta", () => {
   assert.equal(plan.risk.riskScale, 0);
   assert.equal(plan.risk.suggestedRiskPercent, 0);
   assert.equal(plan.checks.find((check) => check.id === "geometry").ok, false);
+});
+
+test("Execution journal registra plano pronto e liquida TP2 em R positivo", () => {
+  const plan = buildExecutionPlanSnapshot({
+    currentPrice: 100.4,
+    executionGate: { riskScale: 0.8, status: "armed" },
+    signal: {
+      entryHigh: 101,
+      entryLow: 100,
+      riskReward: 2.2,
+      stopLoss: 98,
+      takeProfit1: 103,
+      takeProfit2: 106,
+      tone: "buy",
+    },
+  });
+  const entry = createExecutionJournalEntry({
+    currentPrice: 100.4,
+    executionGate: { score: 82, status: "armed" },
+    executionPlan: plan,
+    nowMs: 1000,
+    snapshot: { assetId: "bitcoin", currency: "usd", mode: "live", range: "24h", resolution: "1" },
+  });
+  const appended = appendExecutionJournalEntry(createExecutionJournalState(1000), entry, { nowMs: 1000 });
+  const settled = settleExecutionJournalEntries(appended.state, 106.2, 2000);
+  const summary = summarizeExecutionJournal(settled.state);
+
+  assert.equal(appended.appended, true);
+  assert.equal(settled.state.entries[0].status, "target2");
+  assert.equal(settled.state.entries[0].outcomeR, 2.2);
+  assert.equal(summary.wins, 1);
+  assert.equal(summary.averageR, 2.2);
+  assert.equal(summary.sampleState, "Aquecendo");
+});
+
+test("Execution journal evita duplicidade aberta na mesma janela", () => {
+  const plan = buildExecutionPlanSnapshot({
+    currentPrice: 100.2,
+    executionGate: { riskScale: 0.7, status: "armed" },
+    signal: {
+      entryHigh: 101,
+      entryLow: 100,
+      riskReward: 2,
+      stopLoss: 98,
+      takeProfit1: 103,
+      takeProfit2: 105.5,
+      tone: "buy",
+    },
+  });
+  const state = createExecutionJournalState(1000);
+  const firstEntry = createExecutionJournalEntry({ executionGate: { status: "armed" }, executionPlan: plan, nowMs: 1000, snapshot: { assetId: "ethereum" } });
+  const secondEntry = createExecutionJournalEntry({ executionGate: { status: "armed" }, executionPlan: plan, nowMs: 1200, snapshot: { assetId: "ethereum" } });
+  const first = appendExecutionJournalEntry(state, firstEntry, { nowMs: 1000 });
+  const second = appendExecutionJournalEntry(first.state, secondEntry, { nowMs: 1200 });
+
+  assert.equal(first.appended, true);
+  assert.equal(second.appended, false);
+  assert.equal(second.reason, "duplicate");
+  assert.equal(second.state.entries.length, 1);
+});
+
+test("Execution journal zera score institucional antes de cinco planos fechados", () => {
+  const state = {
+    entries: [
+      { outcomeR: 2, status: "target2" },
+      { outcomeR: -1, status: "stopped" },
+      { outcomeR: 1.5, status: "target2" },
+      { outcomeR: -1, status: "stopped" },
+    ],
+  };
+  const summary = summarizeExecutionJournal(state);
+
+  assert.equal(summary.resolved, 4);
+  assert.equal(summary.score, 0);
+  assert.equal(summary.sampleState, "Aquecendo");
 });
