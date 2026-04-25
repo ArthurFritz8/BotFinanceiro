@@ -75,7 +75,8 @@ test("main.js inicializa estado, aba e render da gestao de risco", async () => {
   assert.match(mainSource, /function runMarketRequestWithRetry\(requestFactory, options = \{\}\)/);
   assert.match(mainSource, /requestBrokerLiveQuoteBatchWithFailover\(/);
   assert.match(mainSource, /Failover do stream watchlist:/);
-  assert.match(mainSource, /Stream live em contingencia:/);
+  assert.match(mainSource, /resolveChartLiveStreamBrokerSelection/);
+  assert.match(mainSource, /resolveNextAutoBrokerAfterLiveFailure/);
   assert.match(mainSource, /openRiskManagementTab\(\{[\s\S]*scroll: true,[\s\S]*\}\);/);
   assert.match(mainSource, /if \(lowerKey === "g"\)/);
   assert.match(mainSource, /function setupPropDesk\(\)/);

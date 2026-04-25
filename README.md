@@ -141,6 +141,7 @@ Politica de retencao:
 55. ADR 083: `docs/ADR/ADR-083-controlador-load-chart-lab.md`
 56. ADR 084: `docs/ADR/ADR-084-controlador-live-stream-chart-lab.md`
 57. ADR 085: `docs/ADR/ADR-085-builders-live-stream-chart-lab.md`
+58. ADR 086: `docs/ADR/ADR-086-helpers-failover-live-chart-lab.md`
 
 ## Relatorio completo desta entrega
 

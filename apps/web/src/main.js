@@ -55,6 +55,10 @@ import {
   buildBinaryOptionsLiveStreamDescriptor,
   buildCryptoLiveStreamDescriptor,
 } from "./modules/chart-lab/chart-live-stream-selection.js";
+import {
+  resolveChartLiveStreamBrokerSelection,
+  resolveNextAutoBrokerAfterLiveFailure,
+} from "./modules/chart-lab/chart-live-failover.js";
 import "./styles.css";
 
 const chatForm = document.querySelector("#chat-form");
@@ -17994,12 +17998,18 @@ function connectChartLiveStream(intervalMs) {
   const requestedResolution = normalizeRequestedChartResolution(selectedInterval);
   const streamResolution = requestedResolution
     ?? normalizeRequestedChartResolution(TERMINAL_INTERVAL_BACKEND_FALLBACK);
-  const selectedRequestedBroker = normalizeRequestedBroker(getSelectedBroker());
-  const selectedBroker = selectedRequestedBroker === "auto"
-    ? resolveAutoChartPrimaryBroker()
-    : normalizeBrokerName(selectedRequestedBroker);
-  const streamFailoverChain = buildBrokerFailoverChain(selectedBroker);
-  const exchange = streamFailoverChain[0] ?? selectedBroker;
+  const {
+    contingencyLegend,
+    exchange,
+    isContingency,
+    selectedRequestedBroker,
+  } = resolveChartLiveStreamBrokerSelection({
+    autoBroker: resolveAutoChartPrimaryBroker(),
+    buildBrokerFailoverChain,
+    normalizeBrokerName,
+    normalizeRequestedBroker,
+    requestedBroker: getSelectedBroker(),
+  });
   const streamDescriptor = buildCryptoLiveStreamDescriptor({
     apiBaseUrl: API_BASE_URL,
     assetId,
@@ -18026,11 +18036,8 @@ function connectChartLiveStream(intervalMs) {
   const eventSource = new EventSource(streamUrl);
   chartLiveStreamController.attachStream(streamKey, eventSource);
 
-  if (exchange !== selectedBroker) {
-    setChartLegend(
-      `Stream live em contingencia: ${selectedBroker.toUpperCase()} -> ${exchange.toUpperCase()}.`,
-      "warn",
-    );
+  if (isContingency) {
+    setChartLegend(contingencyLegend, "warn");
   }
 
   eventSource.addEventListener("snapshot", (event) => {
@@ -18083,15 +18090,19 @@ function connectChartLiveStream(intervalMs) {
 
     markBrokerFailure(exchange, message);
 
-    if (selectedRequestedBroker === "auto" && isBrokerCircuitOpen(exchange)) {
-      const failoverChain = buildBrokerFailoverChain(exchange);
-      const nextBroker = failoverChain.find((candidate) => candidate !== exchange);
+    const nextBroker = resolveNextAutoBrokerAfterLiveFailure({
+      buildBrokerFailoverChain,
+      exchange,
+      isBrokerCircuitOpen,
+      normalizeBrokerName,
+      normalizeRequestedBroker,
+      selectedRequestedBroker,
+    });
 
-      if (nextBroker) {
-        updateAutoChartPreferredBroker(nextBroker, {
-          force: true,
-        });
-      }
+    if (nextBroker) {
+      updateAutoChartPreferredBroker(nextBroker, {
+        force: true,
+      });
     }
 
     startChartLiveFallbackPolling();
@@ -18117,15 +18128,19 @@ function connectChartLiveStream(intervalMs) {
 
     markBrokerFailure(exchange, "Stream live desconectado");
 
-    if (selectedRequestedBroker === "auto" && isBrokerCircuitOpen(exchange)) {
-      const failoverChain = buildBrokerFailoverChain(exchange);
-      const nextBroker = failoverChain.find((candidate) => candidate !== exchange);
+    const nextBroker = resolveNextAutoBrokerAfterLiveFailure({
+      buildBrokerFailoverChain,
+      exchange,
+      isBrokerCircuitOpen,
+      normalizeBrokerName,
+      normalizeRequestedBroker,
+      selectedRequestedBroker,
+    });
 
-      if (nextBroker) {
-        updateAutoChartPreferredBroker(nextBroker, {
-          force: true,
-        });
-      }
+    if (nextBroker) {
+      updateAutoChartPreferredBroker(nextBroker, {
+        force: true,
+      });
     }
 
     stopChartLiveStream({ transitioning: true });
