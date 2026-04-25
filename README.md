@@ -140,6 +140,7 @@ Politica de retencao:
 54. ADR 082: `docs/ADR/ADR-082-store-minimo-chart-lab.md`
 55. ADR 083: `docs/ADR/ADR-083-controlador-load-chart-lab.md`
 56. ADR 084: `docs/ADR/ADR-084-controlador-live-stream-chart-lab.md`
+57. ADR 085: `docs/ADR/ADR-085-builders-live-stream-chart-lab.md`
 
 ## Relatorio completo desta entrega
 

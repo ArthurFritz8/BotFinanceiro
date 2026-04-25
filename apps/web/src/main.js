@@ -51,6 +51,10 @@ import {
 import { createChartLabStore } from "./modules/chart-lab/chart-lab-store.js";
 import { createChartLoadController } from "./modules/chart-lab/chart-load-controller.js";
 import { createChartLiveStreamController } from "./modules/chart-lab/chart-live-stream-controller.js";
+import {
+  buildBinaryOptionsLiveStreamDescriptor,
+  buildCryptoLiveStreamDescriptor,
+} from "./modules/chart-lab/chart-live-stream-selection.js";
 import "./styles.css";
 
 const chatForm = document.querySelector("#chat-form");
@@ -17697,33 +17701,6 @@ async function requestInstitutionalMacroSnapshotCore(symbol, range, mode, module
   return payload?.data ?? null;
 }
 
-function buildCryptoLiveStreamUrl(assetId, exchange, range, intervalMs, resolution = null) {
-  const params = new URLSearchParams({
-    assetId,
-    exchange,
-    intervalMs: String(intervalMs),
-    range,
-  });
-
-  if (typeof resolution === "string" && resolution.length > 0) {
-    params.set("resolution", resolution);
-  }
-
-  return buildApiUrl(`/v1/crypto/live-stream?${params.toString()}`);
-}
-
-function buildBinaryOptionsLiveStreamUrl(assetId, exchange, range, intervalMs, resolution) {
-  const params = new URLSearchParams({
-    assetId,
-    exchange,
-    intervalMs: String(intervalMs),
-    range,
-    resolution,
-  });
-
-  return buildApiUrl(`/v1/binary-options/live-stream?${params.toString()}`);
-}
-
 function applyChartSnapshot(snapshot, options = {}) {
   if (!snapshot || !Array.isArray(snapshot.points)) {
     throw new Error("Resposta de grafico invalida");
@@ -17871,7 +17848,22 @@ function connectBinaryOptionsLiveStream(intervalMs) {
 
   const selectedRequestedBroker = normalizeRequestedBroker(getSelectedBroker());
   const exchange = selectedRequestedBroker === "auto" ? "binance" : normalizeBrokerName(selectedRequestedBroker);
-  const streamKey = `${assetId}:binary:${selectedRequestedBroker}:${exchange}:${range}:${streamResolution}:${intervalMs}`;
+  const streamDescriptor = buildBinaryOptionsLiveStreamDescriptor({
+    apiBaseUrl: API_BASE_URL,
+    assetId,
+    exchange,
+    intervalMs,
+    range,
+    requestedBroker: selectedRequestedBroker,
+    resolution: streamResolution,
+  });
+
+  if (streamDescriptor === null) {
+    startChartLiveFallbackPolling();
+    return false;
+  }
+
+  const { streamKey, streamUrl } = streamDescriptor;
 
   if (chartLiveStreamController.isActiveStream(streamKey)) {
     return true;
@@ -17879,7 +17871,6 @@ function connectBinaryOptionsLiveStream(intervalMs) {
 
   stopChartLiveStream();
 
-  const streamUrl = buildBinaryOptionsLiveStreamUrl(assetId, exchange, range, intervalMs, streamResolution);
   const eventSource = new EventSource(streamUrl);
   chartLiveStreamController.attachStream(streamKey, eventSource);
 
@@ -18009,7 +18000,22 @@ function connectChartLiveStream(intervalMs) {
     : normalizeBrokerName(selectedRequestedBroker);
   const streamFailoverChain = buildBrokerFailoverChain(selectedBroker);
   const exchange = streamFailoverChain[0] ?? selectedBroker;
-  const streamKey = `${assetId}:${selectedRequestedBroker}:${exchange}:${range}:${streamResolution ?? "1"}:${intervalMs}`;
+  const streamDescriptor = buildCryptoLiveStreamDescriptor({
+    apiBaseUrl: API_BASE_URL,
+    assetId,
+    exchange,
+    intervalMs,
+    range,
+    requestedBroker: selectedRequestedBroker,
+    resolution: streamResolution,
+  });
+
+  if (streamDescriptor === null) {
+    startChartLiveFallbackPolling();
+    return false;
+  }
+
+  const { streamKey, streamUrl } = streamDescriptor;
 
   if (chartLiveStreamController.isActiveStream(streamKey)) {
     return true;
@@ -18017,7 +18023,6 @@ function connectChartLiveStream(intervalMs) {
 
   stopChartLiveStream();
 
-  const streamUrl = buildCryptoLiveStreamUrl(assetId, exchange, range, intervalMs, streamResolution);
   const eventSource = new EventSource(streamUrl);
   chartLiveStreamController.attachStream(streamKey, eventSource);
 

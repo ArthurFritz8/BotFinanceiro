@@ -65,6 +65,8 @@ test("main.js inicializa estado, aba e render da gestao de risco", async () => {
   assert.match(mainSource, /function startWatchlistStreamFallbackPolling\(\)/);
   assert.match(mainSource, /function startChartLiveFallbackPolling\(\)/);
   assert.match(mainSource, /import \{ createChartLiveStreamController \} from "\.\/modules\/chart-lab\/chart-live-stream-controller\.js";/);
+  assert.match(mainSource, /buildCryptoLiveStreamDescriptor/);
+  assert.match(mainSource, /buildBinaryOptionsLiveStreamDescriptor/);
   assert.match(mainSource, /const chartLiveStreamController = createChartLiveStreamController\(\{[\s\S]*liveStatus: LIVE_STATUS,[\s\S]*timers: window,[\s\S]*updateLiveStatus: \(status\) => updateChartLiveStatus\(status\),[\s\S]*\}\);/);
   assert.match(mainSource, /const chartFallbackBadgeElement = document\.querySelector\("#chart-fallback-badge"\);/);
   assert.match(mainSource, /function setChartFallbackBadge\(message = "", mode = ""\)/);
@@ -218,6 +220,7 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /const preferredBroker = resolveAutoChartPrimaryBroker\(\);/);
   assert.match(mainSource, /requestCryptoChartEndpoint\([\s\S]*targetMode,[\s\S]*preferredBroker,[\s\S]*resolution,[\s\S]*\)/);
   assert.match(mainSource, /requestCryptoChartEndpoint\([\s\S]*targetMode,[\s\S]*"auto",[\s\S]*resolution,[\s\S]*\)/);
+  assert.match(mainSource, /const \{ streamKey, streamUrl \} = streamDescriptor;/);
   assert.match(mainSource, /AUTO inteligente: ajuste de provider/);
   assert.match(mainSource, /buildResolutionFallbackMessage\(normalizedInterval, TERMINAL_INTERVAL_BINARY_OPTIONS_FALLBACK\)/);
   assert.match(mainSource, /displayProvider: statusBroker,/);
