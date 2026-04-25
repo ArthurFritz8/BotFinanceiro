@@ -214,6 +214,8 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /buildApiUrl\(INTELLIGENCE_SYNC_TELEMETRY_ENDPOINT\)/);
   assert.match(mainSource, /createChartAssetGeneration/);
   assert.match(mainSource, /chartAssetGeneration\.assertCurrent\(assetGenerationToken\)/);
+  assert.match(mainSource, /resetChartAssetContext/);
+  assert.match(mainSource, /function resetChartAssetScopedState\(nextContext, options = \{\}\)/);
   assert.match(mainSource, /if \(pipelineStrategy === "institutional_macro" && !canRunInstitutionalMacroForSymbol\(selectedTerminalSymbol\)\)/);
   assert.match(mainSource, /if \(chartLoadController\.queueIfBusy\(loadOptions\)\) \{[\s\S]*return;[\s\S]*\}/);
   assert.match(mainSource, /chartLoadController\.start\(\);/);

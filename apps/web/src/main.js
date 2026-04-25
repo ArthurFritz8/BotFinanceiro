@@ -55,6 +55,7 @@ import {
   createChartAssetGeneration,
   isStaleChartAssetGenerationError,
 } from "./modules/chart-lab/chart-asset-generation.js";
+import { resetChartAssetContext } from "./modules/chart-lab/chart-asset-context-reset.js";
 import {
   buildBinaryOptionsLiveStreamDescriptor,
   buildCryptoLiveStreamDescriptor,
@@ -7642,6 +7643,34 @@ function resetSpotMarginGhostTrackerSession() {
 function resetBinaryOptionsGhostAuditBackendState() {
   binaryOptionsGhostAuditBackendState = createBinaryOptionsGhostAuditBackendState();
   binaryOptionsGhostAuditViewMode = BINARY_OPTIONS_GHOST_AUDIT_VIEW_MODE_SESSION;
+}
+
+function resetChartAssetScopedState(nextContext, options = {}) {
+  return resetChartAssetContext({
+    callbacks: [() => {
+      resetBinaryOptionsGhostTrackerSession();
+      resetSpotMarginGhostTrackerSession();
+      resetBinaryOptionsGhostAuditBackendState();
+      newsIntelligencePayload = null;
+      newsIntelligenceLastAssetId = "";
+      newsIntelligenceLastFetchedAtMs = 0;
+      newsIntelligenceRequestToken += 1;
+      intelligenceSyncAlertLevel = "ok";
+      intelligenceSyncLastAlertAtMs = 0;
+      chartLabState.snapshot = null;
+      clearChartSurface();
+      setChartLegend("Carregando novo contexto de ativo...", "loading");
+      renderChartMetrics(null);
+    }],
+    force: options.force === true,
+    nextContext,
+    previousContext: {
+      ...chartLabStore.getSelection(),
+      operationalMode: chartLabState.operationalMode,
+      strategy: chartLabState.strategy,
+    },
+    reason: typeof options.reason === "string" ? options.reason : "asset-context-change",
+  });
 }
 
 function setBinaryOptionsGhostAuditViewMode(nextMode, options = {}) {
@@ -18446,6 +18475,16 @@ async function loadChart(options = {}) {
   const range = loadOptions.range ?? chartRangeSelect.value;
   const silent = loadOptions.silent === true;
 
+  resetChartAssetScopedState({
+    assetId,
+    operationalMode: chartLabState.operationalMode,
+    strategy: pipelineStrategy,
+    symbol: selectedTerminalSymbol,
+  }, {
+    reason: "load-chart",
+  });
+  chartLabState.strategy = pipelineStrategy;
+
   chartLabStore.patchSelection({
     assetId,
     broker: selectedBroker,
@@ -18478,7 +18517,6 @@ async function loadChart(options = {}) {
   }
 
   try {
-    chartLabState.strategy = pipelineStrategy;
     const binaryOperationalMode = isBinaryOptionsOperationalMode();
 
     if (pipelineStrategy === "institutional_macro") {
