@@ -64,6 +64,8 @@ test("main.js inicializa estado, aba e render da gestao de risco", async () => {
   assert.match(mainSource, /function buildBrokerFailoverChain\(primaryBroker, options = \{\}\)/);
   assert.match(mainSource, /function startWatchlistStreamFallbackPolling\(\)/);
   assert.match(mainSource, /function startChartLiveFallbackPolling\(\)/);
+  assert.match(mainSource, /import \{ createChartLiveStreamController \} from "\.\/modules\/chart-lab\/chart-live-stream-controller\.js";/);
+  assert.match(mainSource, /const chartLiveStreamController = createChartLiveStreamController\(\{[\s\S]*liveStatus: LIVE_STATUS,[\s\S]*timers: window,[\s\S]*updateLiveStatus: \(status\) => updateChartLiveStatus\(status\),[\s\S]*\}\);/);
   assert.match(mainSource, /const chartFallbackBadgeElement = document\.querySelector\("#chart-fallback-badge"\);/);
   assert.match(mainSource, /function setChartFallbackBadge\(message = "", mode = ""\)/);
   assert.match(mainSource, /setChartFallbackBadge\(fallbackBadgeLabel, fallbackBadgeMode\);/);
@@ -355,9 +357,9 @@ test("main.js aplica filterOutOtc na watchlist e wire LIVE indicator no SSE", as
   assert.match(source, /from "\.\/shared\/asset-filters\.js"/);
   assert.match(source, /from "\.\/shared\/live-status-indicator\.js"/);
   assert.match(source, /const TERMINAL_WATCHLIST = filterOutOtc\(TERMINAL_WATCHLIST_RAW\)/);
-  assert.match(source, /updateChartLiveStatus\(LIVE_STATUS\.LIVE\)/);
+  assert.match(source, /chartLiveStreamController\.markLiveSnapshotReceived\(\)/);
   assert.match(source, /stopChartLiveStream\(\{ transitioning: true \}\)/);
-  assert.match(source, /LIVE_STATUS\.OFFLINE/);
+  assert.match(source, /liveStatus: LIVE_STATUS/);
 });
 
 test("index.html expoe botao ANALISAR MERCADO premium com atalho Alt+I", async () => {
@@ -405,9 +407,8 @@ test("CTA Analisar Mercado dispara fetch fresh bypassando cache do live-chart", 
 test("Stream-error de chart live difere legenda transient para coalescer com snapshot rapido (recovery silencioso)", async () => {
   const source = await readWebFile("src/main.js");
   assert.match(source, /const CHART_STREAM_ERROR_LEGEND_DEFER_MS = 2500;/);
-  assert.match(source, /let chartStreamErrorLegendTimer = null;/);
-  assert.match(source, /chartStreamErrorLegendTimer = setTimeout\(/);
-  assert.match(source, /clearTimeout\(chartStreamErrorLegendTimer\)/);
+  assert.match(source, /chartLiveStreamController\.scheduleDeferredLegend\(\(\) => \{[\s\S]*setChartLegendTransient\(`Stream com oscilacao:/);
+  assert.match(source, /chartLiveStreamController\.markLiveSnapshotReceived\(\)/);
 });
 
 test("index.html expoe seletor de ativos do chart com 30 opcoes globais (BTC, ETH, LTC, TRX, DOT, MATIC)", async () => {

@@ -50,6 +50,7 @@ import {
 } from "./modules/chart-lab/quant/position-calculator.js";
 import { createChartLabStore } from "./modules/chart-lab/chart-lab-store.js";
 import { createChartLoadController } from "./modules/chart-lab/chart-load-controller.js";
+import { createChartLiveStreamController } from "./modules/chart-lab/chart-live-stream-controller.js";
 import "./styles.css";
 
 const chatForm = document.querySelector("#chat-form");
@@ -1913,17 +1914,16 @@ const chartLoadController = createChartLoadController({
     chartLabState.isLoading = isLoading;
   },
 });
+const chartLiveStreamController = createChartLiveStreamController({
+  liveStatus: LIVE_STATUS,
+  timers: window,
+  updateLiveStatus: (status) => updateChartLiveStatus(status),
+});
 let chartAutoRefreshTimer = null;
-let chartLiveStream = null;
-let chartLiveStreamBackoffTimer = null;
-let chartLiveStreamReconnectAttempt = 0;
-let chartLiveStreamKey = "";
 let chartAutoPreferredBroker = "binance";
 let chartAutoPreferredBrokerLockUntilMs = 0;
 let chartLastTransientLegendMessage = "";
 let chartLastTransientLegendAtMs = 0;
-let chartStreamErrorLegendTimer = null;
-let chartLiveFallbackPollTimer = null;
 let chartContextSyncTimer = null;
 let intelligenceSyncPendingStartedAtMs = 0;
 let intelligenceSyncActiveCorrelationId = "";
@@ -17828,44 +17828,15 @@ function applyChartSnapshot(snapshot, options = {}) {
 }
 
 function stopChartLiveStream(options) {
-  stopChartLiveFallbackPolling();
-
-  if (chartLiveStreamBackoffTimer !== null) {
-    window.clearTimeout(chartLiveStreamBackoffTimer);
-    chartLiveStreamBackoffTimer = null;
-  }
-
-  if (chartStreamErrorLegendTimer !== null) {
-    window.clearTimeout(chartStreamErrorLegendTimer);
-    chartStreamErrorLegendTimer = null;
-  }
-
-  if (chartLiveStream) {
-    chartLiveStream.close();
-    chartLiveStream = null;
-  }
-
-  chartLiveStreamKey = "";
-
-  const nextStatus = options && options.transitioning ? LIVE_STATUS.RECONNECTING : LIVE_STATUS.OFFLINE;
-  updateChartLiveStatus(nextStatus);
+  chartLiveStreamController.stopStream(options);
 }
 
 function stopChartLiveFallbackPolling() {
-  if (chartLiveFallbackPollTimer === null) {
-    return;
-  }
-
-  window.clearInterval(chartLiveFallbackPollTimer);
-  chartLiveFallbackPollTimer = null;
+  chartLiveStreamController.stopFallbackPolling();
 }
 
 function startChartLiveFallbackPolling() {
-  if (chartLiveFallbackPollTimer !== null) {
-    return;
-  }
-
-  chartLiveFallbackPollTimer = window.setInterval(() => {
+  chartLiveStreamController.startFallbackPolling(() => {
     if (chartModeSelect?.value !== "live") {
       stopChartLiveFallbackPolling();
       return;
@@ -17902,16 +17873,15 @@ function connectBinaryOptionsLiveStream(intervalMs) {
   const exchange = selectedRequestedBroker === "auto" ? "binance" : normalizeBrokerName(selectedRequestedBroker);
   const streamKey = `${assetId}:binary:${selectedRequestedBroker}:${exchange}:${range}:${streamResolution}:${intervalMs}`;
 
-  if (chartLiveStream && chartLiveStreamKey === streamKey) {
+  if (chartLiveStreamController.isActiveStream(streamKey)) {
     return true;
   }
 
   stopChartLiveStream();
-  chartLiveStreamKey = streamKey;
 
   const streamUrl = buildBinaryOptionsLiveStreamUrl(assetId, exchange, range, intervalMs, streamResolution);
   const eventSource = new EventSource(streamUrl);
-  chartLiveStream = eventSource;
+  chartLiveStreamController.attachStream(streamKey, eventSource);
 
   eventSource.addEventListener("snapshot", (event) => {
     const payload = parseStreamPayload(event, "binary");
@@ -17930,13 +17900,7 @@ function connectBinaryOptionsLiveStream(intervalMs) {
       return;
     }
 
-    stopChartLiveFallbackPolling();
-    chartLiveStreamReconnectAttempt = 0;
-    if (chartStreamErrorLegendTimer !== null) {
-      clearTimeout(chartStreamErrorLegendTimer);
-      chartStreamErrorLegendTimer = null;
-    }
-    updateChartLiveStatus(LIVE_STATUS.LIVE);
+    chartLiveStreamController.markLiveSnapshotReceived();
 
     const resolvedStreamBroker = normalizeBrokerName(snapshot?.exchange?.resolved ?? snapshot?.provider ?? exchange);
     const selectedExchangeForStatus = resolveExchangeLabelFromBroker(resolvedStreamBroker);
@@ -17976,14 +17940,13 @@ function connectBinaryOptionsLiveStream(intervalMs) {
       return;
     }
 
-    if (!chartLiveStream || chartLiveStreamKey !== streamKey) {
+    if (!chartLiveStreamController.isActiveStream(streamKey)) {
       return;
     }
 
     stopChartLiveStream({ transitioning: true });
     startChartLiveFallbackPolling();
-    chartLiveStreamReconnectAttempt += 1;
-    const backoffMs = Math.min(30000, 1200 * 2 ** chartLiveStreamReconnectAttempt);
+    const backoffMs = chartLiveStreamController.nextReconnectBackoffMs();
 
     if (chartLabState.viewMode === "tv" && chartLabState.snapshot) {
       setChartLegendTransient(`Reconectando stream live em ${Math.round(backoffMs / 1000)}s...`, "warn");
@@ -17991,16 +17954,14 @@ function connectBinaryOptionsLiveStream(intervalMs) {
       setChartStatus(`Reconectando stream live em ${Math.round(backoffMs / 1000)}s...`, "loading");
     }
 
-    chartLiveStreamBackoffTimer = window.setTimeout(() => {
-      chartLiveStreamBackoffTimer = null;
-
+    chartLiveStreamController.scheduleReconnect(() => {
       if (chartModeSelect?.value !== "live") {
         return;
       }
 
       configureChartAutoRefresh();
 
-      if (!chartLiveStream) {
+      if (!chartLiveStreamController.hasStream()) {
         void loadChart({
           silent: true,
         });
@@ -18050,16 +18011,15 @@ function connectChartLiveStream(intervalMs) {
   const exchange = streamFailoverChain[0] ?? selectedBroker;
   const streamKey = `${assetId}:${selectedRequestedBroker}:${exchange}:${range}:${streamResolution ?? "1"}:${intervalMs}`;
 
-  if (chartLiveStream && chartLiveStreamKey === streamKey) {
+  if (chartLiveStreamController.isActiveStream(streamKey)) {
     return true;
   }
 
   stopChartLiveStream();
-  chartLiveStreamKey = streamKey;
 
   const streamUrl = buildCryptoLiveStreamUrl(assetId, exchange, range, intervalMs, streamResolution);
   const eventSource = new EventSource(streamUrl);
-  chartLiveStream = eventSource;
+  chartLiveStreamController.attachStream(streamKey, eventSource);
 
   if (exchange !== selectedBroker) {
     setChartLegend(
@@ -18092,13 +18052,7 @@ function connectChartLiveStream(intervalMs) {
       updateAutoChartPreferredBroker(resolvedStreamBroker);
     }
 
-    stopChartLiveFallbackPolling();
-    chartLiveStreamReconnectAttempt = 0;
-    if (chartStreamErrorLegendTimer !== null) {
-      clearTimeout(chartStreamErrorLegendTimer);
-      chartStreamErrorLegendTimer = null;
-    }
-    updateChartLiveStatus(LIVE_STATUS.LIVE);
+    chartLiveStreamController.markLiveSnapshotReceived();
 
     try {
       const statusBroker = selectedRequestedBroker === "auto"
@@ -18139,11 +18093,7 @@ function connectChartLiveStream(intervalMs) {
     const normalizedMessage = normalizeBrokerApiErrorMessage(message, "Stream de chart reportou falha");
 
     if (chartLabState.viewMode === "tv" && chartLabState.snapshot) {
-      if (chartStreamErrorLegendTimer !== null) {
-        clearTimeout(chartStreamErrorLegendTimer);
-      }
-      chartStreamErrorLegendTimer = setTimeout(() => {
-        chartStreamErrorLegendTimer = null;
+      chartLiveStreamController.scheduleDeferredLegend(() => {
         setChartLegendTransient(`Stream com oscilacao: ${normalizedMessage}`, "warn");
       }, CHART_STREAM_ERROR_LEGEND_DEFER_MS);
     } else {
@@ -18156,7 +18106,7 @@ function connectChartLiveStream(intervalMs) {
       return;
     }
 
-    if (!chartLiveStream || chartLiveStreamKey !== streamKey) {
+    if (!chartLiveStreamController.isActiveStream(streamKey)) {
       return;
     }
 
@@ -18175,8 +18125,7 @@ function connectChartLiveStream(intervalMs) {
 
     stopChartLiveStream({ transitioning: true });
     startChartLiveFallbackPolling();
-    chartLiveStreamReconnectAttempt += 1;
-    const backoffMs = Math.min(30000, 1200 * 2 ** chartLiveStreamReconnectAttempt);
+    const backoffMs = chartLiveStreamController.nextReconnectBackoffMs();
 
     if (chartLabState.viewMode === "tv" && chartLabState.snapshot) {
       setChartLegendTransient(`Reconectando stream live em ${Math.round(backoffMs / 1000)}s...`, "warn");
@@ -18184,16 +18133,14 @@ function connectChartLiveStream(intervalMs) {
       setChartStatus(`Reconectando stream live em ${Math.round(backoffMs / 1000)}s...`, "loading");
     }
 
-    chartLiveStreamBackoffTimer = window.setTimeout(() => {
-      chartLiveStreamBackoffTimer = null;
-
+    chartLiveStreamController.scheduleReconnect(() => {
       if (chartModeSelect?.value !== "live") {
         return;
       }
 
       configureChartAutoRefresh();
 
-      if (!chartLiveStream) {
+      if (!chartLiveStreamController.hasStream()) {
         void loadChart({
           silent: true,
         });
