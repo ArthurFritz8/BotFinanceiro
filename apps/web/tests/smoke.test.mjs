@@ -150,7 +150,8 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /const TERMINAL_INTERVAL_BINARY_OPTIONS_FALLBACK = "1S";/);
   assert.match(mainSource, /function buildResolutionFallbackMessage\(interval, fallbackInterval = TERMINAL_INTERVAL_BACKEND_FALLBACK\)/);
   assert.match(mainSource, /let chartAutoPreferredBroker = "binance";/);
-  assert.match(mainSource, /let pendingChartLoadRequest = null;/);
+  assert.match(mainSource, /import \{ createChartLoadController \} from "\.\/modules\/chart-lab\/chart-load-controller\.js";/);
+  assert.match(mainSource, /const chartLoadController = createChartLoadController\(\{[\s\S]*getLoading: \(\) => chartLabState\.isLoading,[\s\S]*setLoading: \(isLoading\) => \{[\s\S]*chartLabState\.isLoading = isLoading;[\s\S]*\},[\s\S]*\}\);/);
   assert.match(mainSource, /let intelligenceSyncActiveCorrelationId = "";/);
   assert.match(mainSource, /let intelligenceSyncHealthPollTimer = null;/);
   assert.match(mainSource, /let intelligenceSyncHealthInFlight = false;/);
@@ -164,7 +165,7 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /function resolveGhostAuditOperationalMode\(mode = chartLabState\.operationalMode\)/);
   assert.match(mainSource, /function resolveChartRangeForTerminalInterval\(interval\)/);
   assert.match(mainSource, /function syncChartRangeWithTerminalInterval\(interval, options = \{\}\)/);
-  assert.match(mainSource, /function queuePendingChartLoadRequest\(options = \{\}\)/);
+  assert.match(mainSource, /chartLoadController\.clearPending\(\);/);
   assert.match(mainSource, /function canRunInstitutionalMacroForSymbol\(symbol\)/);
   assert.match(mainSource, /function createIntelligenceSyncCorrelationId\(\)/);
   assert.match(mainSource, /function getIntelligenceSyncInternalToken\(\)/);
@@ -207,8 +208,9 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /"x-intelligence-correlation-id": correlationId/);
   assert.match(mainSource, /buildApiUrl\(INTELLIGENCE_SYNC_TELEMETRY_ENDPOINT\)/);
   assert.match(mainSource, /if \(pipelineStrategy === "institutional_macro" && !canRunInstitutionalMacroForSymbol\(selectedTerminalSymbol\)\)/);
-  assert.match(mainSource, /if \(chartLabState\.isLoading\) \{[\s\S]*queuePendingChartLoadRequest\(options\);[\s\S]*return;[\s\S]*\}/);
-  assert.match(mainSource, /if \(pendingChartLoadRequest !== null\) \{[\s\S]*const nextRequest = pendingChartLoadRequest;[\s\S]*pendingChartLoadRequest = null;[\s\S]*void loadChart\(nextRequest\);[\s\S]*\}/);
+  assert.match(mainSource, /if \(chartLoadController\.queueIfBusy\(options\)\) \{[\s\S]*return;[\s\S]*\}/);
+  assert.match(mainSource, /chartLoadController\.start\(\);/);
+  assert.match(mainSource, /const nextRequest = chartLoadController\.finish\(\);[\s\S]*if \(nextRequest !== null\) \{[\s\S]*void loadChart\(nextRequest\);[\s\S]*\}/);
   assert.match(mainSource, /function updateAutoChartPreferredBroker\(nextBroker, options = \{\}\)/);
   assert.match(mainSource, /if \(requestedBroker === "auto"\) \{/);
   assert.match(mainSource, /const preferredBroker = resolveAutoChartPrimaryBroker\(\);/);

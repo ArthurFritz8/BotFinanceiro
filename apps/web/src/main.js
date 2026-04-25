@@ -49,6 +49,7 @@ import {
   POSITION_CALC_PROFILES,
 } from "./modules/chart-lab/quant/position-calculator.js";
 import { createChartLabStore } from "./modules/chart-lab/chart-lab-store.js";
+import { createChartLoadController } from "./modules/chart-lab/chart-load-controller.js";
 import "./styles.css";
 
 const chatForm = document.querySelector("#chat-form");
@@ -1906,6 +1907,12 @@ const chartLabState = {
     chartLabStore.setStrategy(strategy);
   },
 };
+const chartLoadController = createChartLoadController({
+  getLoading: () => chartLabState.isLoading,
+  setLoading: (isLoading) => {
+    chartLabState.isLoading = isLoading;
+  },
+});
 let chartAutoRefreshTimer = null;
 let chartLiveStream = null;
 let chartLiveStreamBackoffTimer = null;
@@ -1918,7 +1925,6 @@ let chartLastTransientLegendAtMs = 0;
 let chartStreamErrorLegendTimer = null;
 let chartLiveFallbackPollTimer = null;
 let chartContextSyncTimer = null;
-let pendingChartLoadRequest = null;
 let intelligenceSyncPendingStartedAtMs = 0;
 let intelligenceSyncActiveCorrelationId = "";
 let intelligenceSyncAlertLevel = "ok";
@@ -14870,28 +14876,6 @@ function applyTerminalIntervalSelection(interval, options = {}) {
   };
 }
 
-function queuePendingChartLoadRequest(options = {}) {
-  const nextRequest = {};
-
-  if (typeof options.assetId === "string" && options.assetId.length > 0) {
-    nextRequest.assetId = options.assetId;
-  }
-
-  if (typeof options.mode === "string" && options.mode.length > 0) {
-    nextRequest.mode = options.mode;
-  }
-
-  if (typeof options.range === "string" && options.range.length > 0) {
-    nextRequest.range = options.range;
-  }
-
-  if (options.silent === true) {
-    nextRequest.silent = true;
-  }
-
-  pendingChartLoadRequest = nextRequest;
-}
-
 const manualMarketAnalysisCounter = createCounter();
 const MANUAL_ANALYSIS_MIN_LOADING_MS = 220;
 const MANUAL_ANALYSIS_INVALID_FEEDBACK_MS = 360;
@@ -15096,7 +15080,7 @@ async function syncIntelligenceDeskForCurrentContext(options = {}) {
     ? options.reason
     : "context-sync";
 
-  if (chartLabState.isLoading) {
+  if (chartLoadController.isLoading()) {
     scheduleChartContextSync({
       delayMs: 140,
       reason,
@@ -16658,7 +16642,7 @@ function destroyInteractiveChart() {
     chartContextSyncTimer = null;
   }
 
-  pendingChartLoadRequest = null;
+  chartLoadController.clearPending();
   intelligenceSyncActiveCorrelationId = "";
   stopIntelligenceSyncHealthPolling();
 
@@ -18425,8 +18409,7 @@ async function loadChart(options = {}) {
     return;
   }
 
-  if (chartLabState.isLoading) {
-    queuePendingChartLoadRequest(options);
+  if (chartLoadController.queueIfBusy(options)) {
     return;
   }
 
@@ -18476,7 +18459,7 @@ async function loadChart(options = {}) {
     return;
   }
 
-  chartLabState.isLoading = true;
+  chartLoadController.start();
 
   if (chartRefreshButton instanceof HTMLButtonElement && !silent) {
     chartRefreshButton.disabled = true;
@@ -18673,11 +18656,9 @@ async function loadChart(options = {}) {
       chartRefreshButton.textContent = "Atualizar grafico";
     }
 
-    chartLabState.isLoading = false;
+    const nextRequest = chartLoadController.finish();
 
-    if (pendingChartLoadRequest !== null) {
-      const nextRequest = pendingChartLoadRequest;
-      pendingChartLoadRequest = null;
+    if (nextRequest !== null) {
       void loadChart(nextRequest);
     }
   }

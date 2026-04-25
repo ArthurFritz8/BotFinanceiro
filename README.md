@@ -138,6 +138,7 @@ Politica de retencao:
 52. ADR 080: `docs/ADR/ADR-080-live-signals-screener-cross-asset.md`
 53. ADR 081: `docs/ADR/ADR-081-modularizacao-quant-chart-lab.md`
 54. ADR 082: `docs/ADR/ADR-082-store-minimo-chart-lab.md`
+55. ADR 083: `docs/ADR/ADR-083-controlador-load-chart-lab.md`
 
 ## Relatorio completo desta entrega
 
