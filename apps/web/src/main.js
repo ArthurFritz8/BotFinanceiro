@@ -37,6 +37,7 @@ import {
 import { buildExecutionGateSnapshot } from "./modules/chart-lab/quant/execution-gate.js";
 import { buildExecutionPlanSnapshot } from "./modules/chart-lab/quant/execution-plan.js";
 import { buildExecutionQualitySnapshot } from "./modules/chart-lab/quant/execution-quality.js";
+import { buildExecutionAutomationGuardSnapshot } from "./modules/chart-lab/quant/execution-automation.js";
 import {
   appendExecutionJournalEntry,
   createExecutionJournalEntry,
@@ -12832,6 +12833,33 @@ function renderTimingExecutionQualityPanel(executionQuality) {
   `;
 }
 
+function renderTimingAutomationGuardPanel(automationGuard) {
+  const guard = automationGuard ?? { checks: [], guidance: "Auto Guard aguardando contexto.", label: "AUTO BLOQUEADO", status: "blocked", tone: "danger" };
+  const checks = Array.isArray(guard.checks) ? guard.checks : [];
+  const checksHtml = checks.map((check) => `
+    <li class="timing-automation-check" data-blocking="${check.blocking ? "true" : "false"}" data-ok="${check.ok ? "true" : "false"}" title="${escapeHtml(check.detail)}">
+      <span>${escapeHtml(check.label)}</span>
+      <strong>${check.ok ? "OK" : check.blocking ? "BLOCK" : "WAIT"}</strong>
+    </li>
+  `).join("");
+
+  return `
+    <article class="analysis-block timing-block timing-automation-guard" data-tone="${escapeHtml(guard.tone)}" data-status="${escapeHtml(guard.status)}" id="timing-automation-guard-panel">
+      <header class="timing-automation-guard__head">
+        <div>
+          <h4>Auto Guard</h4>
+          <p>${escapeHtml(guard.guidance)}</p>
+        </div>
+        <div class="timing-automation-guard__badge" id="timing-automation-guard-status">
+          <strong>${escapeHtml(guard.label)}</strong>
+          <span>${guard.canAutoPaper ? "paper liberado" : "sem ordem"}</span>
+        </div>
+      </header>
+      <ul class="timing-automation-checks" role="list">${checksHtml}</ul>
+    </article>
+  `;
+}
+
 function renderChartExecutionHud({ currency, currentPrice, executionGate, executionPlan, executionQuality }) {
   if (!(chartExecutionHudElement instanceof HTMLElement)) {
     return;
@@ -13096,6 +13124,14 @@ function renderTimingDeskHtml(analysis, snapshot, currency) {
     executionPlan,
     journalSummary: executionJournal.summary,
   });
+  const automationGuard = buildExecutionAutomationGuardSnapshot({
+    executionGate,
+    executionPlan,
+    executionQuality,
+    journalSummary: executionJournal.summary,
+    operationalMode: chartLabState.operationalMode,
+    snapshot,
+  });
   updateExecutionChartVisualState(executionGate, executionPlan, executionJournal.summary, executionQuality);
   renderChartExecutionHud({ currency, currentPrice, executionGate, executionPlan, executionQuality });
   const utcHourNow = new Date(nowMs).getUTCHours();
@@ -13192,6 +13228,8 @@ function renderTimingDeskHtml(analysis, snapshot, currency) {
       ${renderTimingExecutionPlanPanel(executionPlan, currency)}
 
       ${renderTimingExecutionQualityPanel(executionQuality)}
+
+      ${renderTimingAutomationGuardPanel(automationGuard)}
 
       ${renderTimingExecutionJournalPanel(executionJournal.summary, executionJournal.recentEntries, currency)}
 

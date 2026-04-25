@@ -156,6 +156,7 @@ Politica de retencao:
 70. ADR 098: `docs/ADR/ADR-098-action-rail-visual-state-execution.md`
 71. ADR 099: `docs/ADR/ADR-099-score-qualidade-plano-execucao.md`
 72. ADR 100: `docs/ADR/ADR-100-hud-execucao-chart-lab.md`
+73. ADR 101: `docs/ADR/ADR-101-auto-guard-execucao-controlada.md`
 
 ## Relatorio completo desta entrega
 

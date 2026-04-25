@@ -9,6 +9,7 @@ import {
 import { buildExecutionGateSnapshot } from "../src/modules/chart-lab/quant/execution-gate.js";
 import { buildExecutionPlanSnapshot } from "../src/modules/chart-lab/quant/execution-plan.js";
 import { buildExecutionQualitySnapshot } from "../src/modules/chart-lab/quant/execution-quality.js";
+import { buildExecutionAutomationGuardSnapshot } from "../src/modules/chart-lab/quant/execution-automation.js";
 import {
   appendExecutionJournalEntry,
   createExecutionJournalEntry,
@@ -744,4 +745,50 @@ test("Execution quality limita grade enquanto journal ainda aquece", () => {
   assert.equal(quality.sampleState, "Aquecendo");
   assert.equal(quality.journalReady, false);
   assert.equal(quality.score, 78);
+});
+
+test("Execution automation arma apenas paper quando plano prime esta maduro", () => {
+  const guard = buildExecutionAutomationGuardSnapshot({
+    executionGate: { status: "armed" },
+    executionPlan: { state: "trigger" },
+    executionQuality: { journalReady: true, score: 88, status: "prime" },
+    journalSummary: { resolved: 8 },
+    operationalMode: "spot_margin",
+    snapshot: { mode: "live" },
+  });
+
+  assert.equal(guard.status, "armed");
+  assert.equal(guard.canAutoPaper, true);
+  assert.equal(guard.checks.every((check) => check.ok), true);
+});
+
+test("Execution automation mantem manual-only enquanto journal aquece", () => {
+  const guard = buildExecutionAutomationGuardSnapshot({
+    executionGate: { status: "armed" },
+    executionPlan: { state: "trigger" },
+    executionQuality: { journalReady: false, score: 78, status: "qualified" },
+    journalSummary: { resolved: 2 },
+    operationalMode: "spot_margin",
+    snapshot: { mode: "live" },
+  });
+
+  assert.equal(guard.status, "manual-only");
+  assert.equal(guard.canAutoPaper, false);
+  assert.equal(guard.checks.find((check) => check.id === "journal").ok, false);
+});
+
+test("Execution automation bloqueia modos fora de spot live", () => {
+  const guard = buildExecutionAutomationGuardSnapshot({
+    executionGate: { status: "armed" },
+    executionPlan: { state: "trigger" },
+    executionQuality: { journalReady: true, score: 90, status: "prime" },
+    journalSummary: { resolved: 12 },
+    operationalMode: "binary_options",
+    snapshot: { mode: "cached" },
+  });
+
+  assert.equal(guard.status, "blocked");
+  assert.equal(guard.canAutoPaper, false);
+  assert.equal(guard.checks.find((check) => check.id === "live-feed").ok, false);
+  assert.equal(guard.checks.find((check) => check.id === "operational-mode").ok, false);
 });

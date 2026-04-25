@@ -7341,6 +7341,24 @@ body.sidebar-collapsed .app-shell {
 .timing-quality-check strong { color: #94a3b8; font-size: 0.64rem; letter-spacing: 0.06em; text-transform: uppercase; }
 .timing-quality-check[data-ok="true"] strong { color: #86efac; }
 
+.timing-automation-guard { gap: 0.7rem; }
+.timing-automation-guard[data-tone="bull"] { border-color: rgba(52, 211, 153, 0.38); background: rgba(5, 46, 22, 0.15); }
+.timing-automation-guard[data-tone="warn"] { border-color: rgba(234, 179, 8, 0.38); background: rgba(113, 63, 18, 0.12); }
+.timing-automation-guard[data-tone="danger"] { border-color: rgba(248, 113, 113, 0.44); background: rgba(69, 10, 10, 0.24); }
+.timing-automation-guard__head { align-items: flex-start; display: flex; gap: 1rem; justify-content: space-between; }
+.timing-automation-guard__head h4 { margin-bottom: 0.25rem; }
+.timing-automation-guard__badge { align-items: flex-end; background: rgba(15, 23, 42, 0.66); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 8px; display: flex; flex-direction: column; flex: 0 0 auto; gap: 0.1rem; min-width: 132px; padding: 0.45rem 0.58rem; }
+.timing-automation-guard__badge strong { color: #f8fafc; font-size: 0.76rem; letter-spacing: 0.06em; }
+.timing-automation-guard__badge span { color: rgba(148, 163, 184, 0.9); font-size: 0.68rem; }
+.timing-automation-checks { display: grid; gap: 0.42rem; grid-template-columns: repeat(3, minmax(0, 1fr)); list-style: none; margin: 0; padding: 0; }
+.timing-automation-check { align-items: center; background: rgba(15, 23, 42, 0.44); border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 8px; display: flex; gap: 0.45rem; justify-content: space-between; min-height: 42px; padding: 0.44rem 0.55rem; }
+.timing-automation-check[data-ok="true"] { border-color: rgba(52, 211, 153, 0.3); }
+.timing-automation-check[data-blocking="true"][data-ok="false"] { border-color: rgba(248, 113, 113, 0.4); }
+.timing-automation-check span { color: #cbd5e1; font-size: 0.72rem; }
+.timing-automation-check strong { color: #94a3b8; font-size: 0.64rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.timing-automation-check[data-ok="true"] strong { color: #86efac; }
+.timing-automation-check[data-blocking="true"][data-ok="false"] strong { color: #fca5a5; }
+
 .timing-execution-journal { gap: 0.7rem; }
 .timing-execution-journal[data-tone="bull"] { border-color: rgba(52, 211, 153, 0.34); background: rgba(6, 78, 59, 0.12); }
 .timing-execution-journal[data-tone="warn"] { border-color: rgba(234, 179, 8, 0.36); background: rgba(113, 63, 18, 0.12); }
@@ -7447,6 +7465,8 @@ body.sidebar-collapsed .app-shell {
   .timing-execution-plan__head { flex-direction: column; }
   .timing-execution-quality__grid, .timing-quality-checks { grid-template-columns: 1fr; }
   .timing-execution-quality__head { flex-direction: column; }
+  .timing-automation-checks { grid-template-columns: 1fr; }
+  .timing-automation-guard__head { flex-direction: column; }
   .timing-execution-journal__head { flex-direction: column; }
   .timing-execution-journal__grid { grid-template-columns: 1fr; }
   .timing-journal-row { grid-template-columns: 0.8fr 0.8fr 1fr 0.8fr; }
@@ -7458,7 +7478,7 @@ body.sidebar-collapsed .app-shell {
   .timing-event-when, .timing-event-currency { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .timing-context-card, .timing-session-row, .timing-killzone-card, .timing-regime-cell, .timing-regime-check, .timing-execution-check, .timing-plan-check, .timing-quality-check { transition: none; }
+  .timing-context-card, .timing-session-row, .timing-killzone-card, .timing-regime-cell, .timing-regime-check, .timing-execution-check, .timing-plan-check, .timing-quality-check, .timing-automation-check { transition: none; }
   .timing-killzone-card:hover { transform: none; }
 }
 
