@@ -7,6 +7,7 @@ import {
   describePositionAssetSpec,
 } from "../src/modules/chart-lab/quant/position-calculator.js";
 import { buildExecutionGateSnapshot } from "../src/modules/chart-lab/quant/execution-gate.js";
+import { buildExecutionPlanSnapshot } from "../src/modules/chart-lab/quant/execution-plan.js";
 import {
   buildLiquidityHeatmapSnapshot,
   normalizeLiquidityHeatmapCandles,
@@ -506,4 +507,80 @@ test("Execution gate aguarda quando CVD ainda nao confirma", () => {
   assert.equal(gate.hardBlocked, false);
   assert.equal(gate.checks.find((check) => check.id === "flow").ok, false);
   assert.ok(gate.score >= 60 && gate.score < 76);
+});
+
+test("Execution plan libera gatilho quando preco esta na zona armada", () => {
+  const plan = buildExecutionPlanSnapshot({
+    currentPrice: 100.6,
+    executionGate: {
+      riskScale: 0.82,
+      status: "armed",
+    },
+    signal: {
+      entryHigh: 101,
+      entryLow: 100,
+      riskReward: 2.2,
+      stopLoss: 98,
+      takeProfit1: 103,
+      takeProfit2: 106,
+      tone: "buy",
+    },
+  });
+
+  assert.equal(plan.ready, true);
+  assert.equal(plan.state, "trigger");
+  assert.equal(plan.tone, "bull");
+  assert.equal(plan.entry.inside, true);
+  assert.equal(plan.risk.suggestedRiskPercent, 0.82);
+  assert.equal(plan.targets.find((target) => target.id === "tp2").riskReward, 2.2);
+});
+
+test("Execution plan preserva venda armada mas veta perseguir preco fora da zona", () => {
+  const plan = buildExecutionPlanSnapshot({
+    currentPrice: 94,
+    executionGate: {
+      riskScale: 0.7,
+      status: "armed",
+    },
+    signal: {
+      entryHigh: 101,
+      entryLow: 100,
+      riskReward: 2,
+      stopLoss: 103,
+      takeProfit1: 98,
+      takeProfit2: 95,
+      tone: "sell",
+    },
+  });
+
+  assert.equal(plan.ready, true);
+  assert.equal(plan.state, "waiting");
+  assert.equal(plan.tone, "bear");
+  assert.equal(plan.entry.inside, false);
+  assert.match(plan.guidance, /nao perseguir/);
+  assert.equal(plan.risk.suggestedRiskPercent, 0.7);
+});
+
+test("Execution plan bloqueia risco quando geometria esta incompleta", () => {
+  const plan = buildExecutionPlanSnapshot({
+    currentPrice: 100,
+    executionGate: {
+      riskScale: 0.9,
+      status: "armed",
+    },
+    signal: {
+      entryHigh: 101,
+      entryLow: 100,
+      stopLoss: 102,
+      takeProfit1: 103,
+      takeProfit2: 106,
+      tone: "buy",
+    },
+  });
+
+  assert.equal(plan.ready, false);
+  assert.equal(plan.state, "incomplete");
+  assert.equal(plan.risk.riskScale, 0);
+  assert.equal(plan.risk.suggestedRiskPercent, 0);
+  assert.equal(plan.checks.find((check) => check.id === "geometry").ok, false);
 });

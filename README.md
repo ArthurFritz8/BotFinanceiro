@@ -151,6 +151,7 @@ Politica de retencao:
 65. ADR 093: `docs/ADR/ADR-093-heatmap-liquidez-price-zones.md`
 66. ADR 094: `docs/ADR/ADR-094-regime-institucional-market-regime.md`
 67. ADR 095: `docs/ADR/ADR-095-execution-gate-timing-desk.md`
+68. ADR 096: `docs/ADR/ADR-096-plano-execucao-timing-desk.md`
 
 ## Relatorio completo desta entrega
 

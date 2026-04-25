@@ -7270,6 +7270,28 @@ body.sidebar-collapsed .app-shell {
 .timing-execution-check[data-ok="true"] strong { color: #86efac; }
 .timing-execution-check[data-blocking="true"][data-ok="false"] strong { color: #fca5a5; }
 
+.timing-execution-plan { gap: 0.7rem; }
+.timing-execution-plan[data-tone="bull"] { border-color: rgba(52, 211, 153, 0.36); background: rgba(5, 46, 22, 0.14); }
+.timing-execution-plan[data-tone="bear"] { border-color: rgba(248, 113, 113, 0.36); background: rgba(76, 5, 25, 0.14); }
+.timing-execution-plan[data-tone="warn"] { border-color: rgba(234, 179, 8, 0.38); background: rgba(113, 63, 18, 0.12); }
+.timing-execution-plan[data-tone="danger"] { border-color: rgba(239, 68, 68, 0.48); background: rgba(69, 10, 10, 0.28); }
+.timing-execution-plan__head { align-items: flex-start; display: flex; gap: 1rem; justify-content: space-between; }
+.timing-execution-plan__head h4 { margin-bottom: 0.25rem; }
+.timing-execution-plan__badge { align-items: flex-end; background: rgba(15, 23, 42, 0.66); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 8px; display: flex; flex-direction: column; flex: 0 0 auto; gap: 0.1rem; min-width: 108px; padding: 0.45rem 0.58rem; }
+.timing-execution-plan__badge strong { color: #f8fafc; font-size: 0.78rem; letter-spacing: 0.06em; }
+.timing-execution-plan__badge span { color: rgba(148, 163, 184, 0.9); font-size: 0.68rem; font-variant-numeric: tabular-nums; }
+.timing-execution-plan__grid { display: grid; gap: 0.55rem; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.timing-execution-plan__grid article { background: rgba(15, 23, 42, 0.54); border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 8px; display: flex; flex-direction: column; gap: 0.15rem; min-height: 82px; overflow-wrap: anywhere; padding: 0.62rem 0.68rem; }
+.timing-execution-plan__grid span { color: rgba(148, 163, 184, 0.9); font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.timing-execution-plan__grid strong { color: #f8fafc; font-size: 0.86rem; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.timing-execution-plan__grid small { color: rgba(203, 213, 225, 0.82); font-size: 0.68rem; }
+.timing-plan-checks { display: grid; gap: 0.42rem; grid-template-columns: repeat(4, minmax(0, 1fr)); list-style: none; margin: 0; padding: 0; }
+.timing-plan-check { align-items: center; background: rgba(15, 23, 42, 0.44); border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 8px; display: flex; gap: 0.45rem; justify-content: space-between; min-height: 42px; padding: 0.44rem 0.55rem; }
+.timing-plan-check[data-ok="true"] { border-color: rgba(52, 211, 153, 0.3); }
+.timing-plan-check span { color: #cbd5e1; font-size: 0.72rem; }
+.timing-plan-check strong { color: #94a3b8; font-size: 0.64rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.timing-plan-check[data-ok="true"] strong { color: #86efac; }
+
 .timing-sessions-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; }
 .timing-session-row {
   display: grid; grid-template-columns: auto 1fr auto auto; gap: 0.6rem; align-items: center;
@@ -7349,6 +7371,8 @@ body.sidebar-collapsed .app-shell {
   .timing-regime-panel__head { flex-direction: column; }
   .timing-execution-gate__grid, .timing-execution-checks { grid-template-columns: 1fr; }
   .timing-execution-gate__head { flex-direction: column; }
+  .timing-execution-plan__grid, .timing-plan-checks { grid-template-columns: 1fr; }
+  .timing-execution-plan__head { flex-direction: column; }
   .timing-killzone-grid { grid-template-columns: 1fr; }
   .timing-session-row { grid-template-columns: auto 1fr auto; }
   .timing-session-row .timing-session-tag { grid-column: 1 / -1; justify-self: end; }
@@ -7357,7 +7381,7 @@ body.sidebar-collapsed .app-shell {
   .timing-event-when, .timing-event-currency { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .timing-context-card, .timing-session-row, .timing-killzone-card, .timing-regime-cell, .timing-regime-check, .timing-execution-check { transition: none; }
+  .timing-context-card, .timing-session-row, .timing-killzone-card, .timing-regime-cell, .timing-regime-check, .timing-execution-check, .timing-plan-check { transition: none; }
   .timing-killzone-card:hover { transform: none; }
 }
 

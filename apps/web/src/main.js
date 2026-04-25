@@ -35,6 +35,7 @@ import {
   runProbabilisticMonteCarloProjection,
 } from "./modules/chart-lab/quant/probabilistic.js";
 import { buildExecutionGateSnapshot } from "./modules/chart-lab/quant/execution-gate.js";
+import { buildExecutionPlanSnapshot } from "./modules/chart-lab/quant/execution-plan.js";
 import {
   classifyRiskLabRuinTone,
   loadRiskLabState,
@@ -12650,6 +12651,86 @@ function renderTimingExecutionGatePanel(executionGate) {
   `;
 }
 
+function renderTimingExecutionPlanPanel(executionPlan, currency) {
+  const plan = executionPlan ?? { checks: [], guidance: "Aguardando plano de execucao.", label: "AGUARDAR", risk: {}, side: "neutral", state: "watch", targets: [], tone: "warn" };
+  const entry = plan.entry ?? null;
+  const invalidation = plan.invalidation ?? {};
+  const risk = plan.risk ?? {};
+  const targets = Array.isArray(plan.targets) ? plan.targets : [];
+  const checks = Array.isArray(plan.checks) ? plan.checks : [];
+  const entryLabel = entry
+    ? `${formatPrice(entry.low, currency)} - ${formatPrice(entry.high, currency)}`
+    : "n/d";
+  const entryDistanceLabel = Number.isFinite(entry?.distancePercent)
+    ? `${entry.distancePercent.toFixed(2)}%`
+    : "n/d";
+  const invalidationDistanceLabel = Number.isFinite(invalidation.distancePercent)
+    ? `${invalidation.distancePercent.toFixed(2)}%`
+    : "n/d";
+  const suggestedRiskLabel = Number.isFinite(risk.suggestedRiskPercent)
+    ? `${risk.suggestedRiskPercent.toFixed(2)}%`
+    : "0%";
+  const riskRewardLabel = Number.isFinite(risk.riskReward)
+    ? risk.riskReward.toFixed(2)
+    : "n/d";
+  const targetCards = targets.map((target) => {
+    const targetDistance = Number.isFinite(target.distancePercent)
+      ? `${target.distancePercent.toFixed(2)}%`
+      : "n/d";
+    const targetRiskReward = Number.isFinite(target.riskReward)
+      ? `R:R ${target.riskReward.toFixed(2)}`
+      : "R:R n/d";
+
+    return `
+      <article>
+        <span>${escapeHtml(target.label)}</span>
+        <strong>${escapeHtml(formatPrice(target.price, currency))}</strong>
+        <small>${escapeHtml(targetRiskReward)} • ${escapeHtml(targetDistance)}</small>
+      </article>
+    `;
+  }).join("");
+  const checksHtml = checks.map((check) => `
+    <li class="timing-plan-check" data-ok="${check.ok ? "true" : "false"}" title="${escapeHtml(check.detail)}">
+      <span>${escapeHtml(check.label)}</span>
+      <strong>${check.ok ? "OK" : "WAIT"}</strong>
+    </li>
+  `).join("");
+
+  return `
+    <article class="analysis-block timing-block timing-execution-plan" data-tone="${escapeHtml(plan.tone)}" data-state="${escapeHtml(plan.state)}" id="timing-execution-plan-panel">
+      <header class="timing-execution-plan__head">
+        <div>
+          <h4>Plano de Execucao</h4>
+          <p>${escapeHtml(plan.guidance)}</p>
+        </div>
+        <div class="timing-execution-plan__badge" id="timing-execution-plan-state">
+          <strong>${escapeHtml(plan.label)}</strong>
+          <span>${escapeHtml(String(plan.side ?? "neutral").toUpperCase())}</span>
+        </div>
+      </header>
+      <div class="timing-execution-plan__grid">
+        <article>
+          <span>Zona de entrada</span>
+          <strong>${escapeHtml(entryLabel)}</strong>
+          <small>distancia ${escapeHtml(entryDistanceLabel)}</small>
+        </article>
+        <article>
+          <span>Invalidacao</span>
+          <strong>${escapeHtml(formatPrice(invalidation.price, currency))}</strong>
+          <small>stop ${escapeHtml(invalidationDistanceLabel)}</small>
+        </article>
+        <article>
+          <span>Risco tatico</span>
+          <strong>${escapeHtml(suggestedRiskLabel)}</strong>
+          <small>R:R base ${escapeHtml(riskRewardLabel)}</small>
+        </article>
+        ${targetCards}
+      </div>
+      <ul class="timing-plan-checks" role="list">${checksHtml}</ul>
+    </article>
+  `;
+}
+
 function renderTimingDeskHtml(analysis, snapshot, currency) {
   const nowMs = Date.now();
   const session = getCurrentTradingSessionUtc(nowMs);
@@ -12660,6 +12741,7 @@ function renderTimingDeskHtml(analysis, snapshot, currency) {
   const marketRegime = buildMarketRegimeSnapshot({ snapshot, orderFlow });
   const liquidityHeatmap = buildLiquidityHeatmapSnapshot({ snapshot });
   const executionGate = buildExecutionGateSnapshot({ analysis, liquidityHeatmap, marketRegime, orderFlow });
+  const executionPlan = buildExecutionPlanSnapshot({ analysis, currentPrice: snapshot?.insights?.currentPrice, executionGate });
   const utcHourNow = new Date(nowMs).getUTCHours();
 
   const macroRadar = snapshot?.institutional?.macroRadar;
@@ -12750,6 +12832,8 @@ function renderTimingDeskHtml(analysis, snapshot, currency) {
       ${renderTimingMarketRegimePanel(marketRegime)}
 
       ${renderTimingExecutionGatePanel(executionGate)}
+
+      ${renderTimingExecutionPlanPanel(executionPlan, currency)}
 
       ${renderTimingOrderFlowPanel(orderFlow)}
 
