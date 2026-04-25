@@ -220,6 +220,12 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /smcConfluence\.checks\.fvgAligned/);
   assert.match(mainSource, /buildVisualIntelligenceEvidence/);
   assert.match(mainSource, /function renderVisualIntelligenceTab\(evidence\)/);
+  assert.match(mainSource, /buildTimingOrderFlowSnapshot/);
+  assert.match(mainSource, /function renderOrderFlowStrip\(flow\)/);
+  assert.match(mainSource, /function renderTimingOrderFlowPanel\(flow\)/);
+  assert.match(mainSource, /const orderFlow = buildTimingOrderFlowSnapshot\(\{ snapshot \}\);/);
+  assert.match(mainSource, /renderOrderFlowStrip\(orderFlow\)/);
+  assert.match(mainSource, /renderTimingOrderFlowPanel\(orderFlow\)/);
   assert.match(
     mainSource,
     /if \(activeAnalysisTabId === "visual_ia"\) \{[\s\S]*buildHarmonicGeometryScanner\(analysis, currency\)[\s\S]*buildVisualIntelligenceEvidence\([\s\S]*points: snapshot\?\.points,[\s\S]*renderVisualIntelligenceTab\(visualEvidence\);/,

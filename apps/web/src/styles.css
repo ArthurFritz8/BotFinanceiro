@@ -3396,6 +3396,29 @@ body.sidebar-collapsed .app-shell {
   background: linear-gradient(90deg, rgba(38, 213, 149, 0.9), rgba(101, 236, 188, 0.95));
 }
 
+.timing-flow-strip {
+  display: grid;
+  gap: 0.28rem;
+  margin-top: 0.34rem;
+  padding: 0.42rem;
+  border-radius: 9px;
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+.timing-flow-strip[data-tone="bull"] { border-color: rgba(52, 211, 153, 0.34); }
+.timing-flow-strip[data-tone="bear"] { border-color: rgba(248, 113, 113, 0.34); }
+.timing-flow-strip__head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.timing-flow-strip__head strong { color: #e2e8f0; font-size: 0.7rem; letter-spacing: 0.04em; text-transform: uppercase; }
+.timing-flow-badge { flex: 0 0 auto; padding: 0.12rem 0.42rem; border-radius: 999px; font-size: 0.62rem; font-weight: 700; color: #cbd5e1; background: rgba(148, 163, 184, 0.14); border: 1px solid rgba(148, 163, 184, 0.2); }
+.timing-flow-badge[data-tone="bull"] { color: #86efac; background: rgba(34, 197, 94, 0.12); border-color: rgba(34, 197, 94, 0.3); }
+.timing-flow-badge[data-tone="bear"] { color: #fca5a5; background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.3); }
+.timing-flow-sparkline { height: 34px; display: grid; grid-template-columns: repeat(24, minmax(2px, 1fr)); align-items: end; gap: 2px; padding: 4px 0; }
+.timing-flow-sparkline span { min-height: 4px; border-radius: 999px 999px 2px 2px; background: rgba(148, 163, 184, 0.42); }
+.timing-flow-sparkline span[data-tone="bull"] { background: rgba(52, 211, 153, 0.78); }
+.timing-flow-sparkline span[data-tone="bear"] { background: rgba(248, 113, 113, 0.78); }
+.timing-flow-sparkline--empty { background: repeating-linear-gradient(90deg, rgba(148, 163, 184, 0.12), rgba(148, 163, 184, 0.12) 2px, transparent 2px, transparent 6px); border-radius: 6px; }
+.timing-flow-strip__meta { display: flex; flex-wrap: wrap; gap: 0.35rem 0.65rem; color: rgba(148, 163, 184, 0.9); font-size: 0.66rem; font-variant-numeric: tabular-nums; }
+
 .analysis-block {
   background: rgba(8, 22, 38, 0.72);
   border: 1px solid rgba(118, 166, 224, 0.34);
@@ -7157,7 +7180,7 @@ body.sidebar-collapsed .app-shell {
    ADR-076 — Timing Desk Institucional (Sessoes / Killzones / Calendario Macro)
    ============================================================================ */
 .timing-desk { display: flex; flex-direction: column; gap: 0.85rem; }
-.timing-desk-header { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+.timing-desk-header { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem; }
 .timing-context-card {
   display: flex; flex-direction: column; gap: 0.2rem;
   padding: 0.75rem 0.9rem; border-radius: 10px;
@@ -7189,6 +7212,15 @@ body.sidebar-collapsed .app-shell {
   background: rgba(56,189,248,0.12); color: #7dd3fc; border: 1px solid rgba(56,189,248,0.3);
   font-weight: 500;
 }
+
+.timing-flow-panel { gap: 0.65rem; }
+.timing-flow-panel[data-tone="bull"] { border-color: rgba(52, 211, 153, 0.32); }
+.timing-flow-panel[data-tone="bear"] { border-color: rgba(248, 113, 113, 0.32); }
+.timing-flow-panel__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.55rem; }
+.timing-flow-panel__grid article { display: flex; flex-direction: column; gap: 0.18rem; padding: 0.62rem 0.7rem; border-radius: 8px; background: rgba(15, 23, 42, 0.55); border: 1px solid rgba(148, 163, 184, 0.14); }
+.timing-flow-panel__grid span { color: rgba(148, 163, 184, 0.9); font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.timing-flow-panel__grid strong { color: #f8fafc; font-size: 1rem; font-variant-numeric: tabular-nums; }
+.timing-flow-panel__grid small { color: rgba(203, 213, 225, 0.82); font-size: 0.72rem; line-height: 1.35; }
 
 .timing-sessions-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; }
 .timing-session-row {
@@ -7264,6 +7296,7 @@ body.sidebar-collapsed .app-shell {
 
 @media (max-width: 720px) {
   .timing-desk-header { grid-template-columns: 1fr; }
+  .timing-flow-panel__grid { grid-template-columns: 1fr; }
   .timing-killzone-grid { grid-template-columns: 1fr; }
   .timing-session-row { grid-template-columns: auto 1fr auto; }
   .timing-session-row .timing-session-tag { grid-column: 1 / -1; justify-self: end; }

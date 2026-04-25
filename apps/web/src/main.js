@@ -49,6 +49,7 @@ import {
   persistPositionCalcState,
   POSITION_CALC_PROFILES,
 } from "./modules/chart-lab/quant/position-calculator.js";
+import { buildTimingOrderFlowSnapshot } from "./modules/chart-lab/quant/order-flow.js";
 import { deriveSmcConfluence } from "./modules/chart-lab/quant/smc-derivations.js";
 import { buildVisualIntelligenceEvidence } from "./modules/chart-lab/quant/visual-intelligence.js";
 import { createChartLabStore } from "./modules/chart-lab/chart-lab-store.js";
@@ -11929,6 +11930,7 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
 
   if (activeAnalysisTabId === "micro_timing") {
     const microTiming = options.microTiming ?? buildMicroTimingAnalysis(analysis, snapshot);
+    const orderFlow = buildTimingOrderFlowSnapshot({ snapshot });
     const ghostStats = getBinaryOptionsGhostTrackerStats();
     const ghostBackendStats = getBinaryOptionsGhostBackendStats();
     const ghostBackendViewMode = normalizeBinaryOptionsGhostAuditViewMode(binaryOptionsGhostAuditViewMode);
@@ -12056,6 +12058,7 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
             </div>
             <p>${escapeHtml(triggerHeat.guidance)}</p>
           </div>
+          ${renderOrderFlowStrip(orderFlow)}
         </article>
         <article class="analysis-block">
           <h4>Contexto institucional e cinetico</h4>
@@ -12407,12 +12410,101 @@ function stopTimingUtcClock() {
   }
 }
 
+function formatOrderFlowNumber(value, fallback = "n/d") {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.abs(value) >= 1000
+    ? value.toLocaleString("pt-BR", { maximumFractionDigits: 0 })
+    : value.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+}
+
+function renderOrderFlowSparkline(flow) {
+  const bars = Array.isArray(flow?.cvd?.sparkline) ? flow.cvd.sparkline : [];
+
+  if (bars.length === 0) {
+    return `<div class="timing-flow-sparkline timing-flow-sparkline--empty" aria-hidden="true"></div>`;
+  }
+
+  return `
+    <div class="timing-flow-sparkline" aria-label="Linha CVD dos ultimos ${bars.length} candles">
+      ${bars.map((bar) => `<span data-tone="${escapeHtml(bar.tone)}" style="height:${Number(bar.heightPercent ?? 20).toFixed(1)}%" title="CVD ${escapeHtml(formatOrderFlowNumber(bar.value))}; delta ${escapeHtml(formatOrderFlowNumber(bar.delta))}"></span>`).join("")}
+    </div>
+  `;
+}
+
+function renderOrderFlowStrip(flow) {
+  const cvd = flow?.cvd ?? { ready: false, label: "Aquecendo", tone: "neutral", change: null, bandOneSigma: null };
+  const volume = flow?.volume ?? { ready: false, label: "Aquecendo", tone: "neutral", zScore: null };
+  const zScoreLabel = volume.ready ? `${volume.zScore >= 0 ? "+" : ""}${Number(volume.zScore).toFixed(2)}σ` : "n/d";
+  const anomalyBadge = volume.anomaly
+    ? `<span class="timing-flow-badge" data-tone="${escapeHtml(volume.tone)}">Volume ${escapeHtml(zScoreLabel)}</span>`
+    : `<span class="timing-flow-badge" data-tone="neutral">Volume ${escapeHtml(volume.label)}</span>`;
+
+  return `
+    <div class="timing-flow-strip" data-tone="${escapeHtml(cvd.tone)}">
+      <div class="timing-flow-strip__head">
+        <strong>CVD ${escapeHtml(cvd.label)}</strong>
+        ${anomalyBadge}
+      </div>
+      ${renderOrderFlowSparkline(flow)}
+      <div class="timing-flow-strip__meta">
+        <span>Delta ${escapeHtml(formatOrderFlowNumber(cvd.change))}</span>
+        <span>Banda 1σ ${escapeHtml(formatOrderFlowNumber(cvd.bandOneSigma))}</span>
+        <span>Amostra ${Number(flow?.sampleSize ?? 0)}</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderTimingOrderFlowPanel(flow) {
+  const cvd = flow?.cvd ?? { label: "Aquecendo", ready: false, tone: "neutral", latest: null, change: null, absorptionRatio: null, bandOneSigma: null };
+  const volume = flow?.volume ?? { label: "Aquecendo", ready: false, tone: "neutral", zScore: null, latest: null, mean: null, baselineSample: 0 };
+  const zScoreLabel = volume.ready ? `${volume.zScore >= 0 ? "+" : ""}${Number(volume.zScore).toFixed(2)}σ` : "n/d";
+  const flowGuidance = !cvd.ready
+    ? "Aguardando OHLCV suficiente para leitura de fluxo."
+    : volume.anomaly
+      ? "Anomalia de volume detectada: exigir confirmacao de direcao antes de executar."
+      : cvd.tone === "bull"
+        ? "Delta acumulado comprador favorece continuacao se o gatilho tecnico alinhar."
+        : cvd.tone === "bear"
+          ? "Delta acumulado vendedor favorece pressao de oferta no timing atual."
+          : "Fluxo equilibrado: priorize setups com confirmacao adicional.";
+
+  return `
+    <article class="analysis-block timing-block timing-flow-panel" data-tone="${escapeHtml(cvd.tone)}">
+      <h4>Order Flow CVD / Volume</h4>
+      <div class="timing-flow-panel__grid">
+        <article>
+          <span>CVD</span>
+          <strong>${escapeHtml(cvd.label)}</strong>
+          <small>Delta ${escapeHtml(formatOrderFlowNumber(cvd.change))} / 1σ ${escapeHtml(formatOrderFlowNumber(cvd.bandOneSigma))}</small>
+        </article>
+        <article>
+          <span>Volume z-score</span>
+          <strong>${escapeHtml(zScoreLabel)}</strong>
+          <small>${escapeHtml(volume.label)} (${Number(volume.baselineSample ?? 0)} candles base)</small>
+        </article>
+        <article>
+          <span>Absorcao</span>
+          <strong>${escapeHtml(Number.isFinite(cvd.absorptionRatio) ? `${(cvd.absorptionRatio * 100).toFixed(1)}%` : "n/d")}</strong>
+          <small>Total volume ${escapeHtml(formatOrderFlowNumber(flow?.totalVolume))}</small>
+        </article>
+      </div>
+      ${renderOrderFlowSparkline(flow)}
+      <p class="timing-muted">${escapeHtml(flowGuidance)}</p>
+    </article>
+  `;
+}
+
 function renderTimingDeskHtml(analysis, snapshot, currency) {
   const nowMs = Date.now();
   const session = getCurrentTradingSessionUtc(nowMs);
   const regime = getVolatilityRegime(analysis?.timing?.volatilityPercent);
   const assetClass = detectAssetClassForTiming(snapshot?.assetId);
   const killzones = getKillzonesForAssetClass(assetClass);
+  const orderFlow = buildTimingOrderFlowSnapshot({ snapshot });
   const utcHourNow = new Date(nowMs).getUTCHours();
 
   const macroRadar = snapshot?.institutional?.macroRadar;
@@ -12486,9 +12578,16 @@ function renderTimingDeskHtml(analysis, snapshot, currency) {
           <strong id="timing-session-active" data-primary="${session.primary ?? "none"}">${escapeHtml(session.label)}</strong>
           <span class="timing-context-meta"><span class="timing-utc-clock" id="timing-utc-clock">${escapeHtml(formatUtcClock())}</span></span>
         </article>
+        <article class="timing-context-card" data-tone="${escapeHtml(orderFlow.volume.anomaly ? orderFlow.volume.tone : orderFlow.cvd.tone)}">
+          <span class="timing-context-label">Order Flow</span>
+          <strong>${escapeHtml(orderFlow.cvd.label)}</strong>
+          <span class="timing-context-meta">Vol z ${escapeHtml(orderFlow.volume.ready ? `${orderFlow.volume.zScore >= 0 ? "+" : ""}${orderFlow.volume.zScore.toFixed(2)}σ` : "n/d")}</span>
+        </article>
       </header>
 
       ${binaryWarnHtml}
+
+      ${renderTimingOrderFlowPanel(orderFlow)}
 
       <article class="analysis-block timing-block">
         <h4>🌐 Mapa de Liquidez Global (UTC)</h4>

@@ -7,6 +7,10 @@ import {
   describePositionAssetSpec,
 } from "../src/modules/chart-lab/quant/position-calculator.js";
 import {
+  buildTimingOrderFlowSnapshot,
+  computeCumulativeVolumeDelta,
+} from "../src/modules/chart-lab/quant/order-flow.js";
+import {
   computeProbabilisticHistoricalStats,
   computeProbabilisticReturnsSeries,
   runProbabilisticMonteCarloProjection,
@@ -273,4 +277,43 @@ test("Visual IA degrada sem amostra minima de candle", () => {
   assert.equal(evidence.score, 0);
   assert.equal(evidence.verdict.label, "Aguardar leitura visual");
   assert.equal(evidence.cards.find((card) => card.id === "candle").tone, "empty");
+});
+
+test("Order flow calcula CVD por candle e detecta anomalia de volume", () => {
+  const points = [
+    { open: 100, close: 101, high: 101.5, low: 99.5, volume: 90 },
+    { open: 101, close: 102, high: 102.5, low: 100.5, volume: 95 },
+    { open: 102, close: 101.5, high: 102.3, low: 101.2, volume: 100 },
+    { open: 101.5, close: 102.2, high: 102.5, low: 101, volume: 105 },
+    { open: 102.2, close: 103, high: 103.2, low: 102, volume: 110 },
+    { open: 103, close: 102.7, high: 103.1, low: 102.4, volume: 95 },
+    { open: 102.7, close: 103.4, high: 103.8, low: 102.5, volume: 100 },
+    { open: 103.4, close: 104.1, high: 104.3, low: 103.1, volume: 105 },
+    { open: 104.1, close: 104.9, high: 105.1, low: 103.9, volume: 110 },
+    { open: 104.9, close: 105.3, high: 105.5, low: 104.6, volume: 115 },
+    { open: 105.3, close: 105.1, high: 105.4, low: 104.9, volume: 100 },
+    { open: 105.1, close: 106.2, high: 106.5, low: 104.8, volume: 180 },
+  ];
+  const cvd = computeCumulativeVolumeDelta(points);
+  const flow = buildTimingOrderFlowSnapshot({ points, lookback: 30 });
+
+  assert.equal(cvd[0].delta, 90);
+  assert.equal(cvd[2].delta, -100);
+  assert.equal(cvd.at(-1).value, 805);
+  assert.equal(flow.cvd.ready, true);
+  assert.equal(flow.cvd.change, 805);
+  assert.equal(flow.cvd.label, "Acumulacao");
+  assert.equal(flow.volume.ready, true);
+  assert.equal(flow.volume.anomaly, true);
+  assert.equal(flow.volume.tone, "bull");
+  assert.ok(flow.volume.zScore >= 2);
+});
+
+test("Order flow degrada volume z-score sem base estatistica", () => {
+  const flow = buildTimingOrderFlowSnapshot({ points: buildPoints(4, 100) });
+
+  assert.equal(flow.cvd.ready, true);
+  assert.equal(flow.volume.ready, false);
+  assert.equal(flow.volume.label, "Aquecendo");
+  assert.equal(flow.volume.zScore, 0);
 });

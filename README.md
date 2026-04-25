@@ -147,6 +147,7 @@ Politica de retencao:
 61. ADR 089: `docs/ADR/ADR-089-derivacoes-smc-confluencia-chart-lab.md`
 62. ADR 090: `docs/ADR/ADR-090-calculadora-posicao-multi-asset.md`
 63. ADR 091: `docs/ADR/ADR-091-visual-ia-evidencia-quantitativa.md`
+64. ADR 092: `docs/ADR/ADR-092-order-flow-cvd-volume-zscore-timing.md`
 
 ## Relatorio completo desta entrega
 
