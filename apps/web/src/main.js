@@ -52,6 +52,10 @@ import { createChartLabStore } from "./modules/chart-lab/chart-lab-store.js";
 import { createChartLoadController } from "./modules/chart-lab/chart-load-controller.js";
 import { createChartLiveStreamController } from "./modules/chart-lab/chart-live-stream-controller.js";
 import {
+  createChartAssetGeneration,
+  isStaleChartAssetGenerationError,
+} from "./modules/chart-lab/chart-asset-generation.js";
+import {
   buildBinaryOptionsLiveStreamDescriptor,
   buildCryptoLiveStreamDescriptor,
 } from "./modules/chart-lab/chart-live-stream-selection.js";
@@ -1922,6 +1926,7 @@ const chartLoadController = createChartLoadController({
     chartLabState.isLoading = isLoading;
   },
 });
+const chartAssetGeneration = createChartAssetGeneration();
 const chartLiveStreamController = createChartLiveStreamController({
   liveStatus: LIVE_STATUS,
   timers: window,
@@ -17244,11 +17249,12 @@ async function requestCryptoChartEndpoint(assetId, range, mode, exchange = "bina
       throw new Error(normalizeChartApiErrorMessage(errorMessage, "Nao foi possivel carregar o grafico"));
     }
 
+    chartAssetGeneration.assertCurrent(options.assetGenerationToken);
     return payload?.data ?? null;
   });
 }
 
-async function requestBinaryOptionsChartEndpoint(assetId, range, mode, exchange = "binance", resolution = "1S") {
+async function requestBinaryOptionsChartEndpoint(assetId, range, mode, exchange = "binance", resolution = "1S", options = {}) {
   return runMarketRequestWithRetry(async () => {
     const normalizedExchange = normalizeRequestedBroker(exchange);
     const normalizedMode = mode === "live" ? "live" : "delayed";
@@ -17278,11 +17284,12 @@ async function requestBinaryOptionsChartEndpoint(assetId, range, mode, exchange 
       throw new Error(normalizeChartApiErrorMessage(errorMessage, "Nao foi possivel carregar o grafico de binarias"));
     }
 
+    chartAssetGeneration.assertCurrent(options.assetGenerationToken);
     return payload?.data ?? null;
   });
 }
 
-async function requestBinaryOptionsChart(assetId, range, mode, exchange, interval) {
+async function requestBinaryOptionsChart(assetId, range, mode, exchange, interval, options = {}) {
   const normalizedInterval = normalizeTerminalInterval(interval);
   const requestedResolution = normalizeRequestedBinaryOptionsResolution(normalizedInterval);
   const fallbackResolution = TERMINAL_INTERVAL_BINARY_OPTIONS_FALLBACK;
@@ -17298,6 +17305,7 @@ async function requestBinaryOptionsChart(assetId, range, mode, exchange, interva
       mode,
       exchange,
       fallbackResolution,
+      options,
     );
     const fallbackReason = [
       buildResolutionFallbackMessage(normalizedInterval, TERMINAL_INTERVAL_BINARY_OPTIONS_FALLBACK),
@@ -17322,6 +17330,7 @@ async function requestBinaryOptionsChart(assetId, range, mode, exchange, interva
       mode,
       exchange,
       requestedResolution,
+      options,
     );
     const fallbackReason = typeof snapshot?.fallbackReason === "string" ? snapshot.fallbackReason : "";
     const resolvedBroker = typeof snapshot?.exchange?.resolved === "string"
@@ -17335,6 +17344,10 @@ async function requestBinaryOptionsChart(assetId, range, mode, exchange, interva
       snapshot,
     };
   } catch (error) {
+    if (isStaleChartAssetGenerationError(error)) {
+      throw error;
+    }
+
     const canFallback =
       normalizedInterval !== TERMINAL_INTERVAL_BINARY_OPTIONS_FALLBACK;
 
@@ -17348,6 +17361,7 @@ async function requestBinaryOptionsChart(assetId, range, mode, exchange, interva
       mode,
       exchange,
       fallbackResolution,
+      options,
     );
     const fallbackReason = [
       buildResolutionFallbackMessage(normalizedInterval, TERMINAL_INTERVAL_BINARY_OPTIONS_FALLBACK),
@@ -17366,7 +17380,7 @@ async function requestBinaryOptionsChart(assetId, range, mode, exchange, interva
   }
 }
 
-async function requestCryptoChart(assetId, range, mode, exchange, interval) {
+async function requestCryptoChart(assetId, range, mode, exchange, interval, options = {}) {
   const normalizedInterval = normalizeTerminalInterval(interval);
   const requestedResolution = normalizeRequestedChartResolution(normalizedInterval);
 
@@ -17378,6 +17392,7 @@ async function requestCryptoChart(assetId, range, mode, exchange, interval) {
       mode,
       exchange,
       fallbackResolution,
+      options,
     );
 
     return {
@@ -17391,13 +17406,17 @@ async function requestCryptoChart(assetId, range, mode, exchange, interval) {
   }
 
   try {
-    const result = await requestCryptoChartCore(assetId, range, mode, exchange, requestedResolution);
+    const result = await requestCryptoChartCore(assetId, range, mode, exchange, requestedResolution, options);
 
     return {
       ...result,
       resolvedResolution: requestedResolution,
     };
   } catch (error) {
+    if (isStaleChartAssetGenerationError(error)) {
+      throw error;
+    }
+
     const message = getErrorMessage(error, "Falha ao consultar grafico");
 
     if (!shouldUseResolutionFallback(normalizedInterval, message)) {
@@ -17411,6 +17430,7 @@ async function requestCryptoChart(assetId, range, mode, exchange, interval) {
       mode,
       exchange,
       fallbackResolution,
+      options,
     );
 
     return {
@@ -17424,7 +17444,7 @@ async function requestCryptoChart(assetId, range, mode, exchange, interval) {
   }
 }
 
-async function requestCryptoChartCore(assetId, range, mode, exchange, resolution) {
+async function requestCryptoChartCore(assetId, range, mode, exchange, resolution, options = {}) {
   const requestedBroker = normalizeRequestedBroker(exchange);
 
   if (requestedBroker === "auto") {
@@ -17438,6 +17458,7 @@ async function requestCryptoChartCore(assetId, range, mode, exchange, resolution
           targetMode,
           preferredBroker,
           resolution,
+          options,
         );
         markBrokerSuccess(preferredBroker);
         updateAutoChartPreferredBroker(preferredBroker);
@@ -17463,6 +17484,7 @@ async function requestCryptoChartCore(assetId, range, mode, exchange, resolution
           targetMode,
           "auto",
           resolution,
+          options,
         );
         const resolvedBroker = normalizeBrokerName(snapshot?.provider ?? preferredBroker);
         const switchedBroker = resolvedBroker !== preferredBroker;
@@ -17520,7 +17542,7 @@ async function requestCryptoChartCore(assetId, range, mode, exchange, resolution
   const tryResolveSnapshot = async (targetMode, brokerChain) => {
     for (const broker of brokerChain) {
       try {
-        const snapshot = await requestCryptoChartEndpoint(assetId, range, targetMode, broker, resolution);
+        const snapshot = await requestCryptoChartEndpoint(assetId, range, targetMode, broker, resolution, options);
         markBrokerSuccess(broker);
         return {
           broker,
@@ -17600,7 +17622,7 @@ async function requestCryptoChartCore(assetId, range, mode, exchange, resolution
   throw new Error(normalizeChartApiErrorMessage(lastFailure?.message, "Nao foi possivel carregar o grafico"));
 }
 
-async function requestInstitutionalMacroSnapshot(symbol, range, mode, moduleName = "forex", interval) {
+async function requestInstitutionalMacroSnapshot(symbol, range, mode, moduleName = "forex", interval, options = {}) {
   const normalizedInterval = normalizeTerminalInterval(interval);
   const requestedResolution = normalizeRequestedChartResolution(normalizedInterval);
 
@@ -17612,6 +17634,7 @@ async function requestInstitutionalMacroSnapshot(symbol, range, mode, moduleName
       mode,
       moduleName,
       fallbackResolution,
+      options,
     );
 
     return {
@@ -17628,6 +17651,7 @@ async function requestInstitutionalMacroSnapshot(symbol, range, mode, moduleName
       mode,
       moduleName,
       requestedResolution,
+      options,
     );
 
     return {
@@ -17636,6 +17660,10 @@ async function requestInstitutionalMacroSnapshot(symbol, range, mode, moduleName
       snapshot,
     };
   } catch (error) {
+    if (isStaleChartAssetGenerationError(error)) {
+      throw error;
+    }
+
     const message = getErrorMessage(error, "Falha ao carregar o motor institucional");
 
     if (!shouldUseResolutionFallback(normalizedInterval, message)) {
@@ -17649,6 +17677,7 @@ async function requestInstitutionalMacroSnapshot(symbol, range, mode, moduleName
       mode,
       moduleName,
       fallbackResolution,
+      options,
     );
 
     return {
@@ -17659,7 +17688,7 @@ async function requestInstitutionalMacroSnapshot(symbol, range, mode, moduleName
   }
 }
 
-async function requestInstitutionalMacroSnapshotCore(symbol, range, mode, moduleName, resolution) {
+async function requestInstitutionalMacroSnapshotCore(symbol, range, mode, moduleName, resolution, options = {}) {
   const sanitizedSymbol = sanitizeTerminalSymbol(symbol);
 
   if (sanitizedSymbol.length < 2) {
@@ -17702,10 +17731,13 @@ async function requestInstitutionalMacroSnapshotCore(symbol, range, mode, module
     );
   }
 
+  chartAssetGeneration.assertCurrent(options.assetGenerationToken);
   return payload?.data ?? null;
 }
 
 function applyChartSnapshot(snapshot, options = {}) {
+  chartAssetGeneration.assertCurrent(options.assetGenerationToken);
+
   if (!snapshot || !Array.isArray(snapshot.points)) {
     throw new Error("Resposta de grafico invalida");
   }
@@ -18376,12 +18408,18 @@ async function loadChart(options = {}) {
     return;
   }
 
-  if (chartLoadController.queueIfBusy(options)) {
+  const loadOptions = {
+    ...options,
+    assetGenerationToken: chartAssetGeneration.resolveToken(options.assetGenerationToken),
+  };
+
+  if (chartLoadController.queueIfBusy(loadOptions)) {
     return;
   }
 
-  const assetId = options.assetId ?? chartAssetSelect.value;
-  const requestedMode = options.mode ?? chartModeSelect?.value ?? "delayed";
+  const assetGenerationToken = loadOptions.assetGenerationToken;
+  const assetId = loadOptions.assetId ?? chartAssetSelect.value;
+  const requestedMode = loadOptions.mode ?? chartModeSelect?.value ?? "delayed";
   const selectedTerminalSymbol = getSelectedTerminalSymbol();
   const selectedInterval = getSelectedTerminalInterval();
   const pipelineStrategy = resolveChartPipelineStrategy(selectedTerminalSymbol);
@@ -18405,8 +18443,8 @@ async function loadChart(options = {}) {
 
     return "";
   })();
-  const range = options.range ?? chartRangeSelect.value;
-  const silent = options.silent === true;
+  const range = loadOptions.range ?? chartRangeSelect.value;
+  const silent = loadOptions.silent === true;
 
   chartLabStore.patchSelection({
     assetId,
@@ -18454,7 +18492,10 @@ async function loadChart(options = {}) {
         mode,
         chartLabState.symbolSourceModule,
         selectedInterval,
+        { assetGenerationToken },
       );
+
+      chartAssetGeneration.assertCurrent(assetGenerationToken);
 
       const requestedResolution = normalizeRequestedChartResolution(selectedInterval);
       const usedFallbackResolution =
@@ -18470,6 +18511,7 @@ async function loadChart(options = {}) {
       }
 
       applyChartSnapshot(snapshot, {
+        assetGenerationToken,
         fallbackReason,
         forcedModeReason,
         selectedExchange,
@@ -18495,6 +18537,7 @@ async function loadChart(options = {}) {
         mode,
         selectedBroker,
         selectedInterval,
+        { assetGenerationToken },
       )
       : await requestCryptoChart(
         assetId,
@@ -18502,7 +18545,10 @@ async function loadChart(options = {}) {
         mode,
         selectedBroker,
         selectedInterval,
+        { assetGenerationToken },
       );
+
+    chartAssetGeneration.assertCurrent(assetGenerationToken);
 
     const requestedResolution = binaryOperationalMode
       ? normalizeRequestedBinaryOptionsResolution(selectedInterval)
@@ -18537,6 +18583,7 @@ async function loadChart(options = {}) {
     const selectedExchangeForStatus = resolveExchangeLabelFromBroker(statusBroker);
 
     applyChartSnapshot(snapshot, {
+      assetGenerationToken,
       displayProvider: statusBroker,
       fallbackReason,
       forcedModeReason,
@@ -18544,6 +18591,10 @@ async function loadChart(options = {}) {
       transport: "polling",
     });
   } catch (error) {
+    if (isStaleChartAssetGenerationError(error) || !chartAssetGeneration.isCurrent(assetGenerationToken)) {
+      return;
+    }
+
     const errorMessage = error instanceof Error ? error.message : "Erro ao carregar grafico";
     const shouldSurfaceStatusError = !silent || chartLabState.viewMode !== "tv";
 
@@ -18576,6 +18627,10 @@ async function loadChart(options = {}) {
         : null;
     } catch {
       spotQuote = null;
+    }
+
+    if (!chartAssetGeneration.isCurrent(assetGenerationToken)) {
+      return;
     }
 
     if (spotQuote?.quote?.price && Number.isFinite(spotQuote.quote.price)) {
@@ -19509,12 +19564,16 @@ function setupChartLab() {
   });
 
   chartAssetSelect.addEventListener("change", () => {
+    const assetGenerationToken = chartAssetGeneration.advance();
     chartHasInitialFit = false;
     chartLabState.symbolSourceModule = "crypto";
     syncTerminalSymbolWithAsset();
     renderWatchlist();
     configureChartAutoRefresh();
-    void loadChart();
+    void loadChart({
+      assetGenerationToken,
+      assetId: chartAssetSelect.value,
+    });
     void refreshWatchlistMarket({
       silent: true,
     });
@@ -19616,6 +19675,7 @@ function setupChartLab() {
 
   if (chartSymbolInput) {
     chartSymbolInput.addEventListener("input", () => {
+      chartAssetGeneration.advance();
       chartLabState.symbolSourceModule = "";
       chartSymbolInput.value = mapSymbolToExchange(
         sanitizeTerminalSymbol(chartSymbolInput.value),
@@ -19882,12 +19942,16 @@ function setupChartLab() {
         chartExchangeSelect.value = exchange;
       }
 
+      const assetGenerationToken = chartAssetGeneration.advance();
       chartLabState.symbolSourceModule = "crypto";
 
       renderWatchlist();
       chartHasInitialFit = false;
       configureChartAutoRefresh();
-      void loadChart();
+      void loadChart({
+        assetGenerationToken,
+        assetId: chartAssetSelect instanceof HTMLSelectElement ? chartAssetSelect.value : assetId,
+      });
       void refreshWatchlistMarket({
         silent: true,
       });

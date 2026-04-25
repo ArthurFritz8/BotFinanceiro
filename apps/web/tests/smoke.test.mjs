@@ -212,8 +212,10 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /"x-internal-token": internalToken/);
   assert.match(mainSource, /"x-intelligence-correlation-id": correlationId/);
   assert.match(mainSource, /buildApiUrl\(INTELLIGENCE_SYNC_TELEMETRY_ENDPOINT\)/);
+  assert.match(mainSource, /createChartAssetGeneration/);
+  assert.match(mainSource, /chartAssetGeneration\.assertCurrent\(assetGenerationToken\)/);
   assert.match(mainSource, /if \(pipelineStrategy === "institutional_macro" && !canRunInstitutionalMacroForSymbol\(selectedTerminalSymbol\)\)/);
-  assert.match(mainSource, /if \(chartLoadController\.queueIfBusy\(options\)\) \{[\s\S]*return;[\s\S]*\}/);
+  assert.match(mainSource, /if \(chartLoadController\.queueIfBusy\(loadOptions\)\) \{[\s\S]*return;[\s\S]*\}/);
   assert.match(mainSource, /chartLoadController\.start\(\);/);
   assert.match(mainSource, /const nextRequest = chartLoadController\.finish\(\);[\s\S]*if \(nextRequest !== null\) \{[\s\S]*void loadChart\(nextRequest\);[\s\S]*\}/);
   assert.match(mainSource, /function updateAutoChartPreferredBroker\(nextBroker, options = \{\}\)/);

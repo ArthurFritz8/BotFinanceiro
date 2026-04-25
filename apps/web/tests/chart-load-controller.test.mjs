@@ -31,10 +31,11 @@ test("Chart load controller guarda apenas a ultima requisicao pendente sanitizad
     },
   });
 
-  assert.equal(controller.queueIfBusy({ assetId: "bitcoin", mode: "live", ignored: "x" }), true);
-  assert.equal(controller.queueIfBusy({ assetId: "ethereum", range: "24h", silent: true }), true);
+  assert.equal(controller.queueIfBusy({ assetGenerationToken: 1, assetId: "bitcoin", mode: "live", ignored: "x" }), true);
+  assert.equal(controller.queueIfBusy({ assetGenerationToken: 2, assetId: "ethereum", range: "24h", silent: true }), true);
 
   assert.deepEqual(controller.getPendingRequest(), {
+    assetGenerationToken: 2,
     assetId: "ethereum",
     range: "24h",
     silent: true,
@@ -48,6 +49,7 @@ test("Chart load controller guarda apenas a ultima requisicao pendente sanitizad
   const nextRequest = controller.finish();
   assert.equal(loading, false);
   assert.deepEqual(nextRequest, {
+    assetGenerationToken: 2,
     assetId: "ethereum",
     range: "24h",
     silent: true,
@@ -64,8 +66,9 @@ test("Chart load controller nao enfileira quando nao ha loading ativo", () => {
   assert.equal(controller.queueIfBusy({ assetId: "bitcoin" }), false);
   assert.equal(controller.getPendingRequest(), null);
 
-  controller.queue({ assetId: "solana", mode: "delayed", range: "7d", silent: false });
+  controller.queue({ assetGenerationToken: 3, assetId: "solana", mode: "delayed", range: "7d", silent: false });
   assert.deepEqual(controller.getPendingRequest(), {
+    assetGenerationToken: 3,
     assetId: "solana",
     mode: "delayed",
     range: "7d",

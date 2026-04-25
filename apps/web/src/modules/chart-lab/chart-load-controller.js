@@ -5,6 +5,10 @@ function sanitizeChartLoadRequest(options = {}) {
     nextRequest.assetId = options.assetId;
   }
 
+  if (Number.isSafeInteger(options.assetGenerationToken) && options.assetGenerationToken >= 0) {
+    nextRequest.assetGenerationToken = options.assetGenerationToken;
+  }
+
   if (typeof options.mode === "string" && options.mode.length > 0) {
     nextRequest.mode = options.mode;
   }

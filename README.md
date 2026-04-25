@@ -142,6 +142,7 @@ Politica de retencao:
 56. ADR 084: `docs/ADR/ADR-084-controlador-live-stream-chart-lab.md`
 57. ADR 085: `docs/ADR/ADR-085-builders-live-stream-chart-lab.md`
 58. ADR 086: `docs/ADR/ADR-086-helpers-failover-live-chart-lab.md`
+59. ADR 087: `docs/ADR/ADR-087-token-geracao-ativo-chart-lab.md`
 
 ## Relatorio completo desta entrega
 
