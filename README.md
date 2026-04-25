@@ -136,6 +136,7 @@ Politica de retencao:
 50. ADR 078: `docs/ADR/ADR-078-hub-inteligencia-fundamentalista.md`
 51. ADR 079: `docs/ADR/ADR-079-polimento-resumo-e-anotacoes-chart-lab.md`
 52. ADR 080: `docs/ADR/ADR-080-live-signals-screener-cross-asset.md`
+53. ADR 081: `docs/ADR/ADR-081-modularizacao-quant-chart-lab.md`
 
 ## Relatorio completo desta entrega
 

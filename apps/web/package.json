@@ -7,7 +7,7 @@
     "build": "vite build",
     "dev": "vite",
     "preview": "vite preview --host 0.0.0.0 --port 4173",
-    "test": "node --test tests/smoke.test.mjs",
+    "test": "node --test tests/smoke.test.mjs tests/chart-lab-quant.test.mjs",
     "test:e2e": "playwright test --config=playwright.config.mjs",
     "test:e2e:headed": "playwright test --config=playwright.config.mjs --headed",
     "typecheck": "echo \"No web typecheck yet\""
