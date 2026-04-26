@@ -267,6 +267,10 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /function renderOperatorJournalPanel/);
   assert.match(mainSource, /shouldTripOperatorBreaker\(summary\)/);
   assert.match(mainSource, /getElementById\("paper-trading-operator-journal-list"\)/);
+  assert.match(mainSource, /paper-trading-operator-central-journal\.js/);
+  assert.match(mainSource, /function refreshCentralOperatorJournal/);
+  assert.match(mainSource, /function renderCentralOperatorJournalPanel/);
+  assert.match(mainSource, /getElementById\("paper-trading-operator-central-list"\)/);
   assert.match(mainSource, /renderOrderFlowStrip\(orderFlow\)/);
   assert.match(mainSource, /renderTimingOrderFlowPanel\(orderFlow\)/);
   assert.match(
@@ -419,6 +423,14 @@ test("index.html expoe painel operador auto paper com toggle e feedback", async 
   assert.match(html, /id="paper-trading-operator-journal-list"/);
   assert.match(html, /id="paper-trading-operator-journal-breaker"/);
   assert.match(html, /id="paper-trading-operator-journal-clear"/);
+  assert.match(html, /id="paper-trading-operator-central-summary"/);
+  assert.match(html, /id="paper-trading-operator-central-list"/);
+  assert.match(html, /id="paper-trading-operator-central-action"/);
+  assert.match(html, /id="paper-trading-operator-central-asset"/);
+  assert.match(html, /id="paper-trading-operator-central-from"/);
+  assert.match(html, /id="paper-trading-operator-central-to"/);
+  assert.match(html, /id="paper-trading-operator-central-fetch"/);
+  assert.match(html, /id="paper-trading-operator-central-reset"/);
 });
 
 test("styles.css define paper-trading-operator com estados armed e feedback", async () => {
@@ -429,6 +441,8 @@ test("styles.css define paper-trading-operator com estados armed e feedback", as
   assert.match(css, /\.paper-trading-operator__journal \{/);
   assert.match(css, /\.paper-trading-operator__journal-item\[data-tone="error"\]/);
   assert.match(css, /\.paper-trading-operator__journal-breaker \{/);
+  assert.match(css, /\.paper-trading-operator__central \{/);
+  assert.match(css, /\.paper-trading-operator__central-filters \{/);
 });
 
 test("styles.css define live-status com pulse e estados", async () => {

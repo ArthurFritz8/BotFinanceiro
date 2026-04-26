@@ -162,6 +162,7 @@ Politica de retencao:
 76. ADR 104: `docs/ADR/ADR-104-journal-circuit-breaker-operator-dispatch.md`
 77. ADR 105: `docs/ADR/ADR-105-journal-operator-dispatch-backend.md`
 78. ADR 106: `docs/ADR/ADR-106-filtros-journal-operator-dispatch.md`
+79. ADR 107: `docs/ADR/ADR-107-painel-frontend-auditoria-centralizada-operator.md`
 
 ## Relatorio completo desta entrega
 
@@ -193,6 +194,8 @@ Filtros opcionais (ADR-106) aceitam `from`/`to` em ISO 8601, `action=opened|skip
 curl "http://localhost:3000/v1/paper-trading/operator/journal?from=2026-04-26T00:00:00.000Z&to=2026-04-26T23:59:59.000Z&action=skipped&asset=bitcoin" \
 	-H "x-paper-trading-operator-token: $PAPER_TRADING_OPERATOR_TOKEN"
 ```
+
+Painel frontend (ADR-107): dentro do Operator Desk, abra a secao "Auditoria centralizada (servidor)" para filtrar action/asset/from/to e listar os disparos sem precisar de `curl`. O painel reusa o token salvo via `paper-trading-operator-client.js` e nao expoe credencial alguma no bundle.
 
 ## Exemplos de chamadas internas
 

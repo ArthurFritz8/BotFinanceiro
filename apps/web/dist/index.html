@@ -15,11 +15,11 @@
       href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Sora:wght@400;500;700&display=swap"
       rel="stylesheet"
     />
-    <script type="module" crossorigin src="/assets/index-B3o41fXr.js"></script>
+    <script type="module" crossorigin src="/assets/index-CkMOYnot.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/vendor-BenDn6BE.js">
     <link rel="modulepreload" crossorigin href="/assets/vendor-supabase-CkFV92xa.js">
     <link rel="modulepreload" crossorigin href="/assets/vendor-charts-N7JNsDXU.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-a1baBX1B.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-CX5opzIl.css">
   <link rel="manifest" href="/manifest.webmanifest"><script id="vite-plugin-pwa:register-sw" src="/registerSW.js"></script></head>
   <body>
     <div class="bg-orb bg-orb-left" aria-hidden="true"></div>
@@ -162,7 +162,7 @@
             class="sidebar-nav-button"
             data-route="live-signals"
             data-label="Sinais ao Vivo"
-            title="Sinais ao Vivo (Top Opportunities) — ADR-078"
+            title="Sinais ao Vivo (Top Opportunities) — ADR-080"
           >
             <span class="sidebar-nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
@@ -551,6 +551,7 @@
 
             <div id="chart-copilot-stage" class="chart-stage is-hidden">
               <div id="chart-viewport" class="chart-viewport" aria-label="Grafico interativo de preco"></div>
+              <div id="chart-execution-hud" class="chart-execution-hud" hidden></div>
             </div>
           </div>
 
@@ -844,14 +845,14 @@
           <section
             id="analysis-ensemble-engine"
             class="analysis-ensemble-engine"
-            aria-label="Contribuicao do motor quantitativo (ensemble)"
+            aria-label="Pesos do motor algoritmico"
             data-ws-channel="intelligence:ensemble"
             hidden
           >
             <header class="analysis-ensemble-head">
               <div>
-                <h4>Contribuicao do motor quantitativo</h4>
-                <p class="analysis-ensemble-sub">Pesos derivados do snapshot real, adaptativos ao modo operacional. Hover em cada motor expoe a metrica bruta auditavel.</p>
+                <h4>Pesos do Motor Algoritmico</h4>
+                <p class="analysis-ensemble-sub">SMC, Exaustao Cinetica, Harmonica e Sentimento Macro/Micro com pesos adaptativos por snapshot real e trilha de auditoria Ghost.</p>
               </div>
               <span id="analysis-ensemble-mode" class="analysis-ensemble-mode" data-mode="spot">Spot</span>
             </header>
@@ -1106,6 +1107,113 @@
         </div>
         <div class="paper-trading__stats" aria-live="polite">Carregando estatísticas...</div>
         <div class="paper-trading__trades" aria-live="polite"></div>
+
+        <details id="paper-trading-operator-panel" class="paper-trading-operator">
+          <summary class="paper-trading-operator__summary">
+            <span class="paper-trading-operator__title">Auto Paper · Operador</span>
+            <span class="paper-trading-operator__status" id="paper-trading-operator-status" data-state="disarmed">DESARMADO</span>
+          </summary>
+          <div class="paper-trading-operator__body">
+            <p class="paper-trading-operator__hint">
+              Cole o token <code>PAPER_TRADING_OPERATOR_TOKEN</code> definido no backend. Ele fica restrito a
+              este navegador (localStorage) e nunca eh enviado para terceiros. Auto-paper so dispara quando o
+              Auto Guard estiver <strong>AUTO PAPER READY</strong>.
+            </p>
+            <label class="paper-trading-operator__field" for="paper-trading-operator-token-input">
+              <span>Token do operador (mínimo 16 caracteres)</span>
+              <input
+                type="password"
+                id="paper-trading-operator-token-input"
+                class="paper-trading-operator__input"
+                autocomplete="off"
+                spellcheck="false"
+                inputmode="text"
+                placeholder="paper_op_•••"
+              />
+            </label>
+            <label class="paper-trading-operator__toggle" for="paper-trading-operator-arm-toggle">
+              <input type="checkbox" id="paper-trading-operator-arm-toggle" />
+              <span>Armar disparo automático quando Auto Guard liberar</span>
+            </label>
+            <div class="paper-trading-operator__actions">
+              <button type="button" id="paper-trading-operator-save" class="paper-trading-operator__button">Salvar credenciais</button>
+              <button type="button" id="paper-trading-operator-clear" class="paper-trading-operator__button paper-trading-operator__button--ghost">Limpar</button>
+            </div>
+            <p class="paper-trading-operator__feedback" id="paper-trading-operator-feedback" aria-live="polite"></p>
+            <div class="paper-trading-operator__journal" aria-live="polite">
+              <div class="paper-trading-operator__journal-header">
+                <span class="paper-trading-operator__journal-title">Auditoria local</span>
+                <span class="paper-trading-operator__journal-summary" id="paper-trading-operator-journal-summary">sem disparos registrados</span>
+                <button
+                  type="button"
+                  id="paper-trading-operator-journal-clear"
+                  class="paper-trading-operator__button paper-trading-operator__button--ghost paper-trading-operator__button--small"
+                >Limpar histórico</button>
+              </div>
+              <ol class="paper-trading-operator__journal-list" id="paper-trading-operator-journal-list"></ol>
+              <p class="paper-trading-operator__journal-breaker" id="paper-trading-operator-journal-breaker" hidden></p>
+            </div>
+            <div class="paper-trading-operator__central" aria-live="polite">
+              <div class="paper-trading-operator__central-header">
+                <span class="paper-trading-operator__central-title">Auditoria centralizada (servidor)</span>
+                <span class="paper-trading-operator__central-summary" id="paper-trading-operator-central-summary">não consultado</span>
+              </div>
+              <div class="paper-trading-operator__central-filters">
+                <label class="paper-trading-operator__central-field" for="paper-trading-operator-central-action">
+                  <span>Ação</span>
+                  <select id="paper-trading-operator-central-action" class="paper-trading-operator__input">
+                    <option value="">todas</option>
+                    <option value="opened">opened</option>
+                    <option value="skipped">skipped</option>
+                    <option value="error">error</option>
+                  </select>
+                </label>
+                <label class="paper-trading-operator__central-field" for="paper-trading-operator-central-asset">
+                  <span>Asset</span>
+                  <input
+                    type="text"
+                    id="paper-trading-operator-central-asset"
+                    class="paper-trading-operator__input"
+                    placeholder="bitcoin"
+                    autocomplete="off"
+                    spellcheck="false"
+                    maxlength="40"
+                  />
+                </label>
+                <label class="paper-trading-operator__central-field" for="paper-trading-operator-central-from">
+                  <span>De (ISO)</span>
+                  <input
+                    type="datetime-local"
+                    id="paper-trading-operator-central-from"
+                    class="paper-trading-operator__input"
+                  />
+                </label>
+                <label class="paper-trading-operator__central-field" for="paper-trading-operator-central-to">
+                  <span>Até (ISO)</span>
+                  <input
+                    type="datetime-local"
+                    id="paper-trading-operator-central-to"
+                    class="paper-trading-operator__input"
+                  />
+                </label>
+              </div>
+              <div class="paper-trading-operator__actions">
+                <button
+                  type="button"
+                  id="paper-trading-operator-central-fetch"
+                  class="paper-trading-operator__button paper-trading-operator__button--small"
+                >Atualizar</button>
+                <button
+                  type="button"
+                  id="paper-trading-operator-central-reset"
+                  class="paper-trading-operator__button paper-trading-operator__button--ghost paper-trading-operator__button--small"
+                >Limpar filtros</button>
+              </div>
+              <p class="paper-trading-operator__feedback" id="paper-trading-operator-central-feedback" aria-live="polite"></p>
+              <ol class="paper-trading-operator__journal-list" id="paper-trading-operator-central-list"></ol>
+            </div>
+          </div>
+        </details>
       </section>
 
       <section id="backtesting-panel" class="backtesting reveal reveal-delay-2 route-hidden"></section>

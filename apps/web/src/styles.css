@@ -7669,6 +7669,50 @@ body.sidebar-collapsed .app-shell {
   border-radius: 6px;
 }
 
+/* ADR-107 — Auditoria centralizada (servidor) consumindo
+   GET /v1/paper-trading/operator/journal */
+.paper-trading-operator__central {
+  margin-top: 0.85rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+  display: grid;
+  gap: 0.55rem;
+}
+.paper-trading-operator__central-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.paper-trading-operator__central-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(226, 232, 240, 0.75);
+  font-weight: 600;
+}
+.paper-trading-operator__central-summary {
+  font-size: 0.72rem;
+  color: rgba(148, 163, 184, 0.95);
+  flex: 1;
+}
+.paper-trading-operator__central-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.45rem;
+}
+.paper-trading-operator__central-field {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.7rem;
+  color: rgba(148, 163, 184, 0.95);
+}
+.paper-trading-operator__central-field span {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 /* ============================================================================
    ADR-078 — Hub de Inteligencia Fundamentalista (refator aba Noticias)
    Sentimento de mercado, palavras-chave, narrativa AI, tabs Noticias/Eventos

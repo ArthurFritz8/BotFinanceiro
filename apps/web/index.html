@@ -1148,6 +1148,65 @@
               <ol class="paper-trading-operator__journal-list" id="paper-trading-operator-journal-list"></ol>
               <p class="paper-trading-operator__journal-breaker" id="paper-trading-operator-journal-breaker" hidden></p>
             </div>
+            <div class="paper-trading-operator__central" aria-live="polite">
+              <div class="paper-trading-operator__central-header">
+                <span class="paper-trading-operator__central-title">Auditoria centralizada (servidor)</span>
+                <span class="paper-trading-operator__central-summary" id="paper-trading-operator-central-summary">não consultado</span>
+              </div>
+              <div class="paper-trading-operator__central-filters">
+                <label class="paper-trading-operator__central-field" for="paper-trading-operator-central-action">
+                  <span>Ação</span>
+                  <select id="paper-trading-operator-central-action" class="paper-trading-operator__input">
+                    <option value="">todas</option>
+                    <option value="opened">opened</option>
+                    <option value="skipped">skipped</option>
+                    <option value="error">error</option>
+                  </select>
+                </label>
+                <label class="paper-trading-operator__central-field" for="paper-trading-operator-central-asset">
+                  <span>Asset</span>
+                  <input
+                    type="text"
+                    id="paper-trading-operator-central-asset"
+                    class="paper-trading-operator__input"
+                    placeholder="bitcoin"
+                    autocomplete="off"
+                    spellcheck="false"
+                    maxlength="40"
+                  />
+                </label>
+                <label class="paper-trading-operator__central-field" for="paper-trading-operator-central-from">
+                  <span>De (ISO)</span>
+                  <input
+                    type="datetime-local"
+                    id="paper-trading-operator-central-from"
+                    class="paper-trading-operator__input"
+                  />
+                </label>
+                <label class="paper-trading-operator__central-field" for="paper-trading-operator-central-to">
+                  <span>Até (ISO)</span>
+                  <input
+                    type="datetime-local"
+                    id="paper-trading-operator-central-to"
+                    class="paper-trading-operator__input"
+                  />
+                </label>
+              </div>
+              <div class="paper-trading-operator__actions">
+                <button
+                  type="button"
+                  id="paper-trading-operator-central-fetch"
+                  class="paper-trading-operator__button paper-trading-operator__button--small"
+                >Atualizar</button>
+                <button
+                  type="button"
+                  id="paper-trading-operator-central-reset"
+                  class="paper-trading-operator__button paper-trading-operator__button--ghost paper-trading-operator__button--small"
+                >Limpar filtros</button>
+              </div>
+              <p class="paper-trading-operator__feedback" id="paper-trading-operator-central-feedback" aria-live="polite"></p>
+              <ol class="paper-trading-operator__journal-list" id="paper-trading-operator-central-list"></ol>
+            </div>
           </div>
         </details>
       </section>

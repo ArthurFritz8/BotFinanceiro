@@ -58,6 +58,10 @@ import {
   summarizeOperatorJournal,
 } from "./modules/chart-lab/quant/paper-trading-operator-journal.js";
 import {
+  fetchCentralOperatorJournal,
+  summarizeCentralJournalSnapshot,
+} from "./modules/chart-lab/quant/paper-trading-operator-central-journal.js";
+import {
   appendExecutionJournalEntry,
   createExecutionJournalEntry,
   createExecutionJournalState,
@@ -2370,6 +2374,15 @@ let operatorPanelJournalSummary = null;
 let operatorPanelJournalList = null;
 let operatorPanelJournalBreaker = null;
 let operatorPanelJournalClearButton = null;
+let operatorPanelCentralSummary = null;
+let operatorPanelCentralList = null;
+let operatorPanelCentralFeedback = null;
+let operatorPanelCentralActionInput = null;
+let operatorPanelCentralAssetInput = null;
+let operatorPanelCentralFromInput = null;
+let operatorPanelCentralToInput = null;
+let operatorPanelCentralFetchButton = null;
+let operatorPanelCentralResetButton = null;
 
 function renderOperatorFeedback(message, tone = "info") {
   if (!(operatorPanelFeedback instanceof HTMLElement)) return;
@@ -2448,6 +2461,15 @@ function bindOperatorAutoPaperPanel() {
   operatorPanelJournalList = document.getElementById("paper-trading-operator-journal-list");
   operatorPanelJournalBreaker = document.getElementById("paper-trading-operator-journal-breaker");
   operatorPanelJournalClearButton = document.getElementById("paper-trading-operator-journal-clear");
+  operatorPanelCentralSummary = document.getElementById("paper-trading-operator-central-summary");
+  operatorPanelCentralList = document.getElementById("paper-trading-operator-central-list");
+  operatorPanelCentralFeedback = document.getElementById("paper-trading-operator-central-feedback");
+  operatorPanelCentralActionInput = document.getElementById("paper-trading-operator-central-action");
+  operatorPanelCentralAssetInput = document.getElementById("paper-trading-operator-central-asset");
+  operatorPanelCentralFromInput = document.getElementById("paper-trading-operator-central-from");
+  operatorPanelCentralToInput = document.getElementById("paper-trading-operator-central-to");
+  operatorPanelCentralFetchButton = document.getElementById("paper-trading-operator-central-fetch");
+  operatorPanelCentralResetButton = document.getElementById("paper-trading-operator-central-reset");
 
   if (!(operatorPanelSaveButton instanceof HTMLElement)) return;
 
@@ -2509,6 +2531,99 @@ function bindOperatorAutoPaperPanel() {
     renderOperatorJournalPanel();
     renderOperatorFeedback("Auditoria local limpa.", "info");
   });
+
+  operatorPanelCentralFetchButton?.addEventListener("click", () => {
+    void refreshCentralOperatorJournal();
+  });
+  operatorPanelCentralResetButton?.addEventListener("click", () => {
+    if (operatorPanelCentralActionInput instanceof HTMLSelectElement) {
+      operatorPanelCentralActionInput.value = "";
+    }
+    if (operatorPanelCentralAssetInput instanceof HTMLInputElement) {
+      operatorPanelCentralAssetInput.value = "";
+    }
+    if (operatorPanelCentralFromInput instanceof HTMLInputElement) {
+      operatorPanelCentralFromInput.value = "";
+    }
+    if (operatorPanelCentralToInput instanceof HTMLInputElement) {
+      operatorPanelCentralToInput.value = "";
+    }
+    void refreshCentralOperatorJournal();
+  });
+}
+
+function readCentralOperatorJournalFilters() {
+  const action = operatorPanelCentralActionInput instanceof HTMLSelectElement ? operatorPanelCentralActionInput.value : "";
+  const asset = operatorPanelCentralAssetInput instanceof HTMLInputElement ? operatorPanelCentralAssetInput.value : "";
+  const fromLocal = operatorPanelCentralFromInput instanceof HTMLInputElement ? operatorPanelCentralFromInput.value : "";
+  const toLocal = operatorPanelCentralToInput instanceof HTMLInputElement ? operatorPanelCentralToInput.value : "";
+  // datetime-local entrega "YYYY-MM-DDTHH:MM" no fuso local — convertemos para
+  // ISO 8601 com offset Z para o backend interpretar como UTC determinístico.
+  const fromIso = fromLocal ? new Date(fromLocal).toISOString() : "";
+  const toIso = toLocal ? new Date(toLocal).toISOString() : "";
+  return { action, asset, from: fromIso, limit: 50, to: toIso };
+}
+
+function renderCentralOperatorFeedback(message, tone = "info") {
+  if (!(operatorPanelCentralFeedback instanceof HTMLElement)) return;
+  operatorPanelCentralFeedback.textContent = message ?? "";
+  if (message) {
+    operatorPanelCentralFeedback.dataset.tone = tone;
+  } else {
+    delete operatorPanelCentralFeedback.dataset.tone;
+  }
+}
+
+function renderCentralOperatorJournalPanel(snapshot) {
+  if (!(operatorPanelCentralSummary instanceof HTMLElement) || !(operatorPanelCentralList instanceof HTMLElement)) return;
+  const summary = summarizeCentralJournalSnapshot(snapshot);
+  if (!summary.enabled) {
+    operatorPanelCentralSummary.textContent = "endpoint desabilitado no servidor";
+    operatorPanelCentralList.innerHTML = "";
+    return;
+  }
+  if (summary.total === 0) {
+    operatorPanelCentralSummary.textContent = "nenhum disparo no filtro atual";
+    operatorPanelCentralList.innerHTML = "";
+    return;
+  }
+  const successRate = summary.successRate !== null ? `${summary.successRate}%` : "—";
+  operatorPanelCentralSummary.textContent = `${summary.total} disparos · ${summary.opened} opened · ${summary.skipped} skipped · ${summary.errors} error · sucesso ${successRate}`;
+  operatorPanelCentralList.innerHTML = summary.entries.slice(0, 25).map((entry) => {
+    const tone = entry.action === "opened" ? "ok" : entry.action === "error" ? "error" : "warn";
+    const time = formatOperatorJournalTimestamp(entry.occurredAtMs);
+    const score = entry.confluenceScore !== null ? `${Math.round(entry.confluenceScore)}%` : "—";
+    const detail = entry.action === "opened"
+      ? "opened"
+      : entry.reason
+        ? `${entry.action}: ${String(entry.reason).slice(0, 60)}`
+        : entry.action;
+    return `<li class="paper-trading-operator__journal-item" data-tone="${tone}">`
+      + `<span class="paper-trading-operator__journal-time">${time}</span>`
+      + `<span class="paper-trading-operator__journal-asset">${entry.asset.toUpperCase()} ${entry.side.toUpperCase()}</span>`
+      + `<span class="paper-trading-operator__journal-score">${score}</span>`
+      + `<span class="paper-trading-operator__journal-detail">${detail}</span>`
+      + `</li>`;
+  }).join("");
+}
+
+async function refreshCentralOperatorJournal() {
+  if (!operatorAutoPaperSettings.token || operatorAutoPaperSettings.token.length < PAPER_TRADING_OPERATOR_MIN_TOKEN_LENGTH) {
+    renderCentralOperatorFeedback("Salve um token válido para consultar a auditoria centralizada.", "warn");
+    return;
+  }
+  const filters = readCentralOperatorJournalFilters();
+  renderCentralOperatorFeedback("Consultando…", "info");
+  const result = await fetchCentralOperatorJournal({
+    filters,
+    token: operatorAutoPaperSettings.token,
+  });
+  if (!result.ok) {
+    renderCentralOperatorFeedback(`Falha: ${result.error?.code ?? "ERRO"}${result.error?.message ? ` — ${result.error.message}` : ""}`, "error");
+    return;
+  }
+  renderCentralOperatorJournalPanel(result.data);
+  renderCentralOperatorFeedback("", "info");
 }
 
 function mapSymbolToExchange(symbol, exchange) {
