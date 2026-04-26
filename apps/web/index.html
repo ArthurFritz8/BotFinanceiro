@@ -1135,6 +1135,19 @@
               <button type="button" id="paper-trading-operator-clear" class="paper-trading-operator__button paper-trading-operator__button--ghost">Limpar</button>
             </div>
             <p class="paper-trading-operator__feedback" id="paper-trading-operator-feedback" aria-live="polite"></p>
+            <div class="paper-trading-operator__journal" aria-live="polite">
+              <div class="paper-trading-operator__journal-header">
+                <span class="paper-trading-operator__journal-title">Auditoria local</span>
+                <span class="paper-trading-operator__journal-summary" id="paper-trading-operator-journal-summary">sem disparos registrados</span>
+                <button
+                  type="button"
+                  id="paper-trading-operator-journal-clear"
+                  class="paper-trading-operator__button paper-trading-operator__button--ghost paper-trading-operator__button--small"
+                >Limpar histórico</button>
+              </div>
+              <ol class="paper-trading-operator__journal-list" id="paper-trading-operator-journal-list"></ol>
+              <p class="paper-trading-operator__journal-breaker" id="paper-trading-operator-journal-breaker" hidden></p>
+            </div>
           </div>
         </details>
       </section>

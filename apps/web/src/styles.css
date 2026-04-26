@@ -7584,6 +7584,91 @@ body.sidebar-collapsed .app-shell {
   .paper-trading-operator__button { transition: none; }
 }
 
+/* ADR-104 — Journal & Circuit Breaker do Operator Auto-Dispatch */
+.paper-trading-operator__button--small {
+  padding: 0.25rem 0.55rem;
+  font-size: 0.7rem;
+}
+.paper-trading-operator__journal {
+  margin-top: 0.85rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+  display: grid;
+  gap: 0.5rem;
+}
+.paper-trading-operator__journal-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.paper-trading-operator__journal-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(226, 232, 240, 0.75);
+  font-weight: 600;
+}
+.paper-trading-operator__journal-summary {
+  font-size: 0.72rem;
+  color: rgba(148, 163, 184, 0.95);
+  flex: 1;
+}
+.paper-trading-operator__journal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.25rem;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.paper-trading-operator__journal-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.72rem;
+  padding: 0.32rem 0.5rem;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.45);
+  border-left: 2px solid rgba(148, 163, 184, 0.4);
+}
+.paper-trading-operator__journal-item[data-tone="ok"] {
+  border-left-color: #34d399;
+}
+.paper-trading-operator__journal-item[data-tone="error"] {
+  border-left-color: #f87171;
+}
+.paper-trading-operator__journal-time {
+  font-variant-numeric: tabular-nums;
+  color: rgba(148, 163, 184, 0.85);
+}
+.paper-trading-operator__journal-asset {
+  font-weight: 600;
+  color: rgba(226, 232, 240, 0.95);
+}
+.paper-trading-operator__journal-score {
+  font-variant-numeric: tabular-nums;
+  color: rgba(226, 232, 240, 0.8);
+}
+.paper-trading-operator__journal-detail {
+  color: rgba(148, 163, 184, 0.85);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.paper-trading-operator__journal-item[data-tone="error"] .paper-trading-operator__journal-detail {
+  color: #fca5a5;
+}
+.paper-trading-operator__journal-breaker {
+  margin: 0;
+  font-size: 0.74rem;
+  color: #fca5a5;
+  background: rgba(127, 29, 29, 0.25);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+}
+
 /* ============================================================================
    ADR-078 — Hub de Inteligencia Fundamentalista (refator aba Noticias)
    Sentimento de mercado, palavras-chave, narrativa AI, tabs Noticias/Eventos

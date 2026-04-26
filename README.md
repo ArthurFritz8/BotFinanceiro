@@ -159,6 +159,7 @@ Politica de retencao:
 73. ADR 101: `docs/ADR/ADR-101-auto-guard-execucao-controlada.md`
 74. ADR 102: `docs/ADR/ADR-102-rota-operador-paper-trading-auto-signal.md`
 75. ADR 103: `docs/ADR/ADR-103-operador-auto-paper-trading-frontend.md`
+76. ADR 104: `docs/ADR/ADR-104-journal-circuit-breaker-operator-dispatch.md`
 
 ## Relatorio completo desta entrega
 

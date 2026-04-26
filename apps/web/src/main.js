@@ -48,6 +48,16 @@ import {
   submitAutoSignal as submitOperatorAutoSignal,
 } from "./modules/chart-lab/quant/paper-trading-operator-client.js";
 import {
+  appendOperatorJournalEntry,
+  clearOperatorJournal as clearOperatorJournalStore,
+  createOperatorJournalEntry,
+  loadOperatorJournal as loadOperatorJournalStore,
+  PAPER_TRADING_OPERATOR_BREAKER_FAILURE_THRESHOLD,
+  saveOperatorJournal as saveOperatorJournalStore,
+  shouldTripOperatorBreaker,
+  summarizeOperatorJournal,
+} from "./modules/chart-lab/quant/paper-trading-operator-journal.js";
+import {
   appendExecutionJournalEntry,
   createExecutionJournalEntry,
   createExecutionJournalState,
@@ -2243,6 +2253,7 @@ hydrateExecutionJournalStateFromStorage();
 // cooldown idempotente para nao reenviar o mesmo plano em rajada.
 // ============================================================================
 let operatorAutoPaperSettings = loadOperatorSettingsStore();
+let operatorAutoPaperJournal = loadOperatorJournalStore();
 let operatorLastDispatchKey = "";
 let operatorLastDispatchAtMs = 0;
 const OPERATOR_DISPATCH_COOLDOWN_MS = 60_000;
@@ -2310,6 +2321,7 @@ function maybeDispatchOperatorAutoSignal({ automationGuard, executionPlan, execu
     payload,
     token: settings.token,
   }).then((result) => {
+    recordOperatorJournalResult({ payload, result });
     if (typeof renderOperatorFeedback === "function") {
       if (result.ok) {
         renderOperatorFeedback(`Auto-paper enviado: ${payload.asset.toUpperCase()} ${payload.side.toUpperCase()} @ ${payload.entryPrice}`, "ok");
@@ -2326,12 +2338,38 @@ function maybeDispatchOperatorAutoSignal({ automationGuard, executionPlan, execu
   });
 }
 
+function recordOperatorJournalResult({ payload, result }) {
+  const entry = createOperatorJournalEntry({ occurredAtMs: Date.now(), payload, result });
+  if (!entry) return;
+  operatorAutoPaperJournal = appendOperatorJournalEntry(operatorAutoPaperJournal, entry);
+  saveOperatorJournalStore(operatorAutoPaperJournal);
+
+  const summary = summarizeOperatorJournal(operatorAutoPaperJournal);
+  if (operatorAutoPaperSettings.autoArmed === true && shouldTripOperatorBreaker(summary)) {
+    operatorAutoPaperSettings = { ...operatorAutoPaperSettings, autoArmed: false };
+    saveOperatorSettingsStore(operatorAutoPaperSettings);
+    syncOperatorPanelFromState();
+    if (typeof renderOperatorFeedback === "function") {
+      renderOperatorFeedback(
+        `Circuit breaker: ${summary.consecutiveFailures} falhas consecutivas. Auto desarmado.`,
+        "error",
+      );
+    }
+  }
+
+  renderOperatorJournalPanel();
+}
+
 let operatorPanelTokenInput = null;
 let operatorPanelArmToggle = null;
 let operatorPanelStatusBadge = null;
 let operatorPanelFeedback = null;
 let operatorPanelSaveButton = null;
 let operatorPanelClearButton = null;
+let operatorPanelJournalSummary = null;
+let operatorPanelJournalList = null;
+let operatorPanelJournalBreaker = null;
+let operatorPanelJournalClearButton = null;
 
 function renderOperatorFeedback(message, tone = "info") {
   if (!(operatorPanelFeedback instanceof HTMLElement)) return;
@@ -2352,6 +2390,52 @@ function syncOperatorPanelFromState() {
   }
 }
 
+function formatOperatorJournalTimestamp(occurredAtMs) {
+  if (typeof occurredAtMs !== "number" || !Number.isFinite(occurredAtMs)) return "—";
+  try {
+    return new Date(occurredAtMs).toLocaleTimeString("pt-BR", { hour: "2-digit", hour12: false, minute: "2-digit", second: "2-digit" });
+  } catch {
+    return "—";
+  }
+}
+
+function renderOperatorJournalPanel() {
+  if (!(operatorPanelJournalSummary instanceof HTMLElement) || !(operatorPanelJournalList instanceof HTMLElement)) return;
+  const summary = summarizeOperatorJournal(operatorAutoPaperJournal);
+  if (summary.total === 0) {
+    operatorPanelJournalSummary.textContent = "sem disparos registrados";
+    operatorPanelJournalList.innerHTML = "";
+  } else {
+    const rate = summary.successRate !== null ? `${summary.successRate}%` : "—";
+    operatorPanelJournalSummary.textContent = `${summary.total} disparos · ${summary.successes} ok · ${summary.failures} falha${summary.failures === 1 ? "" : "s"} · taxa ${rate}`;
+    const recent = operatorAutoPaperJournal.entries.slice(-8).reverse();
+    operatorPanelJournalList.innerHTML = recent.map((entry) => {
+      const tone = entry.outcome === "success" ? "ok" : "error";
+      const time = formatOperatorJournalTimestamp(entry.occurredAtMs);
+      const score = entry.confluenceScore !== null ? `${entry.confluenceScore}%` : "—";
+      const detail = entry.outcome === "success"
+        ? `HTTP ${entry.status ?? "—"}`
+        : `${entry.errorCode ?? "ERR"}${entry.status ? ` · HTTP ${entry.status}` : ""}`;
+      return `<li class="paper-trading-operator__journal-item" data-tone="${tone}">`
+        + `<span class="paper-trading-operator__journal-time">${time}</span>`
+        + `<span class="paper-trading-operator__journal-asset">${entry.asset.toUpperCase()} ${entry.side.toUpperCase()}</span>`
+        + `<span class="paper-trading-operator__journal-score">${score}</span>`
+        + `<span class="paper-trading-operator__journal-detail">${detail}</span>`
+        + `</li>`;
+    }).join("");
+  }
+
+  if (operatorPanelJournalBreaker instanceof HTMLElement) {
+    if (shouldTripOperatorBreaker(summary)) {
+      operatorPanelJournalBreaker.hidden = false;
+      operatorPanelJournalBreaker.textContent = `Circuit breaker aberto: ${summary.consecutiveFailures} falhas seguidas (limite ${PAPER_TRADING_OPERATOR_BREAKER_FAILURE_THRESHOLD}). Revise o token e rearme manualmente.`;
+    } else {
+      operatorPanelJournalBreaker.hidden = true;
+      operatorPanelJournalBreaker.textContent = "";
+    }
+  }
+}
+
 function bindOperatorAutoPaperPanel() {
   if (typeof document === "undefined") return;
   operatorPanelTokenInput = document.getElementById("paper-trading-operator-token-input");
@@ -2360,6 +2444,10 @@ function bindOperatorAutoPaperPanel() {
   operatorPanelFeedback = document.getElementById("paper-trading-operator-feedback");
   operatorPanelSaveButton = document.getElementById("paper-trading-operator-save");
   operatorPanelClearButton = document.getElementById("paper-trading-operator-clear");
+  operatorPanelJournalSummary = document.getElementById("paper-trading-operator-journal-summary");
+  operatorPanelJournalList = document.getElementById("paper-trading-operator-journal-list");
+  operatorPanelJournalBreaker = document.getElementById("paper-trading-operator-journal-breaker");
+  operatorPanelJournalClearButton = document.getElementById("paper-trading-operator-journal-clear");
 
   if (!(operatorPanelSaveButton instanceof HTMLElement)) return;
 
@@ -2370,6 +2458,7 @@ function bindOperatorAutoPaperPanel() {
   }
 
   syncOperatorPanelFromState();
+  renderOperatorJournalPanel();
 
   operatorPanelSaveButton.addEventListener("click", () => {
     const rawToken = operatorPanelTokenInput instanceof HTMLInputElement ? operatorPanelTokenInput.value.trim() : "";
@@ -2412,6 +2501,13 @@ function bindOperatorAutoPaperPanel() {
     operatorAutoPaperSettings = { ...operatorAutoPaperSettings, autoArmed: operatorPanelArmToggle.checked };
     saveOperatorSettingsStore(operatorAutoPaperSettings);
     syncOperatorPanelFromState();
+  });
+
+  operatorPanelJournalClearButton?.addEventListener("click", () => {
+    operatorAutoPaperJournal = { entries: [] };
+    clearOperatorJournalStore();
+    renderOperatorJournalPanel();
+    renderOperatorFeedback("Auditoria local limpa.", "info");
   });
 }
 

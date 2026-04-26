@@ -262,6 +262,11 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /function maybeDispatchOperatorAutoSignal/);
   assert.match(mainSource, /function bindOperatorAutoPaperPanel/);
   assert.match(mainSource, /getElementById\("paper-trading-operator-arm-toggle"\)/);
+  assert.match(mainSource, /paper-trading-operator-journal\.js/);
+  assert.match(mainSource, /function recordOperatorJournalResult/);
+  assert.match(mainSource, /function renderOperatorJournalPanel/);
+  assert.match(mainSource, /shouldTripOperatorBreaker\(summary\)/);
+  assert.match(mainSource, /getElementById\("paper-trading-operator-journal-list"\)/);
   assert.match(mainSource, /renderOrderFlowStrip\(orderFlow\)/);
   assert.match(mainSource, /renderTimingOrderFlowPanel\(orderFlow\)/);
   assert.match(
@@ -410,6 +415,10 @@ test("index.html expoe painel operador auto paper com toggle e feedback", async 
   assert.match(html, /id="paper-trading-operator-save"/);
   assert.match(html, /id="paper-trading-operator-clear"/);
   assert.match(html, /id="paper-trading-operator-feedback"/);
+  assert.match(html, /id="paper-trading-operator-journal-summary"/);
+  assert.match(html, /id="paper-trading-operator-journal-list"/);
+  assert.match(html, /id="paper-trading-operator-journal-breaker"/);
+  assert.match(html, /id="paper-trading-operator-journal-clear"/);
 });
 
 test("styles.css define paper-trading-operator com estados armed e feedback", async () => {
@@ -417,6 +426,9 @@ test("styles.css define paper-trading-operator com estados armed e feedback", as
   assert.match(css, /\.paper-trading-operator \{/);
   assert.match(css, /\.paper-trading-operator__status\[data-state="armed"\]/);
   assert.match(css, /\.paper-trading-operator__feedback\[data-tone="error"\]/);
+  assert.match(css, /\.paper-trading-operator__journal \{/);
+  assert.match(css, /\.paper-trading-operator__journal-item\[data-tone="error"\]/);
+  assert.match(css, /\.paper-trading-operator__journal-breaker \{/);
 });
 
 test("styles.css define live-status com pulse e estados", async () => {
