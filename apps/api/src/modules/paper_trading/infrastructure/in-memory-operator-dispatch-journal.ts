@@ -1,4 +1,12 @@
 import { randomUUID } from "node:crypto";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname } from "node:path";
 
 import {
   operatorDispatchEntrySchema,
@@ -8,6 +16,16 @@ import {
 
 const DEFAULT_MAX_ENTRIES = 100;
 const ABSOLUTE_MAX_ENTRIES = 500;
+
+export interface OperatorDispatchJournalOptions {
+  readonly maxEntries?: number;
+  /**
+   * ADR-109: caminho NDJSON opcional (append-only) para persistir cada
+   * entrada gravada e hidratar o journal no boot. Quando ausente, mantem
+   * o comportamento puramente in-memory do ADR-105.
+   */
+  readonly filePath?: string;
+}
 
 export interface RecordOperatorDispatchInput {
   readonly asset: string;
@@ -65,12 +83,67 @@ export class InMemoryOperatorDispatchJournal {
     error: 0,
   };
 
-  public constructor(maxEntries: number = DEFAULT_MAX_ENTRIES) {
-    if (!Number.isInteger(maxEntries) || maxEntries <= 0) {
+  private readonly filePath: string | null;
+
+  /**
+   * Construtor aceita tanto `number` (compat ADR-105) quanto opcoes
+   * estruturadas com `maxEntries` e/ou `filePath` (ADR-109).
+   */
+  public constructor(optionsOrMax?: number | OperatorDispatchJournalOptions) {
+    const options: OperatorDispatchJournalOptions =
+      typeof optionsOrMax === "number"
+        ? { maxEntries: optionsOrMax }
+        : optionsOrMax ?? {};
+    const requestedMax = options.maxEntries;
+    if (
+      requestedMax !== undefined &&
+      Number.isInteger(requestedMax) &&
+      requestedMax > 0
+    ) {
+      this.maxEntries = Math.min(requestedMax, ABSOLUTE_MAX_ENTRIES);
+    } else {
       this.maxEntries = DEFAULT_MAX_ENTRIES;
-      return;
     }
-    this.maxEntries = Math.min(maxEntries, ABSOLUTE_MAX_ENTRIES);
+    this.filePath = options.filePath ?? null;
+    if (this.filePath) {
+      this.ensureFile(this.filePath);
+      this.loadFromDisk(this.filePath);
+    }
+  }
+
+  private ensureFile(filePath: string): void {
+    const directory = dirname(filePath);
+    if (!existsSync(directory)) {
+      mkdirSync(directory, { recursive: true });
+    }
+    if (!existsSync(filePath)) {
+      writeFileSync(filePath, "", { encoding: "utf8" });
+    }
+  }
+
+  /**
+   * Hidrata estado a partir do arquivo NDJSON. Linhas corrompidas sao
+   * ignoradas silenciosamente para nao bloquear o boot. O ring buffer
+   * mantem apenas as ultimas `maxEntries` posicoes, mas os contadores
+   * cumulativos refletem TODAS as entradas validas — inclusive as
+   * descartadas pelo buffer — preservando o invariante do ADR-108.
+   */
+  private loadFromDisk(filePath: string): void {
+    const raw = readFileSync(filePath, { encoding: "utf8" });
+    const lines = raw.split("\n").filter((line) => line.trim().length > 0);
+    for (const line of lines) {
+      try {
+        const parsed: unknown = JSON.parse(line);
+        const entry = operatorDispatchEntrySchema.parse(parsed);
+        this.entries.push(entry);
+        this.cumulative[entry.action] += 1;
+      } catch {
+        /* linha invalida: ignora para nao quebrar boot */
+      }
+    }
+    if (this.entries.length > this.maxEntries) {
+      this.entries.splice(0, this.entries.length - this.maxEntries);
+    }
   }
 
   public record(input: RecordOperatorDispatchInput): OperatorDispatchEntry {
@@ -90,6 +163,15 @@ export class InMemoryOperatorDispatchJournal {
       this.entries.splice(0, this.entries.length - this.maxEntries);
     }
     this.cumulative[entry.action] += 1;
+    if (this.filePath) {
+      try {
+        appendFileSync(this.filePath, `${JSON.stringify(entry)}\n`, {
+          encoding: "utf8",
+        });
+      } catch {
+        /* I/O falha: degrada silenciosamente para in-memory (ADR-109) */
+      }
+    }
     return entry;
   }
 
@@ -158,6 +240,13 @@ export class InMemoryOperatorDispatchJournal {
     this.cumulative.opened = 0;
     this.cumulative.skipped = 0;
     this.cumulative.error = 0;
+    if (this.filePath) {
+      try {
+        writeFileSync(this.filePath, "", { encoding: "utf8" });
+      } catch {
+        /* I/O falha: ignora — buffer ja foi zerado em memoria */
+      }
+    }
   }
 }
 

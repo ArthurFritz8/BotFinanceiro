@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import { InMemoryOperatorDispatchJournal, renderOperatorDispatchPrometheusFragment } from "./in-memory-operator-dispatch-journal.js";
@@ -239,5 +242,135 @@ void describe("InMemoryOperatorDispatchJournal", () => {
     assert.match(fragment, /paper_trading_operator_dispatches_total\{action="skipped"\} 1/);
     assert.match(fragment, /paper_trading_operator_dispatches_total\{action="error"\} 0/);
     assert.ok(fragment.endsWith("\n"));
+  });
+
+  void describe("ADR-109: persistencia NDJSON", () => {
+    void it("anexa cada record no arquivo configurado", () => {
+      const dir = mkdtempSync(join(tmpdir(), "op-journal-"));
+      const filePath = join(dir, "journal.jsonl");
+      try {
+        const journal = new InMemoryOperatorDispatchJournal({ filePath });
+        journal.record({
+          asset: "bitcoin",
+          side: "long",
+          tier: "high",
+          confluenceScore: 88,
+          action: "opened",
+          occurredAtMs: 1_000,
+        });
+        journal.record({
+          asset: "ethereum",
+          side: "short",
+          tier: "medium",
+          confluenceScore: 55,
+          action: "skipped",
+          reason: "duplicate_open_trade",
+          occurredAtMs: 2_000,
+        });
+
+        const lines = readFileSync(filePath, "utf8")
+          .split("\n")
+          .filter((line) => line.length > 0);
+        assert.equal(lines.length, 2);
+        const first = JSON.parse(lines[0] ?? "{}") as { asset: string };
+        assert.equal(first.asset, "bitcoin");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    void it("hidrata estado a partir do disco preservando cumulativos alem do ring buffer", () => {
+      const dir = mkdtempSync(join(tmpdir(), "op-journal-"));
+      const filePath = join(dir, "journal.jsonl");
+      try {
+        const writer = new InMemoryOperatorDispatchJournal({ filePath });
+        for (let index = 0; index < 5; index += 1) {
+          writer.record({
+            asset: `asset-${index}`,
+            side: "long",
+            tier: "high",
+            confluenceScore: 80,
+            action: "opened",
+            occurredAtMs: 1_000 + index,
+          });
+        }
+        writer.record({
+          asset: "solana",
+          side: "long",
+          tier: "low",
+          confluenceScore: 35,
+          action: "error",
+          reason: "below_min_tier",
+          occurredAtMs: 2_000,
+        });
+
+        const reopened = new InMemoryOperatorDispatchJournal({
+          filePath,
+          maxEntries: 2,
+        });
+        const totals = reopened.cumulativeTotals();
+        assert.equal(totals.opened, 5);
+        assert.equal(totals.error, 1);
+        assert.equal(totals.skipped, 0);
+        assert.equal(totals.total, 6);
+        // Ring buffer mantem so as 2 ultimas entradas apos hidratacao
+        assert.equal(reopened.size(), 2);
+        const snapshot = reopened.snapshot();
+        assert.equal(snapshot.entries[0]?.asset, "solana");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    void it("clear trunca o arquivo e zera cumulativos", () => {
+      const dir = mkdtempSync(join(tmpdir(), "op-journal-"));
+      const filePath = join(dir, "journal.jsonl");
+      try {
+        const journal = new InMemoryOperatorDispatchJournal({ filePath });
+        journal.record({
+          asset: "bitcoin",
+          side: "long",
+          tier: "high",
+          confluenceScore: 88,
+          action: "opened",
+          occurredAtMs: 1_000,
+        });
+        assert.ok(readFileSync(filePath, "utf8").length > 0);
+        journal.clear();
+        assert.equal(readFileSync(filePath, "utf8"), "");
+        assert.equal(journal.cumulativeTotals().total, 0);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    void it("ignora linhas corrompidas durante a hidratacao", () => {
+      const dir = mkdtempSync(join(tmpdir(), "op-journal-"));
+      const filePath = join(dir, "journal.jsonl");
+      try {
+        const seed = new InMemoryOperatorDispatchJournal({ filePath });
+        seed.record({
+          asset: "bitcoin",
+          side: "long",
+          tier: "high",
+          confluenceScore: 88,
+          action: "opened",
+          occurredAtMs: 1_000,
+        });
+        // Corrompe o arquivo: linha valida + linha invalida + JSON valido sem schema
+        const valid = readFileSync(filePath, "utf8");
+        writeFileSync(
+          filePath,
+          `${valid}invalid_json_line\n{"foo":"bar"}\n`,
+          { encoding: "utf8" },
+        );
+
+        const reopened = new InMemoryOperatorDispatchJournal({ filePath });
+        assert.equal(reopened.size(), 1);
+        assert.equal(reopened.cumulativeTotals().opened, 1);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 });

@@ -118,7 +118,11 @@ export function buildApp() {
 
   // ADR-108: criamos o journal cedo para que o coletor Prometheus consiga
   // ler os contadores cumulativos a cada scrape de `/internal/metrics`.
-  const operatorDispatchJournal = new InMemoryOperatorDispatchJournal();
+  // ADR-109: hidratamos a partir do NDJSON em disco para sobreviver a
+  // restarts mantendo cumulativos e ring buffer.
+  const operatorDispatchJournal = new InMemoryOperatorDispatchJournal({
+    filePath: env.OPERATOR_DISPATCH_JOURNAL_FILE,
+  });
 
   registerPrometheusMetrics(app, {
     enabled: env.METRICS_ENABLED,
