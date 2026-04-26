@@ -37,3 +37,6 @@ tests*.tap
 
 # Paper Trading local data (Wave 15)
 apps/api/data/*.jsonl
+
+# ADR-109: stray journal directory when tests run with cwd=apps/api
+apps/api/apps/
