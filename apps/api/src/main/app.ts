@@ -33,6 +33,7 @@ import {
 import { PaperTradingService } from "../modules/paper_trading/application/paper-trading-service.js";
 import { AutoPaperTradingBridge } from "../modules/paper_trading/application/auto-paper-trading-bridge.js";
 import { JsonlTradeStore } from "../modules/paper_trading/infrastructure/jsonl-trade-store.js";
+import { InMemoryOperatorDispatchJournal } from "../modules/paper_trading/infrastructure/in-memory-operator-dispatch-journal.js";
 import { PaperTradingController } from "../modules/paper_trading/interface/paper-trading-controller.js";
 import { AutoPaperTradingController } from "../modules/paper_trading/interface/auto-paper-trading-controller.js";
 import {
@@ -175,8 +176,10 @@ export function buildApp() {
       },
     },
   });
+  const operatorDispatchJournal = new InMemoryOperatorDispatchJournal();
   const autoPaperTradingController = new AutoPaperTradingController(
     autoPaperTradingBridge,
+    operatorDispatchJournal,
   );
 
   if (env.PAPER_TRADING_ENABLED) {

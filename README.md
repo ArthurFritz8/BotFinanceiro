@@ -160,6 +160,7 @@ Politica de retencao:
 74. ADR 102: `docs/ADR/ADR-102-rota-operador-paper-trading-auto-signal.md`
 75. ADR 103: `docs/ADR/ADR-103-operador-auto-paper-trading-frontend.md`
 76. ADR 104: `docs/ADR/ADR-104-journal-circuit-breaker-operator-dispatch.md`
+77. ADR 105: `docs/ADR/ADR-105-journal-operator-dispatch-backend.md`
 
 ## Relatorio completo desta entrega
 
@@ -176,6 +177,13 @@ curl -X POST "http://localhost:3000/v1/paper-trading/operator/auto-signal" \
 	-H "content-type: application/json" \
 	-H "x-paper-trading-operator-token: $PAPER_TRADING_OPERATOR_TOKEN" \
 	-d '{"asset":"bitcoin","side":"long","entryPrice":100,"stopPrice":95,"targetPrice":112,"confluenceScore":88,"tier":"high"}'
+```
+
+Inspecione a auditoria centralizada (ADR-105) — ring buffer in-memory dos disparos recentes:
+
+```bash
+curl "http://localhost:3000/v1/paper-trading/operator/journal?limit=50" \
+	-H "x-paper-trading-operator-token: $PAPER_TRADING_OPERATOR_TOKEN"
 ```
 
 ## Exemplos de chamadas internas

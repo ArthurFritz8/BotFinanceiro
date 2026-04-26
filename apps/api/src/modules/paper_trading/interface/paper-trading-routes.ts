@@ -53,6 +53,11 @@ export function registerPaperTradingPublicRoutes(
       operatorRouteOptions,
       autoController.submitConfluenceSignal,
     );
+    app.get(
+      "/paper-trading/operator/journal",
+      operatorRouteOptions,
+      autoController.listOperatorJournal,
+    );
   }
 }
 
