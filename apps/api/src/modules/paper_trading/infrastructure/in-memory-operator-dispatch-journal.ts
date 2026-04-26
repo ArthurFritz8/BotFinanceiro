@@ -38,10 +38,32 @@ export interface OperatorDispatchSnapshotQuery {
  * centralizada do servidor para auditoria cross-device. Persistencia em
  * disco fica para evolucao futura (ADR proprio se a demanda surgir).
  */
+export interface OperatorDispatchCumulativeTotals {
+  readonly opened: number;
+  readonly skipped: number;
+  readonly error: number;
+  readonly total: number;
+}
+
 export class InMemoryOperatorDispatchJournal {
   private readonly entries: OperatorDispatchEntry[] = [];
 
   private readonly maxEntries: number;
+
+  /**
+   * Contadores cumulativos por `action`, INDEPENDENTES do ring buffer:
+   * cresce monotonicamente ao longo da vida do processo e nao decrementa
+   * quando entradas antigas sao despejadas. Reseta apenas em `clear()`.
+   *
+   * Servem como counter Prometheus (ADR-108) e como base para taxas
+   * observacionais cross-window — o snapshot filtrado segue refletindo
+   * apenas as entradas presentes no buffer.
+   */
+  private readonly cumulative: { opened: number; skipped: number; error: number } = {
+    opened: 0,
+    skipped: 0,
+    error: 0,
+  };
 
   public constructor(maxEntries: number = DEFAULT_MAX_ENTRIES) {
     if (!Number.isInteger(maxEntries) || maxEntries <= 0) {
@@ -67,7 +89,17 @@ export class InMemoryOperatorDispatchJournal {
     if (this.entries.length > this.maxEntries) {
       this.entries.splice(0, this.entries.length - this.maxEntries);
     }
+    this.cumulative[entry.action] += 1;
     return entry;
+  }
+
+  public cumulativeTotals(): OperatorDispatchCumulativeTotals {
+    return {
+      opened: this.cumulative.opened,
+      skipped: this.cumulative.skipped,
+      error: this.cumulative.error,
+      total: this.cumulative.opened + this.cumulative.skipped + this.cumulative.error,
+    };
   }
 
   public snapshot(
@@ -123,5 +155,28 @@ export class InMemoryOperatorDispatchJournal {
 
   public clear(): void {
     this.entries.length = 0;
+    this.cumulative.opened = 0;
+    this.cumulative.skipped = 0;
+    this.cumulative.error = 0;
   }
+}
+
+/**
+ * Coletor Prometheus (ADR-108) que renderiza os contadores cumulativos
+ * do journal como counter unico `paper_trading_operator_dispatches_total`
+ * com label `action="opened|skipped|error"`. Cardinalidade fixa em 3
+ * series, independente do volume de ativos auditados.
+ */
+export function renderOperatorDispatchPrometheusFragment(
+  journal: Pick<InMemoryOperatorDispatchJournal, "cumulativeTotals">,
+): string {
+  const totals = journal.cumulativeTotals();
+  const lines = [
+    "# HELP paper_trading_operator_dispatches_total Total operator auto-signal dispatches recorded since process start.",
+    "# TYPE paper_trading_operator_dispatches_total counter",
+    `paper_trading_operator_dispatches_total{action="opened"} ${totals.opened}`,
+    `paper_trading_operator_dispatches_total{action="skipped"} ${totals.skipped}`,
+    `paper_trading_operator_dispatches_total{action="error"} ${totals.error}`,
+  ];
+  return `${lines.join("\n")}\n`;
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { InMemoryOperatorDispatchJournal } from "./in-memory-operator-dispatch-journal.js";
+import { InMemoryOperatorDispatchJournal, renderOperatorDispatchPrometheusFragment } from "./in-memory-operator-dispatch-journal.js";
 
 void describe("InMemoryOperatorDispatchJournal", () => {
   void it("registra entrada e calcula contadores agregados", () => {
@@ -149,5 +149,95 @@ void describe("InMemoryOperatorDispatchJournal", () => {
     assert.equal(onlyBitcoinOpened.total, 1);
     assert.equal(onlyBitcoinOpened.opened, 1);
     assert.equal(onlyBitcoinOpened.entries[0]?.asset, "Bitcoin");
+  });
+
+  void it("ADR-108: contadores cumulativos crescem por action e sobrevivem ao ring buffer", () => {
+    const journal = new InMemoryOperatorDispatchJournal(2);
+    for (let index = 0; index < 5; index += 1) {
+      journal.record({
+        asset: "bitcoin",
+        side: "long",
+        tier: "high",
+        confluenceScore: 80,
+        action: "opened",
+        occurredAtMs: 1_000 + index,
+      });
+    }
+    journal.record({
+      asset: "ethereum",
+      side: "short",
+      tier: "medium",
+      confluenceScore: 55,
+      action: "skipped",
+      reason: "duplicate_open_trade",
+      occurredAtMs: 2_000,
+    });
+    journal.record({
+      asset: "solana",
+      side: "long",
+      tier: "low",
+      confluenceScore: 35,
+      action: "error",
+      reason: "below_min_tier",
+      occurredAtMs: 3_000,
+    });
+
+    const totals = journal.cumulativeTotals();
+    // Ring buffer mantem so 2 entradas, mas o cumulativo deve refletir TODAS.
+    assert.equal(journal.size(), 2);
+    assert.equal(totals.opened, 5);
+    assert.equal(totals.skipped, 1);
+    assert.equal(totals.error, 1);
+    assert.equal(totals.total, 7);
+  });
+
+  void it("ADR-108: clear() reseta contadores cumulativos", () => {
+    const journal = new InMemoryOperatorDispatchJournal();
+    journal.record({
+      asset: "bitcoin",
+      side: "long",
+      tier: "high",
+      confluenceScore: 90,
+      action: "opened",
+      occurredAtMs: 1_000,
+    });
+    assert.equal(journal.cumulativeTotals().total, 1);
+    journal.clear();
+    assert.deepEqual(journal.cumulativeTotals(), {
+      opened: 0,
+      skipped: 0,
+      error: 0,
+      total: 0,
+    });
+  });
+
+  void it("ADR-108: renderOperatorDispatchPrometheusFragment emite counter com 3 series", () => {
+    const journal = new InMemoryOperatorDispatchJournal();
+    journal.record({
+      asset: "bitcoin",
+      side: "long",
+      tier: "high",
+      confluenceScore: 88,
+      action: "opened",
+      occurredAtMs: 1_000,
+    });
+    journal.record({
+      asset: "ethereum",
+      side: "short",
+      tier: "medium",
+      confluenceScore: 60,
+      action: "skipped",
+      reason: "duplicate_open_trade",
+      occurredAtMs: 2_000,
+    });
+
+    const fragment = renderOperatorDispatchPrometheusFragment(journal);
+
+    assert.match(fragment, /# HELP paper_trading_operator_dispatches_total /);
+    assert.match(fragment, /# TYPE paper_trading_operator_dispatches_total counter/);
+    assert.match(fragment, /paper_trading_operator_dispatches_total\{action="opened"\} 1/);
+    assert.match(fragment, /paper_trading_operator_dispatches_total\{action="skipped"\} 1/);
+    assert.match(fragment, /paper_trading_operator_dispatches_total\{action="error"\} 0/);
+    assert.ok(fragment.endsWith("\n"));
   });
 });

@@ -146,3 +146,58 @@ void it("prometheus metrics: enabled=false nao registra hook nem rota", async ()
     await app.close();
   }
 });
+
+void it("ADR-108: collectors anexam fragmento Prometheus customizado ao scrape", async () => {
+  const app = Fastify({ logger: false });
+  registerPrometheusMetrics(app, {
+    enabled: true,
+    collectors: [
+      () =>
+        [
+          "# HELP custom_business_total Counter de teste.",
+          "# TYPE custom_business_total counter",
+          'custom_business_total{kind="alpha"} 7',
+        ].join("\n"),
+    ],
+  });
+  app.get("/v1/ping", () => ({ ok: true }));
+  try {
+    await app.inject({ method: "GET", url: "/v1/ping" });
+    const metrics = await app.inject({
+      method: "GET",
+      url: "/internal/metrics",
+      headers: { "x-internal-token": "test_internal_token_12345" },
+    });
+    assert.equal(metrics.statusCode, 200);
+    assert.match(metrics.payload, /# HELP custom_business_total Counter de teste\./);
+    assert.match(metrics.payload, /custom_business_total\{kind="alpha"\} 7/);
+    // Built-in continuam presentes.
+    assert.match(metrics.payload, /http_requests_total/);
+  } finally {
+    await app.close();
+  }
+});
+
+void it("ADR-108: collector que lanca nao derruba o scrape (failure-open)", async () => {
+  const app = Fastify({ logger: false });
+  registerPrometheusMetrics(app, {
+    enabled: true,
+    collectors: [
+      () => {
+        throw new Error("collector_boom");
+      },
+      () => 'custom_safe_total{ok="1"} 1',
+    ],
+  });
+  try {
+    const metrics = await app.inject({
+      method: "GET",
+      url: "/internal/metrics",
+      headers: { "x-internal-token": "test_internal_token_12345" },
+    });
+    assert.equal(metrics.statusCode, 200);
+    assert.match(metrics.payload, /custom_safe_total\{ok="1"\} 1/);
+  } finally {
+    await app.close();
+  }
+});

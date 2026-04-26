@@ -163,6 +163,7 @@ Politica de retencao:
 77. ADR 105: `docs/ADR/ADR-105-journal-operator-dispatch-backend.md`
 78. ADR 106: `docs/ADR/ADR-106-filtros-journal-operator-dispatch.md`
 79. ADR 107: `docs/ADR/ADR-107-painel-frontend-auditoria-centralizada-operator.md`
+80. ADR 108: `docs/ADR/ADR-108-metrica-prometheus-operator-dispatch.md`
 
 ## Relatorio completo desta entrega
 
@@ -196,6 +197,14 @@ curl "http://localhost:3000/v1/paper-trading/operator/journal?from=2026-04-26T00
 ```
 
 Painel frontend (ADR-107): dentro do Operator Desk, abra a secao "Auditoria centralizada (servidor)" para filtrar action/asset/from/to e listar os disparos sem precisar de `curl`. O painel reusa o token salvo via `paper-trading-operator-client.js` e nao expoe credencial alguma no bundle.
+
+Counter Prometheus (ADR-108): com `METRICS_ENABLED=true`, o scrape `/internal/metrics` passa a expor `paper_trading_operator_dispatches_total{action="opened|skipped|error"}` (cardinalidade fixa em 3 series). Permite alertas como `rate(...{action="error"}[5m]) > 0.1` e calculo de taxa de aceitacao cumulativa cross-window.
+
+```bash
+curl -H "x-internal-token: $INTERNAL_API_TOKEN" \
+	http://localhost:3000/internal/metrics | grep paper_trading_operator
+```
+
 
 ## Exemplos de chamadas internas
 

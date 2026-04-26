@@ -5,6 +5,14 @@ import { logger } from "../../shared/logger/logger.js";
 
 interface PrometheusMetricsOptions {
   readonly enabled: boolean;
+  /**
+   * Coletores adicionais chamados a cada scrape de `/internal/metrics`.
+   * Cada coletor retorna um fragmento de texto Prometheus ja formatado
+   * (com `# HELP` / `# TYPE` quando aplicavel). Sao concatenados apos as
+   * metricas built-in. Falhas individuais sao logadas e ignoradas para
+   * nao derrubar o scrape inteiro (failure-open observabilidade).
+   */
+  readonly collectors?: ReadonlyArray<() => string>;
 }
 
 interface CounterEntry {
@@ -167,6 +175,7 @@ export function registerPrometheusMetrics(
   }
 
   const registry = new PrometheusRegistry();
+  const collectors = options.collectors ?? [];
 
   app.addHook("onResponse", (request: FastifyRequest, reply: FastifyReply, done: () => void) => {
     const route = resolveRouteTemplate(request);
@@ -206,9 +215,19 @@ export function registerPrometheusMetrics(
       }
     },
     handler: (request: FastifyRequest, reply: FastifyReply) => {
-      const body = registry.render();
+      const fragments: string[] = [registry.render()];
+      for (const collector of collectors) {
+        try {
+          const fragment = collector();
+          if (typeof fragment === "string" && fragment.length > 0) {
+            fragments.push(fragment.endsWith("\n") ? fragment : `${fragment}\n`);
+          }
+        } catch (error) {
+          logger.warn({ err: error }, "prometheus_collector_failed");
+        }
+      }
       void reply.header("content-type", PROMETHEUS_CONTENT_TYPE);
-      void reply.send(body);
+      void reply.send(fragments.join(""));
     },
   });
 
