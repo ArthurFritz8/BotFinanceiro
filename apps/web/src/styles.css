@@ -7483,6 +7483,108 @@ body.sidebar-collapsed .app-shell {
 }
 
 /* ============================================================================
+   ADR-103 — Painel Operador Auto Paper Trading
+   UI restrita ao Paper Trading panel. Token armazenado apenas em localStorage
+   do navegador do operador, com toggle de armar e feedback acessivel.
+   ============================================================================ */
+.paper-trading-operator {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.7), rgba(15, 23, 42, 0.4));
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+}
+.paper-trading-operator__summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-weight: 600;
+  gap: 0.75rem;
+  justify-content: space-between;
+  list-style: none;
+}
+.paper-trading-operator__summary::-webkit-details-marker { display: none; }
+.paper-trading-operator__title { color: #f8fafc; font-size: 0.92rem; letter-spacing: 0.02em; }
+.paper-trading-operator__status {
+  background: rgba(148, 163, 184, 0.18);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 999px;
+  color: rgba(226, 232, 240, 0.92);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 0.2rem 0.6rem;
+  text-transform: uppercase;
+}
+.paper-trading-operator__status[data-state="armed"] {
+  background: rgba(34, 197, 94, 0.18);
+  border-color: rgba(34, 197, 94, 0.45);
+  color: #bbf7d0;
+}
+.paper-trading-operator__body {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.85rem;
+}
+.paper-trading-operator__hint {
+  color: rgba(203, 213, 225, 0.85);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+.paper-trading-operator__hint code {
+  background: rgba(15, 23, 42, 0.65);
+  border-radius: 4px;
+  font-size: 0.74rem;
+  padding: 0.05rem 0.35rem;
+}
+.paper-trading-operator__field {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+}
+.paper-trading-operator__input {
+  background: rgba(15, 23, 42, 0.78);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  color: #f8fafc;
+  font-family: ui-monospace, "SFMono-Regular", monospace;
+  font-size: 0.85rem;
+  padding: 0.55rem 0.7rem;
+}
+.paper-trading-operator__input:focus { border-color: rgba(96, 165, 250, 0.6); outline: none; }
+.paper-trading-operator__toggle {
+  align-items: center;
+  display: flex;
+  font-size: 0.78rem;
+  gap: 0.5rem;
+}
+.paper-trading-operator__actions { display: flex; gap: 0.5rem; }
+.paper-trading-operator__button {
+  background: linear-gradient(180deg, rgba(34, 197, 94, 0.25), rgba(34, 197, 94, 0.1));
+  border: 1px solid rgba(34, 197, 94, 0.45);
+  border-radius: 8px;
+  color: #bbf7d0;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.5rem 0.85rem;
+  transition: filter 120ms ease;
+}
+.paper-trading-operator__button:hover { filter: brightness(1.15); }
+.paper-trading-operator__button--ghost {
+  background: transparent;
+  border-color: rgba(148, 163, 184, 0.35);
+  color: rgba(226, 232, 240, 0.9);
+}
+.paper-trading-operator__feedback { font-size: 0.76rem; min-height: 1.1rem; }
+.paper-trading-operator__feedback[data-tone="ok"] { color: #86efac; }
+.paper-trading-operator__feedback[data-tone="warn"] { color: #fcd34d; }
+.paper-trading-operator__feedback[data-tone="error"] { color: #fca5a5; }
+@media (prefers-reduced-motion: reduce) {
+  .paper-trading-operator__button { transition: none; }
+}
+
+/* ============================================================================
    ADR-078 — Hub de Inteligencia Fundamentalista (refator aba Noticias)
    Sentimento de mercado, palavras-chave, narrativa AI, tabs Noticias/Eventos
    e Radar Macro institucional. Glassmorphism dark premium consistente.

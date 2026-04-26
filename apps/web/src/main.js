@@ -39,6 +39,15 @@ import { buildExecutionPlanSnapshot } from "./modules/chart-lab/quant/execution-
 import { buildExecutionQualitySnapshot } from "./modules/chart-lab/quant/execution-quality.js";
 import { buildExecutionAutomationGuardSnapshot } from "./modules/chart-lab/quant/execution-automation.js";
 import {
+  buildAutoSignalPayload as buildOperatorAutoSignalPayload,
+  canSubmitAutoSignal as canSubmitOperatorAutoSignal,
+  clearOperatorSettings as clearOperatorSettingsStore,
+  loadOperatorSettings as loadOperatorSettingsStore,
+  PAPER_TRADING_OPERATOR_MIN_TOKEN_LENGTH,
+  saveOperatorSettings as saveOperatorSettingsStore,
+  submitAutoSignal as submitOperatorAutoSignal,
+} from "./modules/chart-lab/quant/paper-trading-operator-client.js";
+import {
   appendExecutionJournalEntry,
   createExecutionJournalEntry,
   createExecutionJournalState,
@@ -2224,6 +2233,187 @@ function schedulePersistExecutionJournalState() {
 }
 
 hydrateExecutionJournalStateFromStorage();
+
+// ============================================================================
+// Auto Paper Trading - Operador (ADR-103)
+// ----------------------------------------------------------------------------
+// Estado em memoria do operador + helpers DOM. O token nunca eh logado e nao
+// entra no bundle: vive apenas no localStorage do navegador onde foi colado.
+// O dispatcher so envia quando o Auto Guard (ADR-101) liberar e respeita um
+// cooldown idempotente para nao reenviar o mesmo plano em rajada.
+// ============================================================================
+let operatorAutoPaperSettings = loadOperatorSettingsStore();
+let operatorLastDispatchKey = "";
+let operatorLastDispatchAtMs = 0;
+const OPERATOR_DISPATCH_COOLDOWN_MS = 60_000;
+
+function getOperatorAutoPaperSettings() {
+  return { ...operatorAutoPaperSettings };
+}
+
+function tierFromExecutionQuality(quality) {
+  if (!quality || typeof quality !== "object") return "low";
+  if (quality.status === "prime") return "high";
+  if (quality.status === "qualified") return "medium";
+  return "low";
+}
+
+function buildOperatorPayloadFromContext({ executionPlan, executionQuality, snapshot }) {
+  if (!executionPlan || !snapshot) return null;
+  const entry = executionPlan.entry;
+  const invalidation = executionPlan.invalidation;
+  const targets = Array.isArray(executionPlan.targets) ? executionPlan.targets : [];
+  const primaryTarget = targets[0];
+
+  if (!entry || !invalidation || !primaryTarget) return null;
+
+  const entryLow = Number(entry.low);
+  const entryHigh = Number(entry.high);
+  const entryPrice = Number.isFinite(entryLow) && Number.isFinite(entryHigh)
+    ? (entryLow + entryHigh) / 2
+    : Number.NaN;
+
+  return buildOperatorAutoSignalPayload({
+    asset: typeof snapshot.assetId === "string" ? snapshot.assetId : "",
+    confluenceScore: executionQuality?.score ?? 0,
+    entryPrice,
+    side: executionPlan.side,
+    stopPrice: invalidation.price,
+    targetPrice: primaryTarget.price,
+    tier: tierFromExecutionQuality(executionQuality),
+  });
+}
+
+function maybeDispatchOperatorAutoSignal({ automationGuard, executionPlan, executionQuality, snapshot }) {
+  const settings = operatorAutoPaperSettings;
+  const payload = buildOperatorPayloadFromContext({ executionPlan, executionQuality, snapshot });
+
+  if (!canSubmitOperatorAutoSignal({ automationGuard, operatorSettings: settings, payload })) {
+    return;
+  }
+
+  const dispatchKey = `${payload.asset}|${payload.side}|${payload.entryPrice.toFixed(6)}|${payload.stopPrice.toFixed(6)}|${payload.targetPrice.toFixed(6)}`;
+  const nowMs = Date.now();
+
+  if (
+    dispatchKey === operatorLastDispatchKey
+    && nowMs - operatorLastDispatchAtMs < OPERATOR_DISPATCH_COOLDOWN_MS
+  ) {
+    return;
+  }
+
+  operatorLastDispatchKey = dispatchKey;
+  operatorLastDispatchAtMs = nowMs;
+
+  void submitOperatorAutoSignal({
+    baseUrl: API_BASE_URL,
+    payload,
+    token: settings.token,
+  }).then((result) => {
+    if (typeof renderOperatorFeedback === "function") {
+      if (result.ok) {
+        renderOperatorFeedback(`Auto-paper enviado: ${payload.asset.toUpperCase()} ${payload.side.toUpperCase()} @ ${payload.entryPrice}`, "ok");
+      } else {
+        renderOperatorFeedback(`Auto-paper falhou (${result.error?.code ?? "ERR"}): ${result.error?.message ?? "erro desconhecido"}`, "error");
+        // Em 401, desarmar para forcar revisao manual do token.
+        if (result.status === 401) {
+          operatorAutoPaperSettings = { ...settings, autoArmed: false };
+          saveOperatorSettingsStore(operatorAutoPaperSettings);
+          syncOperatorPanelFromState();
+        }
+      }
+    }
+  });
+}
+
+let operatorPanelTokenInput = null;
+let operatorPanelArmToggle = null;
+let operatorPanelStatusBadge = null;
+let operatorPanelFeedback = null;
+let operatorPanelSaveButton = null;
+let operatorPanelClearButton = null;
+
+function renderOperatorFeedback(message, tone = "info") {
+  if (!(operatorPanelFeedback instanceof HTMLElement)) return;
+  operatorPanelFeedback.textContent = message ?? "";
+  operatorPanelFeedback.dataset.tone = tone;
+}
+
+function syncOperatorPanelFromState() {
+  const settings = operatorAutoPaperSettings;
+  if (operatorPanelArmToggle instanceof HTMLInputElement) {
+    operatorPanelArmToggle.checked = settings.autoArmed === true;
+    operatorPanelArmToggle.disabled = !settings.token || settings.token.length < PAPER_TRADING_OPERATOR_MIN_TOKEN_LENGTH;
+  }
+  if (operatorPanelStatusBadge instanceof HTMLElement) {
+    const armed = settings.autoArmed === true && settings.token.length >= PAPER_TRADING_OPERATOR_MIN_TOKEN_LENGTH;
+    operatorPanelStatusBadge.textContent = armed ? "ARMADO" : "DESARMADO";
+    operatorPanelStatusBadge.dataset.state = armed ? "armed" : "disarmed";
+  }
+}
+
+function bindOperatorAutoPaperPanel() {
+  if (typeof document === "undefined") return;
+  operatorPanelTokenInput = document.getElementById("paper-trading-operator-token-input");
+  operatorPanelArmToggle = document.getElementById("paper-trading-operator-arm-toggle");
+  operatorPanelStatusBadge = document.getElementById("paper-trading-operator-status");
+  operatorPanelFeedback = document.getElementById("paper-trading-operator-feedback");
+  operatorPanelSaveButton = document.getElementById("paper-trading-operator-save");
+  operatorPanelClearButton = document.getElementById("paper-trading-operator-clear");
+
+  if (!(operatorPanelSaveButton instanceof HTMLElement)) return;
+
+  if (operatorPanelTokenInput instanceof HTMLInputElement && operatorAutoPaperSettings.token) {
+    // Mostramos comprimento via placeholder para o operador saber que ja existe um token salvo,
+    // sem nunca expor o valor real.
+    operatorPanelTokenInput.placeholder = `${operatorAutoPaperSettings.token.length} caracteres salvos`;
+  }
+
+  syncOperatorPanelFromState();
+
+  operatorPanelSaveButton.addEventListener("click", () => {
+    const rawToken = operatorPanelTokenInput instanceof HTMLInputElement ? operatorPanelTokenInput.value.trim() : "";
+    if (rawToken.length < PAPER_TRADING_OPERATOR_MIN_TOKEN_LENGTH) {
+      renderOperatorFeedback(`Token precisa de ao menos ${PAPER_TRADING_OPERATOR_MIN_TOKEN_LENGTH} caracteres.`, "error");
+      return;
+    }
+    const armed = operatorPanelArmToggle instanceof HTMLInputElement ? operatorPanelArmToggle.checked : false;
+    operatorAutoPaperSettings = { autoArmed: armed, token: rawToken };
+    const persisted = saveOperatorSettingsStore(operatorAutoPaperSettings);
+    if (operatorPanelTokenInput instanceof HTMLInputElement) {
+      operatorPanelTokenInput.value = "";
+      operatorPanelTokenInput.placeholder = `${rawToken.length} caracteres salvos`;
+    }
+    syncOperatorPanelFromState();
+    renderOperatorFeedback(
+      persisted ? "Credenciais salvas neste navegador." : "Credenciais aplicadas em memoria (storage indisponivel).",
+      persisted ? "ok" : "warn",
+    );
+  });
+
+  operatorPanelClearButton?.addEventListener("click", () => {
+    operatorAutoPaperSettings = { autoArmed: false, token: "" };
+    clearOperatorSettingsStore();
+    if (operatorPanelTokenInput instanceof HTMLInputElement) {
+      operatorPanelTokenInput.value = "";
+      operatorPanelTokenInput.placeholder = "paper_op_•••";
+    }
+    syncOperatorPanelFromState();
+    renderOperatorFeedback("Credenciais limpas.", "info");
+  });
+
+  operatorPanelArmToggle?.addEventListener("change", () => {
+    if (!(operatorPanelArmToggle instanceof HTMLInputElement)) return;
+    if (operatorPanelArmToggle.checked && operatorAutoPaperSettings.token.length < PAPER_TRADING_OPERATOR_MIN_TOKEN_LENGTH) {
+      operatorPanelArmToggle.checked = false;
+      renderOperatorFeedback("Salve um token valido antes de armar.", "warn");
+      return;
+    }
+    operatorAutoPaperSettings = { ...operatorAutoPaperSettings, autoArmed: operatorPanelArmToggle.checked };
+    saveOperatorSettingsStore(operatorAutoPaperSettings);
+    syncOperatorPanelFromState();
+  });
+}
 
 function mapSymbolToExchange(symbol, exchange) {
   const normalizedSymbol = sanitizeTerminalSymbol(symbol);
@@ -13134,6 +13324,17 @@ function renderTimingDeskHtml(analysis, snapshot, currency) {
   });
   updateExecutionChartVisualState(executionGate, executionPlan, executionJournal.summary, executionQuality);
   renderChartExecutionHud({ currency, currentPrice, executionGate, executionPlan, executionQuality });
+  latestTimingExecutionContext = {
+    ...(latestTimingExecutionContext ?? {}),
+    automationGuard,
+    executionQuality,
+  };
+  maybeDispatchOperatorAutoSignal({
+    automationGuard,
+    executionPlan,
+    executionQuality,
+    snapshot,
+  });
   const utcHourNow = new Date(nowMs).getUTCHours();
 
   const macroRadar = snapshot?.institutional?.macroRadar;
@@ -21318,6 +21519,7 @@ setupAirdropRadarPanel();
 setupMemecoinRadarPanel();
 initPushNotifications();
 initPaperTradingPanel();
+bindOperatorAutoPaperPanel();
 initBacktestingPanel();
 bootstrapLiveSignals({
   // ADR-080 — Auditar Sinal: abre o ativo no Chart Lab e dispara

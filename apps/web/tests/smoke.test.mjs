@@ -258,6 +258,10 @@ test("main.js aplica AUTO inteligente com estabilidade no chart", async () => {
   assert.match(mainSource, /function renderChartExecutionHud\(\{ currency, currentPrice, executionGate, executionPlan, executionQuality \}\)/);
   assert.match(mainSource, /chartExecutionHudElement\.dataset\.status/);
   assert.match(mainSource, /function clearChartExecutionHud\(\)/);
+  assert.match(mainSource, /paper-trading-operator-client\.js/);
+  assert.match(mainSource, /function maybeDispatchOperatorAutoSignal/);
+  assert.match(mainSource, /function bindOperatorAutoPaperPanel/);
+  assert.match(mainSource, /getElementById\("paper-trading-operator-arm-toggle"\)/);
   assert.match(mainSource, /renderOrderFlowStrip\(orderFlow\)/);
   assert.match(mainSource, /renderTimingOrderFlowPanel\(orderFlow\)/);
   assert.match(
@@ -396,6 +400,23 @@ test("index.html expoe indicador de live status para o chart", async () => {
   assert.match(html, /id="chart-live-status"/);
   assert.match(html, /class="live-status live-status--offline"/);
   assert.match(html, /aria-live="polite"/);
+});
+
+test("index.html expoe painel operador auto paper com toggle e feedback", async () => {
+  const html = await readWebFile("index.html");
+  assert.match(html, /id="paper-trading-operator-panel"/);
+  assert.match(html, /id="paper-trading-operator-token-input"/);
+  assert.match(html, /id="paper-trading-operator-arm-toggle"/);
+  assert.match(html, /id="paper-trading-operator-save"/);
+  assert.match(html, /id="paper-trading-operator-clear"/);
+  assert.match(html, /id="paper-trading-operator-feedback"/);
+});
+
+test("styles.css define paper-trading-operator com estados armed e feedback", async () => {
+  const css = await readWebFile("src/styles.css");
+  assert.match(css, /\.paper-trading-operator \{/);
+  assert.match(css, /\.paper-trading-operator__status\[data-state="armed"\]/);
+  assert.match(css, /\.paper-trading-operator__feedback\[data-tone="error"\]/);
 });
 
 test("styles.css define live-status com pulse e estados", async () => {

@@ -158,6 +158,7 @@ Politica de retencao:
 72. ADR 100: `docs/ADR/ADR-100-hud-execucao-chart-lab.md`
 73. ADR 101: `docs/ADR/ADR-101-auto-guard-execucao-controlada.md`
 74. ADR 102: `docs/ADR/ADR-102-rota-operador-paper-trading-auto-signal.md`
+75. ADR 103: `docs/ADR/ADR-103-operador-auto-paper-trading-frontend.md`
 
 ## Relatorio completo desta entrega
 

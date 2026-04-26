@@ -1102,6 +1102,41 @@
         </div>
         <div class="paper-trading__stats" aria-live="polite">Carregando estatísticas...</div>
         <div class="paper-trading__trades" aria-live="polite"></div>
+
+        <details id="paper-trading-operator-panel" class="paper-trading-operator">
+          <summary class="paper-trading-operator__summary">
+            <span class="paper-trading-operator__title">Auto Paper · Operador</span>
+            <span class="paper-trading-operator__status" id="paper-trading-operator-status" data-state="disarmed">DESARMADO</span>
+          </summary>
+          <div class="paper-trading-operator__body">
+            <p class="paper-trading-operator__hint">
+              Cole o token <code>PAPER_TRADING_OPERATOR_TOKEN</code> definido no backend. Ele fica restrito a
+              este navegador (localStorage) e nunca eh enviado para terceiros. Auto-paper so dispara quando o
+              Auto Guard estiver <strong>AUTO PAPER READY</strong>.
+            </p>
+            <label class="paper-trading-operator__field" for="paper-trading-operator-token-input">
+              <span>Token do operador (mínimo 16 caracteres)</span>
+              <input
+                type="password"
+                id="paper-trading-operator-token-input"
+                class="paper-trading-operator__input"
+                autocomplete="off"
+                spellcheck="false"
+                inputmode="text"
+                placeholder="paper_op_•••"
+              />
+            </label>
+            <label class="paper-trading-operator__toggle" for="paper-trading-operator-arm-toggle">
+              <input type="checkbox" id="paper-trading-operator-arm-toggle" />
+              <span>Armar disparo automático quando Auto Guard liberar</span>
+            </label>
+            <div class="paper-trading-operator__actions">
+              <button type="button" id="paper-trading-operator-save" class="paper-trading-operator__button">Salvar credenciais</button>
+              <button type="button" id="paper-trading-operator-clear" class="paper-trading-operator__button paper-trading-operator__button--ghost">Limpar</button>
+            </div>
+            <p class="paper-trading-operator__feedback" id="paper-trading-operator-feedback" aria-live="polite"></p>
+          </div>
+        </details>
       </section>
 
       <section id="backtesting-panel" class="backtesting reveal reveal-delay-2 route-hidden"></section>
