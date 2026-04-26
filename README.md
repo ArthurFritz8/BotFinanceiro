@@ -165,6 +165,7 @@ Politica de retencao:
 79. ADR 107: `docs/ADR/ADR-107-painel-frontend-auditoria-centralizada-operator.md`
 80. ADR 108: `docs/ADR/ADR-108-metrica-prometheus-operator-dispatch.md`
 81. ADR 109: `docs/ADR/ADR-109-persistencia-ndjson-operator-dispatch.md`
+82. ADR 110: `docs/ADR/ADR-110-calibracao-explicita-micro-timing-binario.md`
 
 ## Relatorio completo desta entrega
 

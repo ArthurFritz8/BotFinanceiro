@@ -39,6 +39,57 @@ import { buildExecutionPlanSnapshot } from "./modules/chart-lab/quant/execution-
 import { buildExecutionQualitySnapshot } from "./modules/chart-lab/quant/execution-quality.js";
 import { buildExecutionAutomationGuardSnapshot } from "./modules/chart-lab/quant/execution-automation.js";
 import {
+  BACKEND_MOMENTUM_BLEND_LOCAL_WEIGHT,
+  BACKEND_MOMENTUM_BLEND_REMOTE_WEIGHT,
+  DIRECTIONAL_BIAS_CLAMP,
+  INSTITUTIONAL_BIAS_WEIGHT,
+  KINETIC_ACCELERATION_BIAS_CLAMP,
+  KINETIC_ACCELERATION_BIAS_SCALE,
+  KINETIC_ACCELERATION_MOMENTUM_FACTOR,
+  KINETIC_COOLING_BIAS_CLAMP,
+  KINETIC_COOLING_BIAS_SCALE,
+  KINETIC_EXPLOSIVE_BIAS,
+  MOMENTUM_BIAS_CLAMP,
+  MOMENTUM_BIAS_SCALE,
+  MOMENTUM_BOOST_CLAMP_MAX,
+  MOMENTUM_BOOST_CLAMP_MIN,
+  MOMENTUM_BOOST_COOLING_DECEL_SCALE,
+  MOMENTUM_BOOST_EXPLOSIVE,
+  MOMENTUM_BOOST_POI_HIT,
+  MOMENTUM_DIRECTION_THRESHOLD,
+  MOMENTUM_LABEL_MODERATE_THRESHOLD,
+  MOMENTUM_LABEL_STRONG_THRESHOLD,
+  MOMENTUM_STRENGTH_SCALE,
+  NEUTRAL_ADJ_EXPLOSIVE,
+  NEUTRAL_ADJ_POI_COOLING,
+  NEUTRAL_ADJ_POI_ONLY,
+  NEUTRAL_BASE_BOOST_DEFAULT,
+  NEUTRAL_BASE_BOOST_LOW_MOMENTUM,
+  NEUTRAL_LOW_MOMENTUM_THRESHOLD,
+  NEUTRAL_PROBABILITY_CLAMP_MAX,
+  POI_BIAS_CLUSTER,
+  POI_BIAS_LABEL_BUYER_THRESHOLD,
+  POI_BIAS_LABEL_SELLER_THRESHOLD,
+  POI_BIAS_MIDNIGHT_OPEN,
+  POI_BIAS_PREVIOUS_HIGH,
+  POI_BIAS_PREVIOUS_LOW,
+  PROBABILITY_CLAMP_MAX,
+  PROBABILITY_CLAMP_MIN,
+  SIGNAL_TONE_BIAS_BONUS,
+  SUGGESTED_EXPIRY_BAR_MULTIPLIER,
+  SUGGESTED_EXPIRY_MAX_SECONDS,
+  SUGGESTED_EXPIRY_MIN_SECONDS,
+  TRIGGER_HEAT_DIRECTIONAL_WEIGHT,
+  TRIGGER_HEAT_HOT_DIRECTIONAL_MIN,
+  TRIGGER_HEAT_HOT_MOMENTUM_MIN,
+  TRIGGER_HEAT_HOT_NEUTRAL_MAX,
+  TRIGGER_HEAT_MOMENTUM_WEIGHT,
+  TRIGGER_HEAT_NEUTRAL_PENALTY,
+  TRIGGER_HEAT_WARM_DIRECTIONAL_MIN,
+  TRIGGER_HEAT_WARM_MOMENTUM_MIN,
+  TRIGGER_HEAT_WARM_NEUTRAL_MAX,
+} from "./modules/chart-lab/quant/micro-timing-config.js";
+import {
   buildAutoSignalPayload as buildOperatorAutoSignalPayload,
   canSubmitAutoSignal as canSubmitOperatorAutoSignal,
   clearOperatorSettings as clearOperatorSettingsStore,
@@ -7799,24 +7850,24 @@ function resolveBinaryOptionsInstitutionalDirectionalBias(input) {
   }
 
   if (input.poiTag === "previous_low") {
-    return 1;
+    return POI_BIAS_PREVIOUS_LOW;
   }
 
   if (input.poiTag === "previous_high") {
-    return -1;
+    return POI_BIAS_PREVIOUS_HIGH;
   }
 
   if (input.poiTag === "midnight_open") {
-    return input.backendMomentumVelocity >= 0 ? 0.45 : -0.45;
+    return input.backendMomentumVelocity >= 0 ? POI_BIAS_MIDNIGHT_OPEN : -POI_BIAS_MIDNIGHT_OPEN;
   }
 
   if (input.poiTag === "cluster") {
     if (input.rejectionSignal === "bullish" || input.tradeAction === "buy") {
-      return 0.65;
+      return POI_BIAS_CLUSTER;
     }
 
     if (input.rejectionSignal === "bearish" || input.tradeAction === "sell") {
-      return -0.65;
+      return -POI_BIAS_CLUSTER;
     }
   }
 
@@ -7848,28 +7899,36 @@ function buildBinaryOptionsInstitutionalKineticContext(snapshot) {
     rejectionSignal,
     tradeAction,
   });
-  const accelerationBias = clampNumber(kineticAccelerationPercentPerSecond2 * 7000, -3.5, 3.5);
+  const accelerationBias = clampNumber(
+    kineticAccelerationPercentPerSecond2 * KINETIC_ACCELERATION_BIAS_SCALE,
+    -KINETIC_ACCELERATION_BIAS_CLAMP,
+    KINETIC_ACCELERATION_BIAS_CLAMP,
+  );
   const kineticDirectionalBias =
     kineticState === "cooling"
-      ? clampNumber(kineticDecelerationStrength * 0.06, 0, 3.4)
+      ? clampNumber(kineticDecelerationStrength * KINETIC_COOLING_BIAS_SCALE, 0, KINETIC_COOLING_BIAS_CLAMP)
       : kineticState === "explosive"
-        ? -2.8
+        ? KINETIC_EXPLOSIVE_BIAS
         : 0;
-  const directionalBias = clampNumber(institutionalBias * 5 + accelerationBias + kineticDirectionalBias, -9, 9);
+  const directionalBias = clampNumber(
+    institutionalBias * INSTITUTIONAL_BIAS_WEIGHT + accelerationBias + kineticDirectionalBias,
+    -DIRECTIONAL_BIAS_CLAMP,
+    DIRECTIONAL_BIAS_CLAMP,
+  );
   const momentumStrengthBoost = clampNumber(
-    (poiHit ? 4 : 0)
-      + (kineticState === "cooling" ? kineticDecelerationStrength * 0.2 : 0)
-      + (kineticState === "explosive" ? -6 : 0),
-    -10,
-    24,
+    (poiHit ? MOMENTUM_BOOST_POI_HIT : 0)
+      + (kineticState === "cooling" ? kineticDecelerationStrength * MOMENTUM_BOOST_COOLING_DECEL_SCALE : 0)
+      + (kineticState === "explosive" ? MOMENTUM_BOOST_EXPLOSIVE : 0),
+    MOMENTUM_BOOST_CLAMP_MIN,
+    MOMENTUM_BOOST_CLAMP_MAX,
   );
   const neutralProbabilityAdjustment =
     kineticState === "explosive"
-      ? 8
+      ? NEUTRAL_ADJ_EXPLOSIVE
       : poiHit && kineticState === "cooling"
-        ? -6
+        ? NEUTRAL_ADJ_POI_COOLING
         : poiHit
-          ? -2
+          ? NEUTRAL_ADJ_POI_ONLY
           : 0;
   const poiTagLabel =
     poiTag === "cluster"
@@ -7882,9 +7941,9 @@ function buildBinaryOptionsInstitutionalKineticContext(snapshot) {
             ? "Midnight open"
             : "Nao detectado";
   const poiBiasLabel =
-    directionalBias >= 2
+    directionalBias >= POI_BIAS_LABEL_BUYER_THRESHOLD
       ? "Comprador"
-      : directionalBias <= -2
+      : directionalBias <= POI_BIAS_LABEL_SELLER_THRESHOLD
         ? "Vendedor"
         : "Equilibrado";
   const kineticStateLabel =
@@ -7931,9 +7990,9 @@ function resolveBinaryOptionsTriggerHeat(input) {
   const directionalProbability = Math.max(input.callProbability, input.putProbability);
   const score = clampNumber(
     roundNumber(
-      directionalProbability * 0.62
-      + input.momentumStrength * 0.48
-      - input.neutralProbability * 0.35,
+      directionalProbability * TRIGGER_HEAT_DIRECTIONAL_WEIGHT
+      + input.momentumStrength * TRIGGER_HEAT_MOMENTUM_WEIGHT
+      - input.neutralProbability * TRIGGER_HEAT_NEUTRAL_PENALTY,
       1,
     ),
     0,
@@ -7941,7 +8000,11 @@ function resolveBinaryOptionsTriggerHeat(input) {
   );
   const dominantSide = input.callProbability >= input.putProbability ? "CALL" : "PUT";
 
-  if (directionalProbability >= 79 && input.momentumStrength >= 68 && input.neutralProbability <= 18) {
+  if (
+    directionalProbability >= TRIGGER_HEAT_HOT_DIRECTIONAL_MIN
+    && input.momentumStrength >= TRIGGER_HEAT_HOT_MOMENTUM_MIN
+    && input.neutralProbability <= TRIGGER_HEAT_HOT_NEUTRAL_MAX
+  ) {
     return {
       dominantSide,
       guidance: `Fluxo quente para ${dominantSide}. Janela curta valida, sem perseguir esticada.`,
@@ -7951,7 +8014,11 @@ function resolveBinaryOptionsTriggerHeat(input) {
     };
   }
 
-  if (directionalProbability >= 69 && input.momentumStrength >= 44 && input.neutralProbability <= 30) {
+  if (
+    directionalProbability >= TRIGGER_HEAT_WARM_DIRECTIONAL_MIN
+    && input.momentumStrength >= TRIGGER_HEAT_WARM_MOMENTUM_MIN
+    && input.neutralProbability <= TRIGGER_HEAT_WARM_NEUTRAL_MAX
+  ) {
     return {
       dominantSide,
       guidance: `Fluxo aquecendo para ${dominantSide}. Aguardar micro-confirmacao no proximo candle melhora qualidade.`,
@@ -7976,55 +8043,71 @@ function buildMicroTimingAnalysis(analysis, snapshot) {
   const estimatedMomentumPerSecondPercent = estimateMomentumPerSecondPercent(points);
   const blendedMomentumPerSecondPercent = context.backendMomentumVelocityPercentPerSecond === null
     ? estimatedMomentumPerSecondPercent
-    : estimatedMomentumPerSecondPercent * 0.6 + context.backendMomentumVelocityPercentPerSecond * 0.4;
+    : estimatedMomentumPerSecondPercent * BACKEND_MOMENTUM_BLEND_LOCAL_WEIGHT
+      + context.backendMomentumVelocityPercentPerSecond * BACKEND_MOMENTUM_BLEND_REMOTE_WEIGHT;
   const momentumPerSecondPercent = roundNumber(
-    blendedMomentumPerSecondPercent + context.kineticContext.accelerationPercentPerSecond2 * 4,
+    blendedMomentumPerSecondPercent
+      + context.kineticContext.accelerationPercentPerSecond2 * KINETIC_ACCELERATION_MOMENTUM_FACTOR,
     6,
   );
-  const momentumStrengthBase = clampNumber(roundNumber(Math.abs(momentumPerSecondPercent) * 1400, 1), 0, 100);
+  const momentumStrengthBase = clampNumber(
+    roundNumber(Math.abs(momentumPerSecondPercent) * MOMENTUM_STRENGTH_SCALE, 1),
+    0,
+    100,
+  );
   const momentumStrength = clampNumber(
     roundNumber(momentumStrengthBase + context.momentumStrengthBoost, 1),
     0,
     100,
   );
   const momentumDirection =
-    momentumPerSecondPercent >= 0.004
+    momentumPerSecondPercent >= MOMENTUM_DIRECTION_THRESHOLD
       ? "comprador"
-      : momentumPerSecondPercent <= -0.004
+      : momentumPerSecondPercent <= -MOMENTUM_DIRECTION_THRESHOLD
         ? "vendedor"
         : "neutro";
-  const momentumBias = clampNumber(momentumPerSecondPercent * 1200, -14, 14);
+  const momentumBias = clampNumber(
+    momentumPerSecondPercent * MOMENTUM_BIAS_SCALE,
+    -MOMENTUM_BIAS_CLAMP,
+    MOMENTUM_BIAS_CLAMP,
+  );
   const rawCall = clampNumber(
     analysis.buyProbability
       + momentumBias
       + context.callBiasAdjustment
-      + (analysis.signal.tone === "buy" ? 4 : 0),
-    1,
-    98,
+      + (analysis.signal.tone === "buy" ? SIGNAL_TONE_BIAS_BONUS : 0),
+    PROBABILITY_CLAMP_MIN,
+    PROBABILITY_CLAMP_MAX,
   );
   const rawPut = clampNumber(
     analysis.sellProbability
       - momentumBias
       + context.putBiasAdjustment
-      + (analysis.signal.tone === "sell" ? 4 : 0),
-    1,
-    98,
+      + (analysis.signal.tone === "sell" ? SIGNAL_TONE_BIAS_BONUS : 0),
+    PROBABILITY_CLAMP_MIN,
+    PROBABILITY_CLAMP_MAX,
   );
   const rawNeutral = clampNumber(
-    analysis.neutralProbability + (momentumStrength < 28 ? 6 : 2) + context.neutralProbabilityAdjustment,
-    1,
-    45,
+    analysis.neutralProbability
+      + (momentumStrength < NEUTRAL_LOW_MOMENTUM_THRESHOLD ? NEUTRAL_BASE_BOOST_LOW_MOMENTUM : NEUTRAL_BASE_BOOST_DEFAULT)
+      + context.neutralProbabilityAdjustment,
+    PROBABILITY_CLAMP_MIN,
+    NEUTRAL_PROBABILITY_CLAMP_MAX,
   );
   const total = rawCall + rawPut + rawNeutral;
   const callProbability = roundNumber((rawCall / total) * 100, 1);
   const putProbability = roundNumber((rawPut / total) * 100, 1);
   const neutralProbability = roundNumber(Math.max(0, 100 - callProbability - putProbability), 1);
   const barSpacingSeconds = estimateMedianPointSpacingSeconds(points);
-  const suggestedExpirySeconds = Math.round(clampNumber(barSpacingSeconds * 3, 15, 300));
+  const suggestedExpirySeconds = Math.round(clampNumber(
+    barSpacingSeconds * SUGGESTED_EXPIRY_BAR_MULTIPLIER,
+    SUGGESTED_EXPIRY_MIN_SECONDS,
+    SUGGESTED_EXPIRY_MAX_SECONDS,
+  ));
   const momentumLabel =
-    momentumStrength >= 72
+    momentumStrength >= MOMENTUM_LABEL_STRONG_THRESHOLD
       ? "Aceleracao forte"
-      : momentumStrength >= 45
+      : momentumStrength >= MOMENTUM_LABEL_MODERATE_THRESHOLD
         ? "Aceleracao moderada"
         : "Fluxo comprimido";
   const triggerHeat = resolveBinaryOptionsTriggerHeat({
