@@ -393,4 +393,102 @@ void describe("PaperTradingRoutes", () => {
       rmSync(tmpDir, { recursive: true, force: true });
     }
   });
+
+  void it("GET /v1/paper-trading/operator/journal filtra por action (ADR-106)", async () => {
+    const { app, tmpDir } = buildTestApp();
+    try {
+      await app.inject({
+        method: "POST",
+        url: "/v1/paper-trading/operator/auto-signal",
+        headers: {
+          "x-paper-trading-operator-token": "test_operator_token_12345",
+        },
+        payload: {
+          asset: "bitcoin",
+          confluenceScore: 88,
+          entryPrice: 100,
+          side: "long",
+          stopPrice: 95,
+          targetPrice: 112,
+          tier: "high",
+        },
+      });
+      await app.inject({
+        method: "POST",
+        url: "/v1/paper-trading/operator/auto-signal",
+        headers: {
+          "x-paper-trading-operator-token": "test_operator_token_12345",
+        },
+        payload: {
+          asset: "bitcoin",
+          confluenceScore: 75,
+          entryPrice: 110,
+          side: "long",
+          stopPrice: 100,
+          targetPrice: 120,
+          tier: "high",
+        },
+      });
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/v1/paper-trading/operator/journal?action=skipped",
+        headers: {
+          "x-paper-trading-operator-token": "test_operator_token_12345",
+        },
+      });
+      assert.equal(response.statusCode, 200);
+      const body = JSON.parse(response.payload) as {
+        data: {
+          total: number;
+          opened: number;
+          skipped: number;
+          entries: Array<{ action: string }>;
+        };
+      };
+      assert.equal(body.data.total, 1);
+      assert.equal(body.data.skipped, 1);
+      assert.equal(body.data.opened, 0);
+      assert.equal(body.data.entries[0]?.action, "skipped");
+    } finally {
+      await app.close();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  void it("GET /v1/paper-trading/operator/journal rejeita from > to (ADR-106)", async () => {
+    const { app, tmpDir } = buildTestApp();
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url:
+          "/v1/paper-trading/operator/journal" +
+          "?from=2026-04-26T12:00:00.000Z&to=2026-04-26T11:00:00.000Z",
+        headers: {
+          "x-paper-trading-operator-token": "test_operator_token_12345",
+        },
+      });
+      assert.equal(response.statusCode, 400);
+    } finally {
+      await app.close();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  void it("GET /v1/paper-trading/operator/journal rejeita from invalido (ADR-106)", async () => {
+    const { app, tmpDir } = buildTestApp();
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/v1/paper-trading/operator/journal?from=not-a-date",
+        headers: {
+          "x-paper-trading-operator-token": "test_operator_token_12345",
+        },
+      });
+      assert.equal(response.statusCode, 400);
+    } finally {
+      await app.close();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

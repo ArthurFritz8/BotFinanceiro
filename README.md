@@ -161,6 +161,7 @@ Politica de retencao:
 75. ADR 103: `docs/ADR/ADR-103-operador-auto-paper-trading-frontend.md`
 76. ADR 104: `docs/ADR/ADR-104-journal-circuit-breaker-operator-dispatch.md`
 77. ADR 105: `docs/ADR/ADR-105-journal-operator-dispatch-backend.md`
+78. ADR 106: `docs/ADR/ADR-106-filtros-journal-operator-dispatch.md`
 
 ## Relatorio completo desta entrega
 
@@ -183,6 +184,13 @@ Inspecione a auditoria centralizada (ADR-105) — ring buffer in-memory dos disp
 
 ```bash
 curl "http://localhost:3000/v1/paper-trading/operator/journal?limit=50" \
+	-H "x-paper-trading-operator-token: $PAPER_TRADING_OPERATOR_TOKEN"
+```
+
+Filtros opcionais (ADR-106) aceitam `from`/`to` em ISO 8601, `action=opened|skipped|error` e `asset=<id>`:
+
+```bash
+curl "http://localhost:3000/v1/paper-trading/operator/journal?from=2026-04-26T00:00:00.000Z&to=2026-04-26T23:59:59.000Z&action=skipped&asset=bitcoin" \
 	-H "x-paper-trading-operator-token: $PAPER_TRADING_OPERATOR_TOKEN"
 ```
 

@@ -7,20 +7,58 @@ import {
   confluenceSignalSchema,
   type AutoPaperTradingBridge,
 } from "../application/auto-paper-trading-bridge.js";
+import { operatorDispatchActionSchema } from "../domain/operator-dispatch-types.js";
 import type { InMemoryOperatorDispatchJournal } from "../infrastructure/in-memory-operator-dispatch-journal.js";
 
-const journalQuerySchema = z.object({
-  limit: z
-    .union([z.string(), z.number()])
-    .optional()
-    .transform((value) => {
-      if (value === undefined) return undefined;
-      const parsed =
-        typeof value === "number" ? value : Number.parseInt(value, 10);
-      return Number.isFinite(parsed) ? parsed : undefined;
-    })
-    .pipe(z.number().int().min(1).max(500).optional()),
-});
+const optionalIntegerFromQuery = z
+  .union([z.string(), z.number()])
+  .optional()
+  .transform((value) => {
+    if (value === undefined) return undefined;
+    const parsed =
+      typeof value === "number" ? value : Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  });
+
+const isoDateToMs = z
+  .string()
+  .trim()
+  .min(1)
+  .optional()
+  .transform((value, ctx) => {
+    if (value === undefined) return undefined;
+    const ms = Date.parse(value);
+    if (!Number.isFinite(ms)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "must be a valid ISO 8601 date",
+      });
+      return z.NEVER;
+    }
+    return ms;
+  });
+
+const journalQuerySchema = z
+  .object({
+    limit: optionalIntegerFromQuery.pipe(z.number().int().min(1).max(500).optional()),
+    from: isoDateToMs,
+    to: isoDateToMs,
+    action: operatorDispatchActionSchema.optional(),
+    asset: z.string().trim().min(1).max(40).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      value.from !== undefined &&
+      value.to !== undefined &&
+      value.from > value.to
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["from"],
+        message: "from must be less than or equal to to",
+      });
+    }
+  });
 
 export class AutoPaperTradingController {
   public constructor(
@@ -76,7 +114,13 @@ export class AutoPaperTradingController {
       return;
     }
     const query = journalQuerySchema.parse(request.query ?? {});
-    const snapshot = this.operatorJournal.snapshot(query.limit);
+    const snapshot = this.operatorJournal.snapshot({
+      limit: query.limit,
+      fromMs: query.from,
+      toMs: query.to,
+      action: query.action,
+      asset: query.asset,
+    });
     void reply
       .code(200)
       .send(buildSuccessResponse(request.id, { ...snapshot, enabled: true }));

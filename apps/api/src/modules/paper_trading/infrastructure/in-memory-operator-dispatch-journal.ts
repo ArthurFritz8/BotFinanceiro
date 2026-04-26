@@ -19,6 +19,14 @@ export interface RecordOperatorDispatchInput {
   readonly occurredAtMs?: number;
 }
 
+export interface OperatorDispatchSnapshotQuery {
+  readonly limit?: number;
+  readonly fromMs?: number;
+  readonly toMs?: number;
+  readonly action?: OperatorDispatchEntry["action"];
+  readonly asset?: string;
+}
+
 /**
  * Journal in-memory (single-process) dos disparos do operador para a rota
  * publica autenticada `/v1/paper-trading/operator/auto-signal`. Implementa
@@ -62,25 +70,46 @@ export class InMemoryOperatorDispatchJournal {
     return entry;
   }
 
-  public snapshot(limit?: number): OperatorDispatchJournalSnapshot {
-    const total = this.entries.length;
+  public snapshot(
+    queryOrLimit?: number | OperatorDispatchSnapshotQuery,
+  ): OperatorDispatchJournalSnapshot {
+    const query: OperatorDispatchSnapshotQuery =
+      typeof queryOrLimit === "number"
+        ? { limit: queryOrLimit }
+        : queryOrLimit ?? {};
+    const assetFilter = query.asset?.trim().toLowerCase();
+    const filtered = this.entries.filter((entry) => {
+      if (query.fromMs !== undefined && entry.occurredAtMs < query.fromMs) {
+        return false;
+      }
+      if (query.toMs !== undefined && entry.occurredAtMs > query.toMs) {
+        return false;
+      }
+      if (query.action !== undefined && entry.action !== query.action) {
+        return false;
+      }
+      if (assetFilter && entry.asset.toLowerCase() !== assetFilter) {
+        return false;
+      }
+      return true;
+    });
     let opened = 0;
     let skipped = 0;
     let errors = 0;
-    for (const entry of this.entries) {
+    for (const entry of filtered) {
       if (entry.action === "opened") opened += 1;
       else if (entry.action === "skipped") skipped += 1;
       else errors += 1;
     }
-    const ordered = [...this.entries].sort(
+    const ordered = [...filtered].sort(
       (a, b) => b.occurredAtMs - a.occurredAtMs,
     );
     const safeLimit =
-      Number.isInteger(limit) && limit !== undefined && limit > 0
-        ? Math.min(limit, this.maxEntries)
+      Number.isInteger(query.limit) && query.limit !== undefined && query.limit > 0
+        ? Math.min(query.limit, this.maxEntries)
         : this.maxEntries;
     return {
-      total,
+      total: filtered.length,
       opened,
       skipped,
       errors,

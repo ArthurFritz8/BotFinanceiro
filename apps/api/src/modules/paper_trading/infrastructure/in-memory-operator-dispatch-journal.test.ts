@@ -93,4 +93,61 @@ void describe("InMemoryOperatorDispatchJournal", () => {
     assert.equal(journal.size(), 0);
     assert.equal(journal.snapshot().total, 0);
   });
+
+  void it("filtra por janela temporal fromMs/toMs (ADR-106)", () => {
+    const journal = new InMemoryOperatorDispatchJournal();
+    for (let index = 0; index < 5; index += 1) {
+      journal.record({
+        asset: `asset-${index}`,
+        side: "long",
+        tier: "high",
+        confluenceScore: 80,
+        action: "opened",
+        occurredAtMs: 1_000 + index * 1_000,
+      });
+    }
+    const snapshot = journal.snapshot({ fromMs: 2_500, toMs: 4_500 });
+    assert.equal(snapshot.total, 2);
+    assert.deepEqual(
+      snapshot.entries.map((entry) => entry.asset),
+      ["asset-3", "asset-2"],
+    );
+  });
+
+  void it("filtra por action e por asset case-insensitive (ADR-106)", () => {
+    const journal = new InMemoryOperatorDispatchJournal();
+    journal.record({
+      asset: "Bitcoin",
+      side: "long",
+      tier: "high",
+      confluenceScore: 80,
+      action: "opened",
+      occurredAtMs: 1_000,
+    });
+    journal.record({
+      asset: "bitcoin",
+      side: "long",
+      tier: "high",
+      confluenceScore: 60,
+      action: "skipped",
+      reason: "duplicate_open_trade",
+      occurredAtMs: 2_000,
+    });
+    journal.record({
+      asset: "ethereum",
+      side: "short",
+      tier: "medium",
+      confluenceScore: 70,
+      action: "opened",
+      occurredAtMs: 3_000,
+    });
+
+    const onlyBitcoinOpened = journal.snapshot({
+      action: "opened",
+      asset: "BITCOIN",
+    });
+    assert.equal(onlyBitcoinOpened.total, 1);
+    assert.equal(onlyBitcoinOpened.opened, 1);
+    assert.equal(onlyBitcoinOpened.entries[0]?.asset, "Bitcoin");
+  });
 });
