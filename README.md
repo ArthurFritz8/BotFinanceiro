@@ -180,6 +180,7 @@ Politica de retencao:
 2. `docs/runbooks/checklist-deploy-macro-radar-institucional-2026-04-14.md`
 3. `docs/runbooks/checklist-mudanca-strategy-routing-macro-radar-2026-04-14.md`
 4. `docs/runbooks/release-changelog-institucional-live-signals-2026-04-27.md`
+5. `docs/runbooks/checklist-verificacao-contexto-copilot-stream-chart-lab-2026-04-27.md`
 
 ## Exemplo de operador Paper Trading
 

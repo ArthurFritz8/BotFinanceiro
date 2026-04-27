@@ -352,6 +352,101 @@ void it("POST /v1/copilot/chat injeta chartContext no system prompt sem exceder 
   assert.equal(body.data.answer, "Contexto operacional considerado.");
 });
 
+void it("POST /v1/copilot/chat/stream injeta chartContext e retorna eventos NDJSON", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let capturedRequestBody = "";
+
+  globalThis.fetch = ((input, init) => {
+    const requestUrl = String(input);
+
+    if (!requestUrl.includes("/chat/completions")) {
+      return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+    }
+
+    capturedRequestBody = typeof init?.body === "string" ? init.body : "";
+
+    const streamBody = [
+      "data: {\"id\":\"chatcmpl-stream-001\",\"model\":\"google/gemini-1.5-flash\",\"choices\":[{\"delta\":{\"content\":\"Contexto stream ok\"}}]}",
+      "",
+      "data: {\"id\":\"chatcmpl-stream-001\",\"usage\":{\"completion_tokens\":5,\"prompt_tokens\":33,\"total_tokens\":38},\"choices\":[{\"delta\":{}}]}",
+      "",
+      "data: [DONE]",
+      "",
+    ].join("\n");
+
+    return Promise.resolve(
+      new Response(streamBody, {
+        headers: {
+          "content-type": "text/event-stream",
+        },
+        status: 200,
+      }),
+    );
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      chartContext: {
+        assetId: "ethereum",
+        broker: "bybit",
+        exchange: "BYBIT",
+        interval: "15m",
+        mode: "live",
+        operationalMode: "spot_margin",
+        range: "24h",
+        strategy: "crypto",
+        symbol: "ETHUSDT",
+      },
+      message: "Atualize o contexto em stream",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat/stream",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.match(String(response.headers["content-type"] ?? ""), /application\/x-ndjson/);
+
+  const ndjsonLines = response.payload
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  const ndjsonEvents = ndjsonLines.map((line) => JSON.parse(line) as {
+    data?: unknown;
+    type?: string;
+  });
+
+  assert.ok(ndjsonEvents.some((event) => event.type === "meta"));
+  assert.ok(ndjsonEvents.some((event) => event.type === "chunk" && event.data === "Contexto stream ok"));
+  assert.ok(
+    ndjsonEvents.some(
+      (event) => event.type === "done"
+        && typeof event.data === "object"
+        && event.data !== null
+        && (event.data as { answer?: string }).answer === "Contexto stream ok",
+    ),
+  );
+
+  const openRouterPayload = JSON.parse(capturedRequestBody) as {
+    messages?: Array<{
+      content?: string;
+      role?: string;
+    }>;
+  };
+  const systemMessage = Array.isArray(openRouterPayload.messages)
+    ? openRouterPayload.messages.find((message) => message.role === "system")
+    : undefined;
+
+  assert.ok(systemMessage && typeof systemMessage.content === "string");
+  assert.match(systemMessage.content, /Contexto de terminal atual:/);
+  assert.match(systemMessage.content, /asset=ethereum/);
+  assert.match(systemMessage.content, /exchange=bybit/);
+  assert.match(systemMessage.content, /mode=live/);
+  assert.ok(systemMessage.content.length <= 4000);
+});
+
 void it("POST /v1/copilot/chat envia historico recente no payload do OpenRouter", async () => {
   mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
 
