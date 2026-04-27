@@ -172,6 +172,7 @@ Politica de retencao:
 86. ADR 114: `docs/ADR/ADR-114-veto-redesign-visual-ia-observabilidade-defensiva.md`
 87. ADR 115: `docs/ADR/ADR-115-serie-institucional-real-fallback-sintetico-e-live-signals-feed-real.md`
 88. ADR 116: `docs/ADR/ADR-116-contexto-chart-lab-e-copilot-context-aware.md`
+89. ADR 117: `docs/ADR/ADR-117-hardening-contexto-copilot-chart-lab.md`
 
 ## Relatorio completo desta entrega
 

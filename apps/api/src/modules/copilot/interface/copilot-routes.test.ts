@@ -264,6 +264,94 @@ void it("POST /v1/copilot/chat retorna resposta da IA quando OpenRouter esta con
   assert.equal(body.data.usage.totalTokens, 32);
 });
 
+void it("POST /v1/copilot/chat injeta chartContext no system prompt sem exceder 4000 chars", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  let capturedRequestBody = "";
+
+  globalThis.fetch = ((input, init) => {
+    const requestUrl = String(input);
+
+    if (!requestUrl.includes("/chat/completions")) {
+      return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+    }
+
+    capturedRequestBody = typeof init?.body === "string" ? init.body : "";
+
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: "Contexto operacional considerado.",
+                role: "assistant",
+              },
+            },
+          ],
+          id: "gen-chart-context-001",
+          model: "google/gemini-1.5-flash",
+          usage: {
+            completion_tokens: 9,
+            prompt_tokens: 40,
+            total_tokens: 49,
+          },
+        }),
+        {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 200,
+        },
+      ),
+    );
+  }) as typeof fetch;
+
+  const response = await app.inject({
+    method: "POST",
+    payload: {
+      chartContext: {
+        assetId: "ethereum",
+        broker: "bybit",
+        exchange: "BYBIT",
+        interval: "15m",
+        mode: "live",
+        operationalMode: "spot_margin",
+        range: "24h",
+        strategy: "crypto",
+        symbol: "ETHUSDT",
+      },
+      message: "Como esta o contexto atual?",
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const openRouterPayload = JSON.parse(capturedRequestBody) as {
+    messages?: Array<{
+      content?: string;
+      role?: string;
+    }>;
+  };
+  const systemMessage = Array.isArray(openRouterPayload.messages)
+    ? openRouterPayload.messages.find((message) => message.role === "system")
+    : undefined;
+
+  assert.ok(systemMessage && typeof systemMessage.content === "string");
+  assert.match(systemMessage.content, /Contexto de terminal atual:/);
+  assert.match(systemMessage.content, /asset=ethereum/);
+  assert.match(systemMessage.content, /exchange=bybit/);
+  assert.match(systemMessage.content, /mode=live/);
+  assert.match(systemMessage.content, /range=24h/);
+  assert.ok(systemMessage.content.length <= 4000);
+
+  const body = response.json<ApiSuccessResponse<CopilotChatResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.answer, "Contexto operacional considerado.");
+});
+
 void it("POST /v1/copilot/chat envia historico recente no payload do OpenRouter", async () => {
   mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
 

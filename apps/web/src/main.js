@@ -20407,6 +20407,10 @@ function setSendingState(nextValue) {
 }
 
 function buildCopilotChartContextPayload() {
+  if (activeAppRoute !== APP_ROUTE_CHART_LAB) {
+    return undefined;
+  }
+
   const selection = chartLabStore.getSelection();
   const chartContext = {
     assetId: typeof selection?.assetId === "string" ? selection.assetId : undefined,

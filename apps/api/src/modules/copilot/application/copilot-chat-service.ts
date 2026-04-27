@@ -3757,14 +3757,15 @@ export class CopilotChatService {
       return safeBasePrompt;
     }
 
-    const suffix = `\n\nContexto de terminal atual:\n${chartContextPrompt}`;
-    const availableChars = COPILOT_SYSTEM_PROMPT_MAX_LENGTH - safeBasePrompt.length;
+    const contextSuffix = `\n\nContexto de terminal atual:\n${chartContextPrompt}`;
 
-    if (availableChars <= 0) {
-      return safeBasePrompt;
+    if (contextSuffix.length >= COPILOT_SYSTEM_PROMPT_MAX_LENGTH) {
+      return contextSuffix.slice(0, COPILOT_SYSTEM_PROMPT_MAX_LENGTH);
     }
 
-    return `${safeBasePrompt}${suffix.slice(0, availableChars)}`;
+    const baseBudget = COPILOT_SYSTEM_PROMPT_MAX_LENGTH - contextSuffix.length;
+
+    return `${safeBasePrompt.slice(0, baseBudget)}${contextSuffix}`;
   }
 
   private normalizeChartContextValue(value: unknown, maxLength = 64): string {

@@ -9,7 +9,20 @@ import { logger } from "../logger/logger.js";
 import { resolvePersistenceMode, type PersistenceMode } from "../persistence/persistence-mode.js";
 import { getPostgresPool } from "../persistence/postgres-pool.js";
 
+const copilotChartContextAuditSchema = z.object({
+  assetId: z.string().trim().min(1).max(64).optional(),
+  broker: z.string().trim().min(1).max(24).optional(),
+  exchange: z.string().trim().min(1).max(24).optional(),
+  interval: z.string().trim().min(1).max(16).optional(),
+  mode: z.enum(["delayed", "live"]).optional(),
+  operationalMode: z.string().trim().min(1).max(40).optional(),
+  range: z.enum(["24h", "7d", "30d", "90d", "1y"]).optional(),
+  strategy: z.enum(["crypto", "institutional_macro"]).optional(),
+  symbol: z.string().trim().min(1).max(40).optional(),
+});
+
 const copilotChatAuditInputSchema = z.object({
+  chartContext: copilotChartContextAuditSchema.optional(),
   maxTokens: z.number().int().min(1).max(2000).optional(),
   message: z.string(),
   systemPrompt: z.string().optional(),
@@ -102,6 +115,17 @@ export interface CopilotChatSessionHistory {
 export interface CopilotChatAuditAppendInput {
   completion: OpenRouterChatCompletion;
   input: {
+    chartContext?: {
+      assetId?: string;
+      broker?: string;
+      exchange?: string;
+      interval?: string;
+      mode?: "delayed" | "live";
+      operationalMode?: string;
+      range?: "24h" | "7d" | "30d" | "90d" | "1y";
+      strategy?: "crypto" | "institutional_macro";
+      symbol?: string;
+    };
     maxTokens?: number;
     message: string;
     systemPrompt?: string;
