@@ -1836,6 +1836,23 @@ void it("GET /internal/copilot/audit/history retorna 400 para sessionId invalido
   assert.equal(body.error.message, "Invalid payload");
 });
 
+void it("GET /internal/copilot/audit/history retorna 400 para limit fora do intervalo", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/copilot/audit/history?limit=0",
+  });
+
+  assert.equal(response.statusCode, 400);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "VALIDATION_ERROR");
+  assert.equal(body.error.message, "Invalid payload");
+});
+
 void it("DELETE /internal/copilot/audit/history retorna 400 sem confirm=true", async () => {
   const response = await app.inject({
     headers: {
