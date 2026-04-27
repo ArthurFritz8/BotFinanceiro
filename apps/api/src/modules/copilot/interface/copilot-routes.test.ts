@@ -736,6 +736,160 @@ void it("POST /v1/copilot/chat/stream persiste chartContext na auditoria interna
   assert.equal(persistedRecord.input.chartContext?.symbol, "SOLUSD");
 });
 
+void it("GET /internal/copilot/audit/history filtra contexto de stream por janela temporal", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  const sessionId = `sessao_stream_temporal_${Date.now()}`;
+  let streamCallCount = 0;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (!requestUrl.includes("/chat/completions")) {
+      return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+    }
+
+    streamCallCount += 1;
+    const responseId = `chatcmpl-stream-temporal-${streamCallCount}`;
+    const chunkText = streamCallCount === 1 ? "Contexto temporal BTC." : "Contexto temporal ETH.";
+
+    const streamBody = [
+      `data: ${JSON.stringify({
+        choices: [{
+          delta: {
+            content: chunkText,
+          },
+        }],
+        id: responseId,
+        model: "google/gemini-1.5-flash",
+      })}`,
+      "",
+      `data: ${JSON.stringify({
+        choices: [{
+          delta: {},
+        }],
+        id: responseId,
+        usage: {
+          completion_tokens: 6,
+          prompt_tokens: 34,
+          total_tokens: 40,
+        },
+      })}`,
+      "",
+      "data: [DONE]",
+      "",
+    ].join("\n");
+
+    return Promise.resolve(
+      new Response(streamBody, {
+        headers: {
+          "content-type": "text/event-stream",
+        },
+        status: 200,
+      }),
+    );
+  }) as typeof fetch;
+
+  const firstStreamResponse = await app.inject({
+    method: "POST",
+    payload: {
+      chartContext: {
+        assetId: "bitcoin",
+        broker: "bybit",
+        exchange: "bybit",
+        interval: "15m",
+        mode: "live",
+        operationalMode: "spot_margin",
+        range: "24h",
+        strategy: "crypto",
+        symbol: "BTCUSDT",
+      },
+      message: "Primeira captura temporal BTC",
+      sessionId,
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat/stream",
+  });
+
+  assert.equal(firstStreamResponse.statusCode, 200);
+
+  const secondStreamResponse = await app.inject({
+    method: "POST",
+    payload: {
+      chartContext: {
+        assetId: "ethereum",
+        broker: "bybit",
+        exchange: "bybit",
+        interval: "15m",
+        mode: "live",
+        operationalMode: "spot_margin",
+        range: "24h",
+        strategy: "crypto",
+        symbol: "ETHUSDT",
+      },
+      message: "Segunda captura temporal ETH",
+      sessionId,
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat/stream",
+  });
+
+  assert.equal(secondStreamResponse.statusCode, 200);
+
+  const fullAuditResponse = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/copilot/audit/history?limit=1000&offset=0",
+  });
+
+  assert.equal(fullAuditResponse.statusCode, 200);
+
+  const fullAuditBody = fullAuditResponse.json<ApiSuccessResponse<CopilotInternalAuditHistoryResponse>>();
+  const firstRecord = fullAuditBody.data.records.find(
+    (record) => record.sessionId === sessionId && record.completion.responseId === "chatcmpl-stream-temporal-1",
+  );
+  const secondRecord = fullAuditBody.data.records.find(
+    (record) => record.sessionId === sessionId && record.completion.responseId === "chatcmpl-stream-temporal-2",
+  );
+
+  if (!firstRecord || !secondRecord) {
+    throw new Error("Temporal stream audit records not found");
+  }
+
+  const encodedTimestamp = encodeURIComponent(secondRecord.recordedAt);
+  const filteredAuditResponse = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: `/internal/copilot/audit/history?limit=1000&offset=0&from=${encodedTimestamp}&to=${encodedTimestamp}`,
+  });
+
+  assert.equal(filteredAuditResponse.statusCode, 200);
+
+  const filteredAuditBody = filteredAuditResponse.json<ApiSuccessResponse<CopilotInternalAuditHistoryResponse>>();
+  assert.equal(filteredAuditBody.status, "success");
+  assert.equal(filteredAuditBody.data.filters.from, secondRecord.recordedAt);
+  assert.equal(filteredAuditBody.data.filters.to, secondRecord.recordedAt);
+
+  const filteredSessionRecords = filteredAuditBody.data.records.filter((record) => record.sessionId === sessionId);
+  assert.ok(filteredSessionRecords.some((record) => record.completion.responseId === "chatcmpl-stream-temporal-2"));
+
+  if (firstRecord.recordedAt !== secondRecord.recordedAt) {
+    assert.equal(
+      filteredSessionRecords.some((record) => record.completion.responseId === "chatcmpl-stream-temporal-1"),
+      false,
+    );
+  }
+
+  const matchedSecondRecord = filteredSessionRecords.find(
+    (record) => record.completion.responseId === "chatcmpl-stream-temporal-2",
+  );
+  assert.equal(matchedSecondRecord?.input.chartContext?.assetId, "ethereum");
+});
+
 void it("POST /v1/copilot/chat envia historico recente no payload do OpenRouter", async () => {
   mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
 
