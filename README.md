@@ -166,12 +166,18 @@ Politica de retencao:
 80. ADR 108: `docs/ADR/ADR-108-metrica-prometheus-operator-dispatch.md`
 81. ADR 109: `docs/ADR/ADR-109-persistencia-ndjson-operator-dispatch.md`
 82. ADR 110: `docs/ADR/ADR-110-calibracao-explicita-micro-timing-binario.md`
+83. ADR 111: `docs/ADR/ADR-111-remocao-template-morto-technical-gauge.md`
+84. ADR 112: `docs/ADR/ADR-112-badge-sinal-quantitativo-news-fallback.md`
+85. ADR 113: `docs/ADR/ADR-113-acessibilidade-wcag-tabs-principais-chart-lab.md`
+86. ADR 114: `docs/ADR/ADR-114-veto-redesign-visual-ia-observabilidade-defensiva.md`
+87. ADR 115: `docs/ADR/ADR-115-serie-institucional-real-fallback-sintetico-e-live-signals-feed-real.md`
 
 ## Relatorio completo desta entrega
 
 1. `docs/runbooks/relatorio-completo-publicacao-e-resiliencia-2026-04-01.md`
 2. `docs/runbooks/checklist-deploy-macro-radar-institucional-2026-04-14.md`
 3. `docs/runbooks/checklist-mudanca-strategy-routing-macro-radar-2026-04-14.md`
+4. `docs/runbooks/release-changelog-institucional-live-signals-2026-04-27.md`
 
 ## Exemplo de operador Paper Trading
 
