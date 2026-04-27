@@ -57,6 +57,15 @@ curl "http://localhost:3000/internal/copilot/audit/history?sessionId=sessao_stre
   -H "x-internal-token: $INTERNAL_API_TOKEN"
 ```
 
+4. Opcional avancado: validar filtro combinado por sessao + tool + janela temporal exata:
+
+```bash
+curl "http://localhost:3000/internal/copilot/audit/history?sessionId=sessao_stream_ctx_001&toolName=get_crypto_chart_insights&from=2026-04-27T20:30:14.213Z&to=2026-04-27T20:30:14.213Z&limit=10&offset=0" \
+  -H "x-internal-token: $INTERNAL_API_TOKEN"
+```
+
+Observacao: ajuste `toolName` e timestamps para os valores reais retornados na sua trilha.
+
 ## Passo a passo (UI opcional)
 
 1. Abrir Chart Lab no frontend.

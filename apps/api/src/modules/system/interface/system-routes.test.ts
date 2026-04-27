@@ -1601,6 +1601,31 @@ void it("GET /internal/copilot/audit/history retorna payload com filtro de sessi
   assert.equal(body.data.filters.sessionId, "sessao_copilot_001");
 });
 
+void it("GET /internal/copilot/audit/history aplica filtros combinados de sessionId, tool e periodo", async () => {
+  const fromToTimestamp = "2026-03-31T11:00:00.000Z";
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: `/internal/copilot/audit/history?limit=5&offset=0&sessionId=sessao_copilot_002&toolName=get_crypto_multi_spot_price&from=${encodeURIComponent(fromToTimestamp)}&to=${encodeURIComponent(fromToTimestamp)}`,
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<CopilotAuditHistoryResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.totalStored, 2);
+  assert.equal(body.data.totalMatched, 1);
+  assert.equal(body.data.records.length, 1);
+  assert.equal(body.data.records[0]?.sessionId, "sessao_copilot_002");
+  assert.equal(body.data.records[0]?.completion.responseId, "copilot-audit-002");
+  assert.equal(body.data.filters.sessionId, "sessao_copilot_002");
+  assert.equal(body.data.filters.toolName, "get_crypto_multi_spot_price");
+  assert.equal(body.data.filters.from, fromToTimestamp);
+  assert.equal(body.data.filters.to, fromToTimestamp);
+});
+
 void it("GET /internal/copilot/audit/history retorna 400 para sessionId invalido", async () => {
   const response = await app.inject({
     headers: {
