@@ -7949,6 +7949,21 @@ body.sidebar-collapsed .app-shell {
 .fundi-hub-impact-badge[data-impact="medium"] { background: rgba(250, 204, 21, 0.16); color: #fde68a; }
 .fundi-hub-impact-badge[data-impact="low"] { background: rgba(148, 163, 184, 0.12); color: #cbd5e1; }
 
+/* ADR-112 — Badge "Sinal Quantitativo" no fallback de noticias.
+   Sinaliza fail-honest que o bloco e' derivacao quantitativa, nao feed editorial. */
+.fundi-hub-quant-fallback-head {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.4rem;
+}
+.fundi-hub-quant-fallback-head h4 { margin: 0; }
+.fundi-hub-quant-badge {
+  font-size: 0.62rem; padding: 0.18rem 0.55rem; border-radius: 999px;
+  font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+  background: rgba(56, 189, 248, 0.14); color: #7dd3fc;
+  border: 1px solid rgba(56, 189, 248, 0.32);
+  cursor: help;
+}
+
 /* --- Lista de eventos --- */
 .fundi-hub-events-list { display: flex; flex-direction: column; gap: 0.5rem; max-height: 540px; overflow-y: auto; padding-right: 0.3rem; }
 .fundi-hub-event-row {

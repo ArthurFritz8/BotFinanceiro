@@ -12839,9 +12839,20 @@ function renderAnalysisTabContent(analysis, snapshot, options = {}) {
     return;
   }
 
+  // ADR-112 — fallback quantitativo: badge visual fail-honest sinaliza que o
+  // bloco abaixo nao e' feed editorial externo, mas derivacao quantitativa
+  // dos sinais ja' calculados (analysis.newsProxy).
   analysisTabContentElement.innerHTML = `
-    <article class="analysis-block">
-      <h4>Noticias e eventos (proxy quantitativo)</h4>
+    <article class="analysis-block fundi-hub-quant-fallback">
+      <header class="fundi-hub-quant-fallback-head">
+        <h4>Noticias e eventos (proxy quantitativo)</h4>
+        <span
+          class="fundi-hub-quant-badge"
+          role="status"
+          aria-label="Conteudo derivado de sinais quantitativos, sem feed editorial externo"
+          title="Sem feed editorial externo: este bloco lista alertas derivados dos sinais quantitativos calculados para o ativo (ADR-112)."
+        >Sinal Quantitativo</span>
+      </header>
       <p>Sem feed externo oficial integrado no momento. Bloco abaixo usa sinais quantitativos reais do ativo para alertas operacionais:</p>
       <ul class="analysis-list">
         ${analysis.newsProxy.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
