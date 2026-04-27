@@ -1733,6 +1733,92 @@ void it("GET /internal/copilot/audit/history aplica paginacao com filtros combin
   assert.equal(body.data.filters.to, toTimestamp);
 });
 
+void it("GET /internal/copilot/audit/history retorna records vazio quando offset excede total filtrado", async () => {
+  copilotStoreInternal.records = [
+    {
+      completion: {
+        answer: "Resultado pagina 1",
+        fetchedAt: "2026-04-01T09:00:01.000Z",
+        model: "google/gemini-1.5-flash",
+        provider: "openrouter",
+        responseId: "copilot-audit-page-001",
+        toolCallsUsed: ["get_crypto_multi_spot_price"],
+        usage: {
+          totalTokens: 30,
+        },
+      },
+      input: {
+        message: "Paginacao 1",
+        temperature: 0.1,
+      },
+      recordedAt: "2026-04-01T09:00:00.000Z",
+      sessionId: "sessao_copilot_pagination",
+    },
+    {
+      completion: {
+        answer: "Resultado pagina 2",
+        fetchedAt: "2026-04-01T09:05:01.000Z",
+        model: "google/gemini-1.5-flash",
+        provider: "openrouter",
+        responseId: "copilot-audit-page-002",
+        toolCallsUsed: ["get_crypto_multi_spot_price"],
+        usage: {
+          totalTokens: 31,
+        },
+      },
+      input: {
+        message: "Paginacao 2",
+        temperature: 0.1,
+      },
+      recordedAt: "2026-04-01T09:05:00.000Z",
+      sessionId: "sessao_copilot_pagination",
+    },
+    {
+      completion: {
+        answer: "Resultado pagina 3",
+        fetchedAt: "2026-04-01T09:10:01.000Z",
+        model: "google/gemini-1.5-flash",
+        provider: "openrouter",
+        responseId: "copilot-audit-page-003",
+        toolCallsUsed: ["get_crypto_multi_spot_price"],
+        usage: {
+          totalTokens: 32,
+        },
+      },
+      input: {
+        message: "Paginacao 3",
+        temperature: 0.1,
+      },
+      recordedAt: "2026-04-01T09:10:00.000Z",
+      sessionId: "sessao_copilot_pagination",
+    },
+  ];
+
+  const fromTimestamp = "2026-04-01T09:00:00.000Z";
+  const toTimestamp = "2026-04-01T09:10:00.000Z";
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: `/internal/copilot/audit/history?limit=1&offset=10&sessionId=sessao_copilot_pagination&toolName=get_crypto_multi_spot_price&from=${encodeURIComponent(fromTimestamp)}&to=${encodeURIComponent(toTimestamp)}`,
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<CopilotAuditHistoryResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.limit, 1);
+  assert.equal(body.data.offset, 10);
+  assert.equal(body.data.totalStored, 3);
+  assert.equal(body.data.totalMatched, 3);
+  assert.equal(body.data.records.length, 0);
+  assert.equal(body.data.filters.sessionId, "sessao_copilot_pagination");
+  assert.equal(body.data.filters.toolName, "get_crypto_multi_spot_price");
+  assert.equal(body.data.filters.from, fromTimestamp);
+  assert.equal(body.data.filters.to, toTimestamp);
+});
+
 void it("GET /internal/copilot/audit/history retorna 400 para sessionId invalido", async () => {
   const response = await app.inject({
     headers: {

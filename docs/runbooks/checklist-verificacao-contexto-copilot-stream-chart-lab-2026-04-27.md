@@ -75,6 +75,15 @@ curl "http://localhost:3000/internal/copilot/audit/history?sessionId=sessao_stre
 
 Resultado esperado: `totalMatched` permanece estavel enquanto `records` muda conforme `offset`.
 
+6. Opcional avancado: validar `offset` acima do total filtrado:
+
+```bash
+curl "http://localhost:3000/internal/copilot/audit/history?sessionId=sessao_stream_ctx_001&toolName=get_crypto_chart_insights&from=2026-04-27T20:30:14.213Z&to=2026-04-27T20:31:14.213Z&limit=1&offset=999" \
+  -H "x-internal-token: $INTERNAL_API_TOKEN"
+```
+
+Resultado esperado: `records` vazio, com `totalMatched` preservado para refletir o total real da busca.
+
 ## Passo a passo (UI opcional)
 
 1. Abrir Chart Lab no frontend.
