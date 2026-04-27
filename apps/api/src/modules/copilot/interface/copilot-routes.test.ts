@@ -54,6 +54,43 @@ interface CopilotHistoryResponse {
   sessionId: string;
 }
 
+interface CopilotInternalAuditRecord {
+  completion: {
+    answer: string;
+    responseId: string;
+  };
+  input: {
+    chartContext?: {
+      assetId?: string;
+      broker?: string;
+      exchange?: string;
+      interval?: string;
+      mode?: "delayed" | "live";
+      operationalMode?: string;
+      range?: "24h" | "7d" | "30d" | "90d" | "1y";
+      strategy?: "crypto" | "institutional_macro";
+      symbol?: string;
+    };
+    message: string;
+  };
+  recordedAt: string;
+  sessionId?: string;
+}
+
+interface CopilotInternalAuditHistoryResponse {
+  filters: {
+    from: string | null;
+    sessionId?: string | null;
+    to: string | null;
+    toolName: string | null;
+  };
+  limit: number;
+  offset: number;
+  records: CopilotInternalAuditRecord[];
+  totalMatched: number;
+  totalStored: number;
+}
+
 interface MutableEnv {
   OPENROUTER_API_BASE_URL: string;
   OPENROUTER_API_KEY: string;
@@ -445,6 +482,258 @@ void it("POST /v1/copilot/chat/stream injeta chartContext e retorna eventos NDJS
   assert.match(systemMessage.content, /exchange=bybit/);
   assert.match(systemMessage.content, /mode=live/);
   assert.ok(systemMessage.content.length <= 4000);
+});
+
+void it("POST /v1/copilot/chat/stream atualiza chartContext entre chamadas da mesma sessao", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  const sessionId = `sessao_stream_context_switch_${Date.now()}`;
+  const capturedBodies: string[] = [];
+  let openRouterCalls = 0;
+
+  globalThis.fetch = ((input, init) => {
+    const requestUrl = String(input);
+
+    if (!requestUrl.includes("/chat/completions")) {
+      return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+    }
+
+    openRouterCalls += 1;
+    capturedBodies.push(typeof init?.body === "string" ? init.body : "");
+
+    const chunkText = openRouterCalls === 1 ? "Contexto BTC em stream." : "Contexto ETH em stream.";
+    const streamId = `chatcmpl-stream-context-switch-${openRouterCalls}`;
+    const streamBody = [
+      `data: ${JSON.stringify({
+        choices: [{
+          delta: {
+            content: chunkText,
+          },
+        }],
+        id: streamId,
+        model: "google/gemini-1.5-flash",
+      })}`,
+      "",
+      `data: ${JSON.stringify({
+        choices: [{
+          delta: {},
+        }],
+        id: streamId,
+        usage: {
+          completion_tokens: 6,
+          prompt_tokens: 36,
+          total_tokens: 42,
+        },
+      })}`,
+      "",
+      "data: [DONE]",
+      "",
+    ].join("\n");
+
+    return Promise.resolve(
+      new Response(streamBody, {
+        headers: {
+          "content-type": "text/event-stream",
+        },
+        status: 200,
+      }),
+    );
+  }) as typeof fetch;
+
+  const firstResponse = await app.inject({
+    method: "POST",
+    payload: {
+      chartContext: {
+        assetId: "bitcoin",
+        broker: "bybit",
+        exchange: "bybit",
+        interval: "15m",
+        mode: "live",
+        operationalMode: "spot_margin",
+        range: "24h",
+        strategy: "crypto",
+        symbol: "BTCUSDT",
+      },
+      message: "Analise BTC no contexto atual.",
+      sessionId,
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat/stream",
+  });
+
+  assert.equal(firstResponse.statusCode, 200);
+
+  const secondResponse = await app.inject({
+    method: "POST",
+    payload: {
+      chartContext: {
+        assetId: "ethereum",
+        broker: "bybit",
+        exchange: "bybit",
+        interval: "15m",
+        mode: "live",
+        operationalMode: "spot_margin",
+        range: "24h",
+        strategy: "crypto",
+        symbol: "ETHUSDT",
+      },
+      message: "Agora troque para ETH e reavalie o contexto.",
+      sessionId,
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat/stream",
+  });
+
+  assert.equal(secondResponse.statusCode, 200);
+  assert.equal(openRouterCalls, 2);
+
+  const secondOpenRouterPayload = JSON.parse(capturedBodies[1] ?? "{}") as {
+    messages?: Array<{
+      content?: string;
+      role?: string;
+    }>;
+  };
+  const secondMessages = Array.isArray(secondOpenRouterPayload.messages)
+    ? secondOpenRouterPayload.messages
+    : [];
+  const secondSystemMessage = secondMessages.find((message) => message.role === "system");
+
+  assert.ok(secondSystemMessage && typeof secondSystemMessage.content === "string");
+  assert.match(secondSystemMessage.content, /Contexto de terminal atual:/);
+  assert.match(secondSystemMessage.content, /asset=ethereum/);
+  assert.match(secondSystemMessage.content, /exchange=bybit/);
+  assert.match(secondSystemMessage.content, /mode=live/);
+  assert.doesNotMatch(secondSystemMessage.content, /asset=bitcoin/);
+
+  assert.ok(secondMessages.some((message) => message.role === "user" && message.content?.includes("Analise BTC")));
+  assert.ok(
+    secondMessages.some(
+      (message) => message.role === "assistant" && message.content?.includes("Contexto BTC em stream."),
+    ),
+  );
+  assert.equal(secondMessages[secondMessages.length - 1]?.role, "user");
+  assert.equal(secondMessages[secondMessages.length - 1]?.content, "Agora troque para ETH e reavalie o contexto.");
+
+  const secondNdjsonLines = secondResponse.payload
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const secondNdjsonEvents = secondNdjsonLines.map((line) => JSON.parse(line) as {
+    data?: unknown;
+    type?: string;
+  });
+
+  assert.ok(
+    secondNdjsonEvents.some(
+      (event) => event.type === "done"
+        && typeof event.data === "object"
+        && event.data !== null
+        && (event.data as { answer?: string }).answer === "Contexto ETH em stream.",
+    ),
+  );
+});
+
+void it("POST /v1/copilot/chat/stream persiste chartContext na auditoria interna", async () => {
+  mutableEnv.OPENROUTER_API_KEY = "sk-or-v1-test-key-configured-123456";
+
+  const sessionId = `sessao_stream_audit_${Date.now()}`;
+
+  globalThis.fetch = ((input) => {
+    const requestUrl = String(input);
+
+    if (!requestUrl.includes("/chat/completions")) {
+      return Promise.reject(new Error(`Unexpected fetch URL: ${requestUrl}`));
+    }
+
+    const streamBody = [
+      `data: ${JSON.stringify({
+        choices: [{
+          delta: {
+            content: "Persistencia stream pronta.",
+          },
+        }],
+        id: "chatcmpl-stream-audit-001",
+        model: "google/gemini-1.5-flash",
+      })}`,
+      "",
+      `data: ${JSON.stringify({
+        choices: [{
+          delta: {},
+        }],
+        id: "chatcmpl-stream-audit-001",
+        usage: {
+          completion_tokens: 7,
+          prompt_tokens: 35,
+          total_tokens: 42,
+        },
+      })}`,
+      "",
+      "data: [DONE]",
+      "",
+    ].join("\n");
+
+    return Promise.resolve(
+      new Response(streamBody, {
+        headers: {
+          "content-type": "text/event-stream",
+        },
+        status: 200,
+      }),
+    );
+  }) as typeof fetch;
+
+  const streamResponse = await app.inject({
+    method: "POST",
+    payload: {
+      chartContext: {
+        assetId: "solana",
+        broker: "kraken",
+        exchange: "kraken",
+        interval: "1h",
+        mode: "live",
+        operationalMode: "spot_margin",
+        range: "7d",
+        strategy: "crypto",
+        symbol: "SOLUSD",
+      },
+      message: "Registre este contexto no stream",
+      sessionId,
+      temperature: 0.1,
+    },
+    url: "/v1/copilot/chat/stream",
+  });
+
+  assert.equal(streamResponse.statusCode, 200);
+
+  const auditResponse = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/copilot/audit/history?limit=1000&offset=0",
+  });
+
+  assert.equal(auditResponse.statusCode, 200);
+
+  const auditBody = auditResponse.json<ApiSuccessResponse<CopilotInternalAuditHistoryResponse>>();
+  assert.equal(auditBody.status, "success");
+
+  const persistedRecord = auditBody.data.records.find(
+    (record) => record.sessionId === sessionId && record.completion.responseId === "chatcmpl-stream-audit-001",
+  );
+
+  if (!persistedRecord) {
+    throw new Error("Persisted stream audit record not found");
+  }
+
+  assert.equal(persistedRecord.input.message, "Registre este contexto no stream");
+  assert.equal(persistedRecord.input.chartContext?.assetId, "solana");
+  assert.equal(persistedRecord.input.chartContext?.broker, "kraken");
+  assert.equal(persistedRecord.input.chartContext?.exchange, "kraken");
+  assert.equal(persistedRecord.input.chartContext?.mode, "live");
+  assert.equal(persistedRecord.input.chartContext?.range, "7d");
+  assert.equal(persistedRecord.input.chartContext?.strategy, "crypto");
+  assert.equal(persistedRecord.input.chartContext?.symbol, "SOLUSD");
 });
 
 void it("POST /v1/copilot/chat envia historico recente no payload do OpenRouter", async () => {
