@@ -2,10 +2,27 @@ function readContextValue(value) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
+const CHART_ASSET_CONTEXT_KEYS = Object.freeze([
+  "assetId",
+  "broker",
+  "exchange",
+  "interval",
+  "mode",
+  "operationalMode",
+  "range",
+  "strategy",
+  "symbol",
+]);
+
 export function normalizeChartAssetContext(input = {}) {
   return {
     assetId: readContextValue(input.assetId),
+    broker: readContextValue(input.broker),
+    exchange: readContextValue(input.exchange),
+    interval: readContextValue(input.interval),
+    mode: readContextValue(input.mode),
     operationalMode: readContextValue(input.operationalMode),
+    range: readContextValue(input.range),
     strategy: readContextValue(input.strategy),
     symbol: readContextValue(input.symbol),
   };
@@ -15,10 +32,7 @@ export function hasChartAssetContextChanged(previousContext = {}, nextContext = 
   const previous = normalizeChartAssetContext(previousContext);
   const next = normalizeChartAssetContext(nextContext);
 
-  return previous.assetId !== next.assetId
-    || previous.symbol !== next.symbol
-    || previous.strategy !== next.strategy
-    || previous.operationalMode !== next.operationalMode;
+  return CHART_ASSET_CONTEXT_KEYS.some((key) => previous[key] !== next[key]);
 }
 
 export function resetChartAssetContext(input = {}) {

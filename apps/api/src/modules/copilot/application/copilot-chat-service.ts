@@ -100,7 +100,23 @@ import {
 } from "../../wall_street/application/wall-street-market-service.js";
 import { z } from "zod";
 
+type CopilotChartContextMode = "delayed" | "live";
+type CopilotChartContextStrategy = "crypto" | "institutional_macro";
+
+export interface CopilotChartContextInput {
+  assetId?: string;
+  broker?: string;
+  exchange?: string;
+  interval?: string;
+  mode?: CopilotChartContextMode;
+  operationalMode?: string;
+  range?: CryptoChartRange;
+  strategy?: CopilotChartContextStrategy;
+  symbol?: string;
+}
+
 export interface CopilotChatInput {
+  chartContext?: CopilotChartContextInput;
   maxTokens?: number;
   message: string;
   sessionId?: string;
@@ -169,6 +185,12 @@ const copilotGeneralAssistantSystemPrompt = [
   "Nao force contexto financeiro se a pergunta for de outro assunto.",
   "Se nao souber algum fato, sinalize a limitacao de forma transparente e sugira como verificar.",
 ].join(" ");
+
+const COPILOT_SYSTEM_PROMPT_MAX_LENGTH = 4000;
+const copilotChartContextExchanges = new Set(["binance", "bybit", "coinbase", "kraken", "okx"]);
+const copilotChartContextModes = new Set(["delayed", "live"]);
+const copilotChartContextRanges = new Set(["24h", "7d", "30d", "90d", "1y"]);
+const copilotChartContextStrategies = new Set(["crypto", "institutional_macro"]);
 
 const copilotSpotPriceToolInputSchema = z.object({
   assetId: z.string().trim().min(1).default("bitcoin"),
@@ -3717,18 +3739,108 @@ export class CopilotChatService {
 
   private withDefaultSystemPrompt(input: CopilotChatInput): CopilotChatInput {
     const trimmedCustomPrompt = input.systemPrompt?.trim();
-
-    if (!trimmedCustomPrompt || trimmedCustomPrompt.length === 0) {
-      return {
-        ...input,
-        systemPrompt: copilotDefaultSystemPrompt,
-      };
-    }
+    const basePrompt = !trimmedCustomPrompt || trimmedCustomPrompt.length === 0
+      ? copilotDefaultSystemPrompt
+      : `${copilotDefaultSystemPrompt}\n\nContexto adicional do usuario:\n${trimmedCustomPrompt}`;
+    const chartContextPrompt = this.buildChartContextPrompt(input.chartContext);
 
     return {
       ...input,
-      systemPrompt: `${copilotDefaultSystemPrompt}\n\nContexto adicional do usuario:\n${trimmedCustomPrompt}`,
+      systemPrompt: this.composeSystemPrompt(basePrompt, chartContextPrompt),
     };
+  }
+
+  private composeSystemPrompt(basePrompt: string, chartContextPrompt: string): string {
+    const safeBasePrompt = basePrompt.slice(0, COPILOT_SYSTEM_PROMPT_MAX_LENGTH);
+
+    if (chartContextPrompt.length === 0) {
+      return safeBasePrompt;
+    }
+
+    const suffix = `\n\nContexto de terminal atual:\n${chartContextPrompt}`;
+    const availableChars = COPILOT_SYSTEM_PROMPT_MAX_LENGTH - safeBasePrompt.length;
+
+    if (availableChars <= 0) {
+      return safeBasePrompt;
+    }
+
+    return `${safeBasePrompt}${suffix.slice(0, availableChars)}`;
+  }
+
+  private normalizeChartContextValue(value: unknown, maxLength = 64): string {
+    if (typeof value !== "string") {
+      return "";
+    }
+
+    const trimmed = value.trim().toLowerCase();
+
+    if (trimmed.length === 0) {
+      return "";
+    }
+
+    return trimmed.slice(0, maxLength);
+  }
+
+  private buildChartContextPrompt(chartContext?: CopilotChartContextInput): string {
+    if (!chartContext || typeof chartContext !== "object") {
+      return "";
+    }
+
+    const contextParts: string[] = [];
+    const assetId = this.normalizeChartContextValue(chartContext.assetId, 64);
+    const symbol = this.normalizeChartContextValue(chartContext.symbol, 32);
+    const broker = this.normalizeChartContextValue(chartContext.broker, 24);
+    const exchange = this.normalizeChartContextValue(chartContext.exchange, 24);
+    const interval = this.normalizeChartContextValue(chartContext.interval, 16);
+    const mode = this.normalizeChartContextValue(chartContext.mode, 10);
+    const range = this.normalizeChartContextValue(chartContext.range, 8);
+    const strategy = this.normalizeChartContextValue(chartContext.strategy, 24);
+    const operationalMode = this.normalizeChartContextValue(chartContext.operationalMode, 40);
+
+    if (assetId.length > 0) {
+      contextParts.push(`asset=${assetId}`);
+    }
+
+    if (symbol.length > 0) {
+      contextParts.push(`symbol=${symbol.toUpperCase()}`);
+    }
+
+    if (broker.length > 0) {
+      contextParts.push(`broker=${broker}`);
+    }
+
+    if (exchange.length > 0 && copilotChartContextExchanges.has(exchange)) {
+      contextParts.push(`exchange=${exchange}`);
+    }
+
+    if (interval.length > 0) {
+      contextParts.push(`interval=${interval}`);
+    }
+
+    if (mode.length > 0 && copilotChartContextModes.has(mode)) {
+      contextParts.push(`mode=${mode}`);
+    }
+
+    if (range.length > 0 && copilotChartContextRanges.has(range)) {
+      contextParts.push(`range=${range}`);
+    }
+
+    if (strategy.length > 0 && copilotChartContextStrategies.has(strategy)) {
+      contextParts.push(`strategy=${strategy}`);
+    }
+
+    if (operationalMode.length > 0) {
+      contextParts.push(`operationalMode=${operationalMode}`);
+    }
+
+    if (contextParts.length === 0) {
+      return "";
+    }
+
+    return [
+      "Use este contexto como padrao para tools de mercado apenas quando o usuario nao explicitar ativo/corretora/faixa.",
+      contextParts.join(" | "),
+    ].join(" ");
   }
 
   private resolveLatestUserMessage(

@@ -9166,18 +9166,116 @@ function renderAnalysisTabs() {
 
 // Pure ADR-074 helpers live in modules/chart-lab/quant/probabilistic.js.
 
+const PROBABILISTIC_MIN_RETURNS_BY_RANGE = Object.freeze({
+  "24h": 12,
+  "7d": 18,
+  "30d": 24,
+  "90d": 30,
+  "1y": 40,
+});
+const PROBABILISTIC_MIN_RETURNS_FLOOR = 12;
+const PROBABILISTIC_MS_PER_DAY = 24 * 60 * 60 * 1000;
+const PROBABILISTIC_MIN_PERIODS_PER_YEAR = 52;
+const PROBABILISTIC_MAX_PERIODS_PER_YEAR = 525600;
+
+function toProbabilisticTimestampMs(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.length > 0) {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : Number.NaN;
+  }
+
+  return Number.NaN;
+}
+
+function inferMedianProbabilisticStepMs(points) {
+  if (!Array.isArray(points) || points.length < 3) {
+    return null;
+  }
+
+  const deltas = [];
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previousTimestamp = toProbabilisticTimestampMs(points[index - 1]?.timestamp);
+    const currentTimestamp = toProbabilisticTimestampMs(points[index]?.timestamp);
+
+    if (!Number.isFinite(previousTimestamp) || !Number.isFinite(currentTimestamp)) {
+      continue;
+    }
+
+    const delta = currentTimestamp - previousTimestamp;
+
+    if (delta > 0) {
+      deltas.push(delta);
+    }
+  }
+
+  if (deltas.length === 0) {
+    return null;
+  }
+
+  deltas.sort((left, right) => left - right);
+  const middle = Math.floor(deltas.length / 2);
+
+  if (deltas.length % 2 === 0) {
+    return (deltas[middle - 1] + deltas[middle]) / 2;
+  }
+
+  return deltas[middle];
+}
+
+function resolveProbabilisticCalibration(points, input = {}) {
+  const range = typeof input.range === "string" ? input.range : "";
+  const strategy = typeof input.strategy === "string" ? input.strategy : "";
+  const baselineMinReturns = PROBABILISTIC_MIN_RETURNS_BY_RANGE[range] ?? PROBABILISTIC_MIN_RETURNS_FOR_STATS;
+  const sampleAwareTarget = Math.max(
+    PROBABILISTIC_MIN_RETURNS_FLOOR,
+    Math.floor((Array.isArray(points) ? points.length : 0) * 0.8),
+  );
+  const minReturnsForStats = Math.min(baselineMinReturns, sampleAwareTarget);
+  const tradingDaysPerYear = strategy === "institutional_macro" ? 252 : 365;
+  const medianStepMs = inferMedianProbabilisticStepMs(points);
+
+  if (!Number.isFinite(medianStepMs) || medianStepMs <= 0) {
+    return {
+      minReturnsForStats,
+      periodsPerYear: tradingDaysPerYear,
+    };
+  }
+
+  const inferredPeriodsPerYear = Math.round((tradingDaysPerYear * PROBABILISTIC_MS_PER_DAY) / medianStepMs);
+
+  return {
+    minReturnsForStats,
+    periodsPerYear: clampNumber(
+      inferredPeriodsPerYear,
+      PROBABILISTIC_MIN_PERIODS_PER_YEAR,
+      PROBABILISTIC_MAX_PERIODS_PER_YEAR,
+    ),
+  };
+}
+
 function renderInstitutionalProbabilisticTab(analysis, snapshot, currency) {
   const points = Array.isArray(snapshot?.points) ? snapshot.points : [];
+  const currentSelection = chartLabStore.getSelection();
+  const probabilisticCalibration = resolveProbabilisticCalibration(points, {
+    range: currentSelection.range,
+    strategy: chartLabState.strategy,
+  });
   const returns = computeProbabilisticReturnsSeries(points);
-  const stats = computeProbabilisticHistoricalStats(returns);
-  const risk = computeProbabilisticRiskMetrics(returns, snapshot);
+  const stats = computeProbabilisticHistoricalStats(returns, probabilisticCalibration);
+  const risk = computeProbabilisticRiskMetrics(returns, snapshot, probabilisticCalibration);
   const monteCarlo = runProbabilisticMonteCarloProjection({
     lastClose: toFiniteNumber(snapshot?.live?.price ?? points[points.length - 1]?.close, Number.NaN),
+    minReturnsForStats: probabilisticCalibration.minReturnsForStats,
     returns,
   });
   const seasonality = computeProbabilisticMonthlySeasonality(points);
-  const skewness = computeProbabilisticSkewness(returns);
-  const kurtosis = computeProbabilisticKurtosis(returns);
+  const skewness = computeProbabilisticSkewness(returns, probabilisticCalibration);
+  const kurtosis = computeProbabilisticKurtosis(returns, probabilisticCalibration);
   const hourlySeasonality = computeProbabilisticHourlySeasonality(points);
   const weekdaySeasonality = computeProbabilisticWeekdaySeasonality(points);
   const candlePatterns = detectProbabilisticCandlePatterns(points);
@@ -9241,7 +9339,7 @@ function renderInstitutionalProbabilisticTab(analysis, snapshot, currency) {
 
   const monteCarloHeader = monteCarlo.ready
     ? `Horizonte ${monteCarlo.horizon} periodos • ${monteCarlo.simulations.toLocaleString("pt-BR")} simulacoes`
-    : `Aquecendo (${returns.length}/${PROBABILISTIC_MIN_RETURNS_FOR_STATS})`;
+    : `Aquecendo (${returns.length}/${probabilisticCalibration.minReturnsForStats})`;
 
   return `
     <section class="prob-dashboard" aria-label="Dashboard Probabilistico Quantitativo">
@@ -9282,14 +9380,14 @@ function renderInstitutionalProbabilisticTab(analysis, snapshot, currency) {
       <article class="prob-card">
         <header class="prob-card__head">
           <h4>Estatisticas Historicas</h4>
-          <span class="prob-card__hint">${stats.ready ? `${stats.sample} periodos` : `Aquecendo (${returns.length}/${PROBABILISTIC_MIN_RETURNS_FOR_STATS})`}</span>
+          <span class="prob-card__hint">${stats.ready ? `${stats.sample} periodos` : `Aquecendo (${returns.length}/${probabilisticCalibration.minReturnsForStats})`}</span>
         </header>
         <div class="prob-stats-grid">
           <div class="prob-stats-cell" data-tone="${statRetCls}" title="Retorno cumulativo (log) sobre a janela disponivel">
             <strong id="prob-stats-return">${stats.ready ? formatProbabilisticPercent(stats.cumulativeReturnPercent, { signed: true }) : "—"}</strong>
             <span>Retorno</span>
           </div>
-          <div class="prob-stats-cell" data-tone="neutral" title="Volatilidade anualizada (desvio padrao * sqrt(252))">
+          <div class="prob-stats-cell" data-tone="neutral" title="Volatilidade anualizada (desvio padrao * sqrt(${probabilisticCalibration.periodsPerYear}))">
             <strong id="prob-stats-vol">${stats.ready ? formatProbabilisticPercent(stats.annualizedVolatilityPercent) : "—"}</strong>
             <span>Volatilidade</span>
           </div>
@@ -10847,7 +10945,7 @@ function buildHftSensorTriggers(analysis, snapshot) {
   // Divergência de delta: gradiente WEGD oposto ao tone
   const deltaOk = Number.isFinite(wegdGradient)
     && ((tone === "buy" && wegdGradient < 0) || (tone === "sell" && wegdGradient > 0));
-  // Pressão de book: pressão WEGD alinhada ao tone com energia ≥ 50
+  // Pressão de fluxo (proxy OHLCV): pressão WEGD alinhada ao tone com energia ≥ 50
   const bookOk = Number.isFinite(wegdPressure) && Number.isFinite(wegdEnergy) && wegdEnergy >= 50
     && ((tone === "buy" && wegdPressure > 0) || (tone === "sell" && wegdPressure < 0));
 
@@ -10872,11 +10970,11 @@ function buildHftSensorTriggers(analysis, snapshot) {
     },
     {
       id: "book",
-      label: "Pressão de order book",
+      label: "Pressão de fluxo (proxy OHLCV)",
       icon: "≣",
       ok: bookOk,
       polarity: "favor",
-      hint: bookOk ? "Pressão alinhada ao bias" : "Pressão indefinida",
+      hint: bookOk ? "Pressão proxy alinhada ao bias" : "Pressão proxy indefinida",
     },
   ];
 
@@ -13114,19 +13212,20 @@ function renderTimingOrderFlowPanel(flow) {
   const cvd = flow?.cvd ?? { label: "Aquecendo", ready: false, tone: "neutral", latest: null, change: null, absorptionRatio: null, bandOneSigma: null };
   const volume = flow?.volume ?? { label: "Aquecendo", ready: false, tone: "neutral", zScore: null, latest: null, mean: null, baselineSample: 0 };
   const zScoreLabel = volume.ready ? `${volume.zScore >= 0 ? "+" : ""}${Number(volume.zScore).toFixed(2)}σ` : "n/d";
+  const flowMethodologyNote = "Leitura baseada em OHLCV agregado (proxy), sem livro de ofertas em tempo real.";
   const flowGuidance = !cvd.ready
     ? "Aguardando OHLCV suficiente para leitura de fluxo."
     : volume.anomaly
       ? "Anomalia de volume detectada: exigir confirmacao de direcao antes de executar."
       : cvd.tone === "bull"
-        ? "Delta acumulado comprador favorece continuacao se o gatilho tecnico alinhar."
+        ? "Delta acumulado comprador (proxy) favorece continuacao se o gatilho tecnico alinhar."
         : cvd.tone === "bear"
-          ? "Delta acumulado vendedor favorece pressao de oferta no timing atual."
-          : "Fluxo equilibrado: priorize setups com confirmacao adicional.";
+          ? "Delta acumulado vendedor (proxy) favorece pressao de oferta no timing atual."
+          : "Fluxo proxy equilibrado: priorize setups com confirmacao adicional.";
 
   return `
     <article class="analysis-block timing-block timing-flow-panel" data-tone="${escapeHtml(cvd.tone)}">
-      <h4>Order Flow CVD / Volume</h4>
+      <h4>Fluxo (proxy OHLCV): CVD / Volume</h4>
       <div class="timing-flow-panel__grid">
         <article>
           <span>CVD</span>
@@ -13145,6 +13244,7 @@ function renderTimingOrderFlowPanel(flow) {
         </article>
       </div>
       ${renderOrderFlowSparkline(flow)}
+      <p class="timing-muted">${escapeHtml(flowMethodologyNote)}</p>
       <p class="timing-muted">${escapeHtml(flowGuidance)}</p>
     </article>
   `;
@@ -19923,7 +20023,12 @@ async function loadChart(options = {}) {
 
   resetChartAssetScopedState({
     assetId,
+    broker: selectedBroker,
+    exchange: selectedExchange,
+    interval: selectedInterval,
+    mode,
     operationalMode: chartLabState.operationalMode,
+    range,
     strategy: pipelineStrategy,
     symbol: selectedTerminalSymbol,
   }, {
@@ -20301,15 +20406,36 @@ function setSendingState(nextValue) {
   setStatus(nextValue ? "loading" : "", nextValue ? "Consultando desk" : "Desk pronto");
 }
 
+function buildCopilotChartContextPayload() {
+  const selection = chartLabStore.getSelection();
+  const chartContext = {
+    assetId: typeof selection?.assetId === "string" ? selection.assetId : undefined,
+    broker: typeof selection?.broker === "string" ? selection.broker : undefined,
+    exchange: typeof selection?.exchange === "string" ? selection.exchange : undefined,
+    interval: typeof selection?.interval === "string" ? selection.interval : undefined,
+    mode: typeof selection?.mode === "string" ? selection.mode : undefined,
+    operationalMode: typeof chartLabState?.operationalMode === "string" ? chartLabState.operationalMode : undefined,
+    range: typeof selection?.range === "string" ? selection.range : undefined,
+    strategy: typeof chartLabState?.strategy === "string" ? chartLabState.strategy : undefined,
+    symbol: typeof selection?.symbol === "string" ? selection.symbol : undefined,
+  };
+
+  return Object.values(chartContext).some((value) => typeof value === "string" && value.length > 0)
+    ? chartContext
+    : undefined;
+}
+
 async function requestCopilotCompletion(message) {
   const headers = await buildCopilotRequestHeaders();
 
   const requestSessionId = isCloudHistoryEnabled() && activeConversationId.length > 0
     ? activeConversationId
     : chatSessionId;
+  const chartContext = buildCopilotChartContextPayload();
 
   const response = await fetch(buildApiUrl("/v1/copilot/chat"), {
     body: JSON.stringify({
+      chartContext,
       maxTokens: 350,
       message,
       sessionId: requestSessionId,
@@ -20361,8 +20487,10 @@ async function requestCopilotCompletionStream(message, options = {}) {
   const requestSessionId = isCloudHistoryEnabled() && activeConversationId.length > 0
     ? activeConversationId
     : chatSessionId;
+  const chartContext = buildCopilotChartContextPayload();
   const response = await fetch(buildApiUrl("/v1/copilot/chat/stream"), {
     body: JSON.stringify({
+      chartContext,
       maxTokens: 350,
       message,
       sessionId: requestSessionId,

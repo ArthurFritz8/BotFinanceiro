@@ -30,6 +30,22 @@ function roundNumber(value, precision = 2) {
   return Math.round(value * factor) / factor;
 }
 
+function toPositiveInteger(value, fallback) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  const normalized = Math.floor(value);
+  return normalized > 0 ? normalized : fallback;
+}
+
+function resolveProbabilisticStatsConfig(options = {}) {
+  return {
+    minReturnsForStats: toPositiveInteger(options.minReturnsForStats, PROBABILISTIC_MIN_RETURNS_FOR_STATS),
+    periodsPerYear: toPositiveInteger(options.periodsPerYear, PROBABILISTIC_TRADING_DAYS_PER_YEAR),
+  };
+}
+
 export function computeProbabilisticReturnsSeries(points) {
   if (!Array.isArray(points) || points.length < 2) {
     return [];
@@ -46,8 +62,10 @@ export function computeProbabilisticReturnsSeries(points) {
   return returns;
 }
 
-export function computeProbabilisticHistoricalStats(returns) {
-  if (!Array.isArray(returns) || returns.length < PROBABILISTIC_MIN_RETURNS_FOR_STATS) {
+export function computeProbabilisticHistoricalStats(returns, options = {}) {
+  const statsConfig = resolveProbabilisticStatsConfig(options);
+
+  if (!Array.isArray(returns) || returns.length < statsConfig.minReturnsForStats) {
     return {
       sample: returns?.length ?? 0,
       ready: false,
@@ -55,14 +73,15 @@ export function computeProbabilisticHistoricalStats(returns) {
       annualizedVolatilityPercent: null,
       sharpeRatio: null,
       maxDrawdownPercent: null,
+      periodsPerYear: statsConfig.periodsPerYear,
     };
   }
   const sumReturns = returns.reduce((acc, value) => acc + value, 0);
   const meanReturn = sumReturns / returns.length;
   const variance = returns.reduce((acc, value) => acc + (value - meanReturn) ** 2, 0) / Math.max(returns.length - 1, 1);
   const stdDev = Math.sqrt(variance);
-  const annualizedVolatility = stdDev * Math.sqrt(PROBABILISTIC_TRADING_DAYS_PER_YEAR);
-  const annualizedReturn = meanReturn * PROBABILISTIC_TRADING_DAYS_PER_YEAR;
+  const annualizedVolatility = stdDev * Math.sqrt(statsConfig.periodsPerYear);
+  const annualizedReturn = meanReturn * statsConfig.periodsPerYear;
   const sharpe = annualizedVolatility > 0 ? annualizedReturn / annualizedVolatility : 0;
 
   let equity = 1;
@@ -86,6 +105,7 @@ export function computeProbabilisticHistoricalStats(returns) {
     annualizedVolatilityPercent: roundNumber(annualizedVolatility * 100, 2),
     sharpeRatio: roundNumber(sharpe, 2),
     maxDrawdownPercent: roundNumber(maxDrawdown * 100, 2),
+    periodsPerYear: statsConfig.periodsPerYear,
   };
 }
 
@@ -101,8 +121,10 @@ export function computeProbabilisticEmpiricalPercentile(sortedValues, percentile
   return sortedValues[lowerIndex] * (1 - weight) + sortedValues[upperIndex] * weight;
 }
 
-export function computeProbabilisticRiskMetrics(returns, _snapshot) {
-  if (!Array.isArray(returns) || returns.length < PROBABILISTIC_MIN_RETURNS_FOR_STATS) {
+export function computeProbabilisticRiskMetrics(returns, _snapshot, options = {}) {
+  const statsConfig = resolveProbabilisticStatsConfig(options);
+
+  if (!Array.isArray(returns) || returns.length < statsConfig.minReturnsForStats) {
     return {
       ready: false,
       varPercent: null,
@@ -135,10 +157,12 @@ export function runProbabilisticMonteCarloProjection({
   returns,
   simulations = PROBABILISTIC_MONTE_CARLO_SIMULATIONS,
   horizonOverride = null,
+  minReturnsForStats,
   random = Math.random,
 }) {
   const safeLastClose = toFiniteNumber(lastClose, Number.NaN);
-  if (!Number.isFinite(safeLastClose) || safeLastClose <= 0 || !Array.isArray(returns) || returns.length < PROBABILISTIC_MIN_RETURNS_FOR_STATS) {
+  const effectiveMinReturns = toPositiveInteger(minReturnsForStats, PROBABILISTIC_MIN_RETURNS_FOR_STATS);
+  if (!Number.isFinite(safeLastClose) || safeLastClose <= 0 || !Array.isArray(returns) || returns.length < effectiveMinReturns) {
     return {
       ready: false,
       simulations: 0,
@@ -244,8 +268,10 @@ export function classifyProbabilisticTone(value, { invert = false } = {}) {
   return positive ? "bull" : "bear";
 }
 
-export function computeProbabilisticSkewness(returns) {
-  if (!Array.isArray(returns) || returns.length < PROBABILISTIC_MIN_RETURNS_FOR_STATS) {
+export function computeProbabilisticSkewness(returns, options = {}) {
+  const statsConfig = resolveProbabilisticStatsConfig(options);
+
+  if (!Array.isArray(returns) || returns.length < statsConfig.minReturnsForStats) {
     return { ready: false, value: null, bias: "n/d" };
   }
   const n = returns.length;
@@ -265,8 +291,10 @@ export function computeProbabilisticSkewness(returns) {
   return { ready: true, value: rounded, bias };
 }
 
-export function computeProbabilisticKurtosis(returns) {
-  if (!Array.isArray(returns) || returns.length < PROBABILISTIC_MIN_RETURNS_FOR_STATS) {
+export function computeProbabilisticKurtosis(returns, options = {}) {
+  const statsConfig = resolveProbabilisticStatsConfig(options);
+
+  if (!Array.isArray(returns) || returns.length < statsConfig.minReturnsForStats) {
     return { ready: false, value: null, alert: "n/d", isFatTail: false };
   }
   const n = returns.length;
