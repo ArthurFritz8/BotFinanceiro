@@ -9188,6 +9188,27 @@ function renderInstitutionalProbabilisticTab(analysis, snapshot, currency) {
     ? `${ghostBackend.resolvedTrades} trades auditados`
     : `Aquecendo (${ghostBackend.resolvedTrades}/5)`;
 
+  // ADR-114 — defensive guards 50/50 sao failure-open intencional (Visual IA
+  // nunca renderiza barra vazia em pipeline degradado). Quando `analysis` chega
+  // sem probabilidades definidas e' sintoma de bug upstream — emitimos warning
+  // observavel em DEV/test sem quebrar a UI em producao (fail-honest preservado).
+  if (
+    analysis !== null
+    && typeof analysis === "object"
+    && (analysis.buyProbability === undefined
+      || analysis.buyProbability === null
+      || !Number.isFinite(analysis.buyProbability))
+    && (analysis.sellProbability === undefined
+      || analysis.sellProbability === null
+      || !Number.isFinite(analysis.sellProbability))
+  ) {
+    if (typeof console !== "undefined" && typeof console.warn === "function") {
+      console.warn(
+        "[chart-lab][ADR-114] Visual IA recebeu analysis sem buy/sellProbability finitos; usando default 50/50 defensivo. Investigar pipeline upstream.",
+      );
+    }
+  }
+
   const buyProbability = toFiniteNumber(analysis?.buyProbability, 50);
   const sellProbability = toFiniteNumber(analysis?.sellProbability, 50);
   const neutralProbability = toFiniteNumber(analysis?.neutralProbability, 0);
