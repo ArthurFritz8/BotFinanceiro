@@ -66,6 +66,15 @@ curl "http://localhost:3000/internal/copilot/audit/history?sessionId=sessao_stre
 
 Observacao: ajuste `toolName` e timestamps para os valores reais retornados na sua trilha.
 
+5. Opcional avancado: validar paginacao no mesmo filtro combinado (`limit`/`offset`):
+
+```bash
+curl "http://localhost:3000/internal/copilot/audit/history?sessionId=sessao_stream_ctx_001&toolName=get_crypto_chart_insights&from=2026-04-27T20:30:14.213Z&to=2026-04-27T20:31:14.213Z&limit=1&offset=1" \
+  -H "x-internal-token: $INTERNAL_API_TOKEN"
+```
+
+Resultado esperado: `totalMatched` permanece estavel enquanto `records` muda conforme `offset`.
+
 ## Passo a passo (UI opcional)
 
 1. Abrir Chart Lab no frontend.
