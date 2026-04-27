@@ -9130,15 +9130,29 @@ function renderAnalysisTabs() {
 
   ensureActiveAnalysisTabForOperationalMode(chartLabState.operationalMode);
 
+  // ADR-113 — ARIA WCAG completo: id estavel + aria-controls no botao,
+  // tabindex roving (active=0, demais=-1) e sincronizacao de
+  // aria-labelledby no tabpanel apos adicao dos botoes.
   for (const tab of resolveVisibleAnalysisTabs(chartLabState.operationalMode)) {
+    const isActive = activeAnalysisTabId === tab.id;
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `analysis-tab-button${activeAnalysisTabId === tab.id ? " is-active" : ""}`;
+    button.className = `analysis-tab-button${isActive ? " is-active" : ""}`;
     button.dataset.tab = tab.id;
+    button.id = `analysis-tab-button-${tab.id}`;
     button.setAttribute("role", "tab");
-    button.setAttribute("aria-selected", activeAnalysisTabId === tab.id ? "true" : "false");
+    button.setAttribute("aria-selected", isActive ? "true" : "false");
+    button.setAttribute("aria-controls", "analysis-tab-content");
+    button.setAttribute("tabindex", isActive ? "0" : "-1");
     button.textContent = tab.label;
     analysisTabsElement.append(button);
+  }
+
+  if (analysisTabContentElement instanceof HTMLElement) {
+    analysisTabContentElement.setAttribute(
+      "aria-labelledby",
+      `analysis-tab-button-${activeAnalysisTabId}`,
+    );
   }
 }
 
