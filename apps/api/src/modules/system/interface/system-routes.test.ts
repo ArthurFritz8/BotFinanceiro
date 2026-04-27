@@ -78,6 +78,7 @@ type CopilotAuditRecord = {
     temperature?: number;
   };
   recordedAt: string;
+  sessionId?: string;
 };
 
 interface MutableOperationalHealthHistoryStore {
@@ -92,11 +93,13 @@ interface MutableCopilotChatAuditStore {
     from?: Date;
     limit?: number;
     offset?: number;
+    sessionId?: string;
     to?: Date;
     toolName?: string;
   }) => Promise<{
     filters: {
       from: string | null;
+      sessionId: string | null;
       to: string | null;
       toolName: string | null;
     };
@@ -358,6 +361,7 @@ interface AirdropsIntelligenceHealthResponse {
 interface CopilotAuditHistoryResponse {
   filters: {
     from: string | null;
+    sessionId: string | null;
     to: string | null;
     toolName: string | null;
   };
@@ -440,6 +444,7 @@ function buildCopilotAuditFixtureRecords(): CopilotAuditRecord[] {
         temperature: 0.1,
       },
       recordedAt: "2026-03-31T10:00:00.000Z",
+      sessionId: "sessao_copilot_001",
     },
     {
       completion: {
@@ -458,6 +463,7 @@ function buildCopilotAuditFixtureRecords(): CopilotAuditRecord[] {
         temperature: 0.1,
       },
       recordedAt: "2026-03-31T11:00:00.000Z",
+      sessionId: "sessao_copilot_002",
     },
   ];
 }
@@ -511,6 +517,7 @@ void beforeEach(() => {
     const safeLimit = Math.max(1, Math.min(options.limit ?? 50, 10000));
     const safeOffset = Math.max(0, options.offset ?? 0);
     const fromMs = options.from?.getTime();
+    const sessionId = options.sessionId?.trim();
     const toMs = options.to?.getTime();
     const toolName = options.toolName?.trim().toLowerCase();
 
@@ -530,6 +537,10 @@ void beforeEach(() => {
         return false;
       }
 
+      if (sessionId && record.sessionId !== sessionId) {
+        return false;
+      }
+
       if (toolName) {
         return record.completion.toolCallsUsed.some((item) => item.toLowerCase() === toolName);
       }
@@ -540,6 +551,7 @@ void beforeEach(() => {
     return Promise.resolve({
       filters: {
         from: options.from ? options.from.toISOString() : null,
+        sessionId: options.sessionId?.trim() || null,
         to: options.to ? options.to.toISOString() : null,
         toolName: options.toolName?.trim() || null,
       },
@@ -1566,6 +1578,44 @@ void it("GET /internal/copilot/audit/history retorna payload com filtro de tool"
   assert.equal(body.data.records.length, 1);
   assert.equal(body.data.records[0]?.completion.responseId, "copilot-audit-002");
   assert.equal(body.data.filters.toolName, "get_crypto_multi_spot_price");
+});
+
+void it("GET /internal/copilot/audit/history retorna payload com filtro de sessionId", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/copilot/audit/history?limit=5&offset=0&sessionId=sessao_copilot_001",
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  const body = response.json<ApiSuccessResponse<CopilotAuditHistoryResponse>>();
+  assert.equal(body.status, "success");
+  assert.equal(body.data.totalStored, 2);
+  assert.equal(body.data.totalMatched, 1);
+  assert.equal(body.data.records.length, 1);
+  assert.equal(body.data.records[0]?.sessionId, "sessao_copilot_001");
+  assert.equal(body.data.records[0]?.completion.responseId, "copilot-audit-001");
+  assert.equal(body.data.filters.sessionId, "sessao_copilot_001");
+});
+
+void it("GET /internal/copilot/audit/history retorna 400 para sessionId invalido", async () => {
+  const response = await app.inject({
+    headers: {
+      "x-internal-token": process.env.INTERNAL_API_TOKEN ?? "",
+    },
+    method: "GET",
+    url: "/internal/copilot/audit/history?sessionId=abc",
+  });
+
+  assert.equal(response.statusCode, 400);
+
+  const body = response.json<ApiErrorResponse>();
+  assert.equal(body.status, "error");
+  assert.equal(body.error.code, "VALIDATION_ERROR");
+  assert.equal(body.error.message, "Invalid payload");
 });
 
 void it("DELETE /internal/copilot/audit/history retorna 400 sem confirm=true", async () => {

@@ -59,6 +59,7 @@ const copilotAuditHistoryQuerySchema = z.object({
   from: optionalDateTimeSchema.optional(),
   limit: z.coerce.number().int().min(1).max(10000).default(50),
   offset: z.coerce.number().int().min(0).max(100000).default(0),
+  sessionId: z.string().trim().min(8).max(128).regex(/^[a-zA-Z0-9_-]+$/).optional(),
   to: optionalDateTimeSchema.optional(),
   toolName: z.string().trim().min(1).max(100).optional(),
 }).superRefine((value, ctx) => {
@@ -223,6 +224,7 @@ export async function getCopilotAuditHistory(
     from: parsedQuery.from,
     limit: parsedQuery.limit,
     offset: parsedQuery.offset,
+    sessionId: parsedQuery.sessionId,
     to: parsedQuery.to,
     toolName: parsedQuery.toolName,
   });
