@@ -8209,6 +8209,9 @@ function resetChartAssetScopedState(nextContext, options = {}) {
       intelligenceSyncAlertLevel = "ok";
       intelligenceSyncLastAlertAtMs = 0;
       chartLabState.snapshot = null;
+      activeAnalysisTabId = "resumo";
+      ensureActiveAnalysisTabForOperationalMode(chartLabState.operationalMode);
+      renderAnalysisTabs();
       clearChartSurface();
       setChartLegend("Carregando novo contexto de ativo...", "loading");
       renderChartMetrics(null);
@@ -12965,6 +12968,25 @@ function getVolatilityRegime(volatilityPercent) {
 function detectAssetClassForTiming(assetId) {
   const id = typeof assetId === "string" ? assetId.trim() : "";
   if (!id) return "crypto";
+
+  const normalizedSymbol = id.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+  const institutionalIndexLike = /^(NAS100|US100|NDX|SPX500|US500|GSPC|US30|DJI|DAX40|GER40|GDAXI|UK100|FTSE|JP225|N225|HK50|HSI)$/;
+  const institutionalCommodityLike = /^(XAUUSD|XAGUSD|WTI|BRENT|NGAS|USOIL|UKOIL|GOLD|SILVER)$/;
+  const institutionalMacroLike = /^(DXY|VIX|TNX|FVX|IRX|US0?2Y|US0?5Y|US10Y|US30Y)$/;
+
+  if (institutionalCommodityLike.test(normalizedSymbol)) {
+    return "commodity";
+  }
+
+  if (institutionalIndexLike.test(normalizedSymbol)) {
+    return "index";
+  }
+
+  if (institutionalMacroLike.test(normalizedSymbol)) {
+    return "macro";
+  }
+
   // Reusa heuristica robusta ja existente (linha ~2093).
   try {
     if (typeof isLikelyForexPairSymbol === "function" && isLikelyForexPairSymbol(id.toUpperCase())) {
@@ -18265,7 +18287,22 @@ function renderChartMetrics(snapshot) {
     },
     {
       label: "Provider",
-      value: String(snapshot.provider ?? "n/d").toUpperCase(),
+      value: (() => {
+        const provider = String(snapshot.provider ?? "n/d").toUpperCase();
+        const source = typeof snapshot.marketDataSource === "string"
+          ? snapshot.marketDataSource
+          : "";
+
+        if (source === "yahoo_finance") {
+          return `${provider} (YAHOO)`;
+        }
+
+        if (source === "synthetic") {
+          return `${provider} (SYNTH)`;
+        }
+
+        return provider;
+      })(),
     },
   ];
 
@@ -19208,7 +19245,18 @@ function applyChartSnapshot(snapshot, options = {}) {
   const displayProvider = typeof options.displayProvider === "string"
     ? options.displayProvider
     : snapshot.provider;
-  const providerLabel = String(displayProvider ?? "n/d").toUpperCase();
+  const providerBaseLabel = String(displayProvider ?? "n/d").toUpperCase();
+  const providerSource = typeof snapshot.marketDataSource === "string"
+    ? snapshot.marketDataSource
+    : "";
+  const providerSourceLabel = providerSource === "yahoo_finance"
+    ? "YAHOO"
+    : providerSource === "synthetic"
+      ? "SYNTH"
+      : "";
+  const providerLabel = typeof options.displayProvider === "string" || providerSourceLabel.length === 0
+    ? providerBaseLabel
+    : `${providerBaseLabel} (${providerSourceLabel})`;
   const refreshIntervalMs = resolveAutoRefreshIntervalMs();
   const refreshLabel =
     snapshot.mode === "live"
@@ -21861,23 +21909,318 @@ initPushNotifications();
 initPaperTradingPanel();
 bindOperatorAutoPaperPanel();
 initBacktestingPanel();
+
+const LIVE_SIGNALS_REAL_CANDIDATES = Object.freeze([
+  {
+    assetId: "bitcoin",
+    displaySymbol: "BTCUSDT",
+    exchange: "binance",
+    module: "crypto",
+    range: "24h",
+    strategy: "crypto",
+  },
+  {
+    assetId: "ethereum",
+    displaySymbol: "ETHUSDT",
+    exchange: "binance",
+    module: "crypto",
+    range: "24h",
+    strategy: "crypto",
+  },
+  {
+    assetId: "solana",
+    displaySymbol: "SOLUSDT",
+    exchange: "binance",
+    module: "crypto",
+    range: "24h",
+    strategy: "crypto",
+  },
+  {
+    displaySymbol: "EURUSD",
+    module: "forex",
+    range: "24h",
+    strategy: "institutional_macro",
+    symbol: "EURUSD",
+  },
+  {
+    displaySymbol: "XAUUSD",
+    module: "forex",
+    range: "24h",
+    strategy: "institutional_macro",
+    symbol: "XAUUSD",
+  },
+  {
+    displaySymbol: "NAS100",
+    module: "forex",
+    range: "24h",
+    strategy: "institutional_macro",
+    symbol: "NAS100",
+  },
+]);
+
+function toLiveSignalsFiniteNumber(value, fallback = Number.NaN) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function clampLiveSignalsNumber(value, minimum, maximum) {
+  if (!Number.isFinite(value)) {
+    return minimum;
+  }
+
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function resolveLiveSignalsTimeframe(range) {
+  if (range === "24h") {
+    return "5m";
+  }
+
+  if (range === "7d" || range === "30d") {
+    return "15m";
+  }
+
+  if (range === "90d") {
+    return "60m";
+  }
+
+  return "240m";
+}
+
+function resolveLiveSignalTone(tradeAction, trend) {
+  const normalizedTradeAction = typeof tradeAction === "string"
+    ? tradeAction.trim().toLowerCase()
+    : "";
+
+  if (normalizedTradeAction === "buy") {
+    return "bull";
+  }
+
+  if (normalizedTradeAction === "sell") {
+    return "bear";
+  }
+
+  const normalizedTrend = typeof trend === "string"
+    ? trend.trim().toLowerCase()
+    : "";
+
+  if (normalizedTrend.includes("bull")) {
+    return "bull";
+  }
+
+  if (normalizedTrend.includes("bear")) {
+    return "bear";
+  }
+
+  return "neutral";
+}
+
+function resolveLiveSignalStatus(score, tradeAction) {
+  const normalizedTradeAction = typeof tradeAction === "string"
+    ? tradeAction.trim().toLowerCase()
+    : "";
+
+  if (normalizedTradeAction === "wait") {
+    return "aguardando";
+  }
+
+  if (score >= 90) {
+    return "ativo";
+  }
+
+  if (score >= 85) {
+    return "aguardando";
+  }
+
+  return "stop";
+}
+
+function buildLiveSignalSetup(snapshot) {
+  const marketStructure = snapshot?.insights?.marketStructure;
+
+  if (marketStructure && typeof marketStructure === "object") {
+    const bos = typeof marketStructure.bosSignal === "string"
+      ? marketStructure.bosSignal.toLowerCase()
+      : "none";
+    const choch = typeof marketStructure.chochSignal === "string"
+      ? marketStructure.chochSignal.toLowerCase()
+      : "none";
+
+    if (bos !== "none") {
+      return `BOS ${bos.toUpperCase()} + leitura de estrutura`;
+    }
+
+    if (choch !== "none") {
+      return `CHoCH ${choch.toUpperCase()} + confirmacao de fluxo`;
+    }
+  }
+
+  const trend = typeof snapshot?.insights?.trend === "string"
+    ? snapshot.insights.trend
+    : "mercado";
+
+  return `Confluencia tecnica ${trend}`;
+}
+
+function buildLiveSignalFromSnapshot(candidate, snapshot) {
+  const insights = snapshot?.insights;
+
+  if (!insights || typeof insights !== "object") {
+    return null;
+  }
+
+  const tradeLevels = insights.tradeLevels;
+  const entryLow = toLiveSignalsFiniteNumber(tradeLevels?.entryZoneLow, Number.NaN);
+  const entryHigh = toLiveSignalsFiniteNumber(tradeLevels?.entryZoneHigh, Number.NaN);
+  const currentPrice = toLiveSignalsFiniteNumber(insights.currentPrice, Number.NaN);
+  const entry = Number.isFinite(entryLow) && Number.isFinite(entryHigh)
+    ? (entryLow + entryHigh) / 2
+    : currentPrice;
+
+  if (!Number.isFinite(entry)) {
+    return null;
+  }
+
+  const stop = toLiveSignalsFiniteNumber(tradeLevels?.stopLoss, entry);
+  const takeProfit1 = toLiveSignalsFiniteNumber(tradeLevels?.takeProfit1, entry);
+  const takeProfit2 = toLiveSignalsFiniteNumber(tradeLevels?.takeProfit2, takeProfit1);
+  const confidenceScore = clampLiveSignalsNumber(Math.round(toLiveSignalsFiniteNumber(insights.confidenceScore, 85)), 0, 99);
+  const tradeAction = typeof insights.tradeAction === "string" ? insights.tradeAction : "wait";
+  const tone = resolveLiveSignalTone(tradeAction, insights.trend);
+  const take = tone === "bear"
+    ? Math.min(takeProfit1, takeProfit2)
+    : Math.max(takeProfit1, takeProfit2);
+  const fetchedAtMs = Date.parse(typeof snapshot?.fetchedAt === "string" ? snapshot.fetchedAt : "");
+  const assetId = typeof snapshot?.assetId === "string"
+    ? snapshot.assetId.toLowerCase()
+    : typeof candidate.assetId === "string"
+      ? candidate.assetId
+      : "";
+  const symbol = typeof snapshot?.symbol === "string" && snapshot.symbol.length > 0
+    ? snapshot.symbol
+    : candidate.displaySymbol;
+  const signalId = `ls_${candidate.module}_${(assetId || symbol).toLowerCase().replace(/[^a-z0-9]/g, "")}_${Number.isFinite(fetchedAtMs) ? Math.floor(fetchedAtMs) : Date.now()}`;
+
+  return {
+    assetId,
+    entry,
+    module: candidate.module,
+    score: confidenceScore,
+    setup: buildLiveSignalSetup(snapshot),
+    signalId,
+    snapshotAtMs: Number.isFinite(fetchedAtMs) ? Math.floor(fetchedAtMs) : Date.now(),
+    status: resolveLiveSignalStatus(confidenceScore, tradeAction),
+    stop,
+    strategy: candidate.strategy,
+    symbol,
+    take,
+    tf: resolveLiveSignalsTimeframe(candidate.range),
+    tone,
+  };
+}
+
+function buildLiveSignalsCandidateUrl(candidate) {
+  const params = new URLSearchParams({
+    mode: "delayed",
+    range: candidate.range,
+  });
+
+  if (candidate.module === "crypto") {
+    params.set("assetId", candidate.assetId);
+    params.set("exchange", candidate.exchange);
+    return buildApiUrl(`/v1/crypto/strategy-chart?${params.toString()}`);
+  }
+
+  params.set("symbol", candidate.symbol);
+  return buildApiUrl(`/v1/forex/strategy-chart?${params.toString()}`);
+}
+
+async function fetchSingleLiveSignalCandidate(candidate) {
+  try {
+    const response = await fetch(buildLiveSignalsCandidateUrl(candidate), {
+      headers: {
+        accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = await response.json();
+    return buildLiveSignalFromSnapshot(candidate, payload?.data);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchLiveSignalsFeed() {
+  const settled = await Promise.allSettled(
+    LIVE_SIGNALS_REAL_CANDIDATES.map((candidate) => fetchSingleLiveSignalCandidate(candidate)),
+  );
+
+  return settled
+    .filter((result) => result.status === "fulfilled")
+    .map((result) => result.value)
+    .filter((signal) => signal !== null)
+    .sort((left, right) => right.score - left.score);
+}
+
 bootstrapLiveSignals({
+  fetchSignals: fetchLiveSignalsFeed,
   // ADR-080 — Auditar Sinal: abre o ativo no Chart Lab e dispara
   // o pipeline completo (SMC + HFT + Probabilistica + ...).
-  onAuditSignal: ({ symbol }) => {
+  onAuditSignal: ({ symbol, assetId, module, strategy }) => {
     try {
       navigateToRoute(APP_ROUTE_CHART_LAB);
-      const chartAssetSelect = document.querySelector("#chart-asset");
-      if (chartAssetSelect instanceof HTMLSelectElement && typeof symbol === "string" && symbol.length > 0) {
-        const slug = symbol.toLowerCase().replace(/\s+/g, "-");
-        const candidates = [symbol, symbol.toLowerCase(), slug];
-        const match = Array.from(chartAssetSelect.options).find((opt) =>
-          candidates.includes(opt.value) || candidates.includes(opt.textContent?.trim().toLowerCase() ?? ""),
-        );
-        if (match) {
-          chartAssetSelect.value = match.value;
+
+      const normalizedAssetId = typeof assetId === "string"
+        ? assetId.trim().toLowerCase()
+        : "";
+      const normalizedSymbol = sanitizeTerminalSymbol(symbol);
+      const normalizedModule = typeof module === "string" && module.trim().length > 0
+        ? module.trim().toLowerCase()
+        : typeof strategy === "string" && strategy === "institutional_macro"
+          ? "forex"
+          : "crypto";
+
+      if (chartAssetSelect instanceof HTMLSelectElement) {
+        const availableAssetIds = new Set(Array.from(chartAssetSelect.options).map((opt) => opt.value));
+
+        if (normalizedAssetId.length > 0 && availableAssetIds.has(normalizedAssetId)) {
+          chartAssetSelect.value = normalizedAssetId;
           chartAssetSelect.dispatchEvent(new Event("change", { bubbles: true }));
+          return;
         }
+
+        if (normalizedSymbol.length > 0) {
+          const lowerSymbol = normalizedSymbol.toLowerCase();
+          const slug = lowerSymbol.replace(/\s+/g, "-");
+          const candidates = [lowerSymbol, slug];
+          const match = Array.from(chartAssetSelect.options).find((opt) => {
+            const value = opt.value.toLowerCase();
+            const text = opt.textContent?.trim().toLowerCase() ?? "";
+            return candidates.includes(value) || candidates.some((candidate) => text.includes(candidate));
+          });
+
+          if (match) {
+            chartAssetSelect.value = match.value;
+            chartAssetSelect.dispatchEvent(new Event("change", { bubbles: true }));
+            return;
+          }
+        }
+      }
+
+      if (chartSymbolInput instanceof HTMLInputElement && normalizedSymbol.length > 0) {
+        chartLabState.symbolSourceModule = normalizedModule;
+        chartSymbolInput.value = mapSymbolToExchange(normalizedSymbol, getSelectedTerminalExchange());
+        renderWatchlist();
+        chartHasInitialFit = false;
+        void syncIntelligenceDeskForCurrentContext({
+          reason: "live-signals-audit",
+          silent: false,
+        });
+        scheduleTradingViewRefresh();
+        saveChartPreferences();
       }
     } catch {
       // Falha silenciosa — graceful degradation.

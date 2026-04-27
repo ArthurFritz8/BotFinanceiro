@@ -258,6 +258,8 @@ void it("GET /v1/forex/strategy-chart retorna snapshot institucional com macro r
           }>;
         };
       };
+      marketDataSource: "synthetic" | "yahoo_finance";
+      marketDataSymbol: string | null;
       mode: "delayed" | "live";
       strategy: "institutional_macro";
       symbol: string;
@@ -269,6 +271,8 @@ void it("GET /v1/forex/strategy-chart retorna snapshot institucional com macro r
   assert.equal(body.data.symbol, "EURUSD");
   assert.equal(body.data.strategy, "institutional_macro");
   assert.equal(body.data.mode, "delayed");
+  assert.equal(body.data.marketDataSource, "synthetic");
+  assert.equal(body.data.marketDataSymbol, null);
   assert.ok(body.data.institutional.macroRadar.upcomingEvents.length >= 1);
   assert.equal(typeof body.data.institutional.macroRadar.upcomingEvents[0]?.hoursToEvent, "number");
   assert.ok(["green", "yellow", "red"].includes(body.data.institutional.macroRadar.alertLevel));
@@ -284,6 +288,8 @@ void it("GET /v1/forex/institutional-macro/snapshot suporta modo live", async ()
 
   const body = response.json<{
     data: {
+      marketDataSource: "synthetic" | "yahoo_finance";
+      marketDataSymbol: string | null;
       mode: "delayed" | "live";
       strategy: "institutional_macro";
       symbol: string;
@@ -294,5 +300,7 @@ void it("GET /v1/forex/institutional-macro/snapshot suporta modo live", async ()
   assert.equal(body.status, "success");
   assert.equal(body.data.symbol, "XAUUSD");
   assert.equal(body.data.mode, "live");
+  assert.equal(body.data.marketDataSource, "synthetic");
+  assert.equal(body.data.marketDataSymbol, null);
   assert.equal(body.data.strategy, "institutional_macro");
 });

@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+import { env } from "../../../shared/config/env.js";
+import { logger } from "../../../shared/logger/logger.js";
+
 const supportedRangeSchema = z.enum(["24h", "7d", "30d", "90d", "1y"]);
 const supportedModeSchema = z.enum(["delayed", "live"]);
 const supportedResolutionSchema = z.enum([
@@ -48,6 +51,7 @@ type InstitutionalBias = "bullish" | "bearish" | "neutral";
 type PowerOfThreePhase = "accumulation" | "manipulation" | "distribution" | "transition";
 
 type MacroAlertLevel = "green" | "yellow" | "red";
+type InstitutionalMarketDataSource = "yahoo_finance" | "synthetic";
 
 interface MacroRadarEvent {
   hoursToEvent: number;
@@ -110,6 +114,8 @@ export interface InstitutionalMacroResponse {
   };
   currency: "usd";
   fetchedAt: string;
+  marketDataSource: InstitutionalMarketDataSource;
+  marketDataSymbol: string | null;
   insights: InstitutionalMacroInsights;
   institutional: {
     killzones: {
@@ -176,6 +182,46 @@ const rangeToPointCount: Record<InstitutionalMacroRange, number> = {
 
 const oneMinuteMs = 60 * 1000;
 const oneDayMs = 24 * 60 * oneMinuteMs;
+
+const yahooChartQuoteSeriesSchema = z.object({
+  close: z.array(z.number().nullable()).optional(),
+  high: z.array(z.number().nullable()).optional(),
+  low: z.array(z.number().nullable()).optional(),
+  open: z.array(z.number().nullable()).optional(),
+  volume: z.array(z.number().nullable()).optional(),
+});
+
+const yahooChartResponseSchema = z.object({
+  chart: z.object({
+    result: z.array(z.object({
+      indicators: z
+        .object({
+          quote: z.array(yahooChartQuoteSeriesSchema).optional(),
+        })
+        .optional(),
+      timestamp: z.array(z.number().int()).optional(),
+    })).nullable().optional(),
+  }),
+});
+
+type YahooChartQuoteSeries = z.infer<typeof yahooChartQuoteSeriesSchema>;
+type YahooChartResponse = z.infer<typeof yahooChartResponseSchema>;
+
+const yahooChartSymbolAliasMap: Record<string, string> = {
+  DAX40: "^GDAXI",
+  DJI: "^DJI",
+  GER40: "^GDAXI",
+  HK50: "^HSI",
+  JP225: "^N225",
+  NAS100: "^NDX",
+  SPX500: "^GSPC",
+  UK100: "^FTSE",
+  US100: "^NDX",
+  US30: "^DJI",
+  US500: "^GSPC",
+  XAGUSD: "SI=F",
+  XAUUSD: "GC=F",
+};
 
 const resolutionToMsMap: Record<Exclude<InstitutionalMacroResolution, "1S" | "5S" | "10S" | "15S" | "30S" | "45S">, number> = {
   "1": oneMinuteMs,
@@ -278,6 +324,209 @@ function derivePowerOfThreePhase(session: "asia" | "london" | "new_york" | "off_
   }
 
   return "transition";
+}
+
+function resolveYahooChartSymbol(symbol: string): string | null {
+  if (typeof symbol !== "string" || symbol.length < 2) {
+    return null;
+  }
+
+  if (symbol in yahooChartSymbolAliasMap) {
+    return yahooChartSymbolAliasMap[symbol] ?? null;
+  }
+
+  if (/^[A-Z]{6}$/.test(symbol)) {
+    return `${symbol}=X`;
+  }
+
+  return null;
+}
+
+function resolveYahooRangeConfig(range: InstitutionalMacroRange): {
+  interval: "1d" | "1h" | "5m";
+  range: "1d" | "7d" | "1mo" | "3mo" | "1y";
+} {
+  if (range === "24h") {
+    return {
+      interval: "5m",
+      range: "1d",
+    };
+  }
+
+  if (range === "7d") {
+    return {
+      interval: "1h",
+      range: "7d",
+    };
+  }
+
+  if (range === "30d") {
+    return {
+      interval: "1h",
+      range: "1mo",
+    };
+  }
+
+  if (range === "90d") {
+    return {
+      interval: "1d",
+      range: "3mo",
+    };
+  }
+
+  return {
+    interval: "1d",
+    range: "1y",
+  };
+}
+
+function roundByMagnitude(value: number): number {
+  return round(value, Math.abs(value) >= 50 ? 2 : 6);
+}
+
+function toFiniteNumberOrNull(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || Number.isNaN(value) || !Number.isFinite(value)) {
+    return null;
+  }
+
+  return value;
+}
+
+async function loadMarketBackedSeries(
+  symbol: string,
+  range: InstitutionalMacroRange,
+): Promise<{
+  points: InstitutionalMacroPoint[];
+  source: InstitutionalMarketDataSource;
+  symbolResolved: string | null;
+} | null> {
+  if (
+    process.env.NODE_ENV === "test"
+    && process.env.FOREX_INSTITUTIONAL_REAL_SERIES_TEST !== "true"
+  ) {
+    return null;
+  }
+
+  const yahooSymbol = resolveYahooChartSymbol(symbol);
+
+  if (!yahooSymbol) {
+    return null;
+  }
+
+  const rangeConfig = resolveYahooRangeConfig(range);
+  let requestUrl: URL;
+
+  try {
+    requestUrl = new URL(
+      `/v8/finance/chart/${encodeURIComponent(yahooSymbol)}`,
+      env.YAHOO_FINANCE_API_BASE_URL,
+    );
+  } catch {
+    return null;
+  }
+
+  requestUrl.searchParams.set("interval", rangeConfig.interval);
+  requestUrl.searchParams.set("range", rangeConfig.range);
+
+  let response: Response;
+
+  try {
+    response = await fetch(requestUrl.toString(), {
+      headers: {
+        accept: "application/json",
+      },
+      signal: AbortSignal.timeout(env.YAHOO_FINANCE_TIMEOUT_MS),
+    });
+  } catch {
+    return null;
+  }
+
+  if (!response.ok) {
+    logger.warn(
+      {
+        responseStatus: response.status,
+        symbol,
+        yahooSymbol,
+      },
+      "Institutional macro yahoo chart unavailable",
+    );
+    return null;
+  }
+
+  let payload: unknown;
+
+  try {
+    payload = await response.json();
+  } catch {
+    return null;
+  }
+
+  const parsedPayload = yahooChartResponseSchema.safeParse(payload);
+
+  if (!parsedPayload.success) {
+    return null;
+  }
+
+  const chartPayload: YahooChartResponse = parsedPayload.data;
+  const chartResult = chartPayload.chart.result?.[0] ?? null;
+  const timestamps: number[] = Array.isArray(chartResult?.timestamp)
+    ? chartResult.timestamp
+    : [];
+  const quote: YahooChartQuoteSeries | null = chartResult?.indicators?.quote?.[0] ?? null;
+
+  if (!quote || timestamps.length === 0) {
+    return null;
+  }
+
+  const points: InstitutionalMacroPoint[] = [];
+  let previousClose: number | null = null;
+
+  for (let index = 0; index < timestamps.length; index += 1) {
+    const timestampSeconds = timestamps[index];
+
+    if (typeof timestampSeconds !== "number" || !Number.isFinite(timestampSeconds) || timestampSeconds <= 0) {
+      continue;
+    }
+
+    const openRaw = toFiniteNumberOrNull(quote.open?.[index]);
+    const highRaw = toFiniteNumberOrNull(quote.high?.[index]);
+    const lowRaw = toFiniteNumberOrNull(quote.low?.[index]);
+    const closeRaw = toFiniteNumberOrNull(quote.close?.[index]);
+
+    const close: number | null = closeRaw ?? openRaw ?? previousClose;
+
+    if (close === null || close <= 0) {
+      continue;
+    }
+
+    const normalizedClose: number = close;
+    const open: number = openRaw ?? previousClose ?? normalizedClose;
+    const high: number = Math.max(highRaw ?? normalizedClose, open, normalizedClose);
+    const low: number = Math.min(lowRaw ?? normalizedClose, open, normalizedClose);
+    const volumeRaw = toFiniteNumberOrNull(quote.volume?.[index]);
+    const volume = volumeRaw !== null ? Math.max(0, volumeRaw) : null;
+
+    points.push({
+      close: roundByMagnitude(normalizedClose),
+      high: roundByMagnitude(high),
+      low: roundByMagnitude(low),
+      open: roundByMagnitude(open),
+      timestamp: new Date(timestampSeconds * 1000).toISOString(),
+      volume,
+    });
+
+    previousClose = normalizedClose;
+  }
+
+  if (points.length < 12) {
+    return null;
+  }
+
+  return {
+    points,
+    source: "yahoo_finance",
+    symbolResolved: yahooSymbol,
+  };
 }
 
 function buildSyntheticSeries(symbol: string, range: InstitutionalMacroRange): InstitutionalMacroPoint[] {
@@ -822,8 +1071,13 @@ export class InstitutionalMacroService {
     const now = new Date();
     const utcHour = now.getUTCHours();
     const seed = hashCode(`${parsedInput.module}:${parsedInput.symbol}:${parsedInput.range}`);
+    const marketSeries = await loadMarketBackedSeries(parsedInput.symbol, parsedInput.range);
+    const marketDataSource: InstitutionalMarketDataSource = marketSeries?.source ?? "synthetic";
+    const marketDataSymbol = marketSeries?.symbolResolved ?? null;
+    const sourceSeries = marketSeries?.points
+      ?? buildSyntheticSeries(parsedInput.symbol, parsedInput.range);
     const points = applyResolutionToSeries(
-      buildSyntheticSeries(parsedInput.symbol, parsedInput.range),
+      sourceSeries,
       parsedInput.resolution,
     );
     const insights = computeInsights(points);
@@ -871,6 +1125,8 @@ export class InstitutionalMacroService {
       },
       currency: "usd",
       fetchedAt: now.toISOString(),
+      marketDataSource,
+      marketDataSymbol,
       insights,
       institutional: {
         killzones: {

@@ -173,6 +173,91 @@ function scoreTier(score) {
   return "ok";
 }
 
+function clampNumber(value, min, max) {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+
+  return Math.min(max, Math.max(min, value));
+}
+
+function toFiniteNumber(value, fallback = Number.NaN) {
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function sanitizeSignalText(value, fallback = "") {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : fallback;
+}
+
+const LIVE_SIGNAL_ALLOWED_TONES = new Set(["bull", "bear", "neutral"]);
+const LIVE_SIGNAL_ALLOWED_TF = new Set(["5m", "15m", "60m", "240m", "D"]);
+const LIVE_SIGNAL_ALLOWED_STATUS = new Set(["aguardando", "ativo", "tp1", "tp2", "stop"]);
+
+export function normalizeLiveSignal(signal, nowMs = Date.now()) {
+  if (!signal || typeof signal !== "object") {
+    return null;
+  }
+
+  const toneRaw = sanitizeSignalText(signal.tone, "neutral").toLowerCase();
+  const tone = LIVE_SIGNAL_ALLOWED_TONES.has(toneRaw) ? toneRaw : "neutral";
+  const tfRaw = sanitizeSignalText(signal.tf, "15m");
+  const tf = LIVE_SIGNAL_ALLOWED_TF.has(tfRaw) ? tfRaw : "15m";
+  const statusRaw = sanitizeSignalText(signal.status, "aguardando").toLowerCase();
+  const status = LIVE_SIGNAL_ALLOWED_STATUS.has(statusRaw) ? statusRaw : "aguardando";
+  const score = clampNumber(Math.round(toFiniteNumber(signal.score, 85)), 0, 99);
+  const entry = toFiniteNumber(signal.entry, Number.NaN);
+  const stop = toFiniteNumber(signal.stop, Number.NaN);
+  const take = toFiniteNumber(signal.take, Number.NaN);
+
+  if (!Number.isFinite(entry) || !Number.isFinite(stop) || !Number.isFinite(take)) {
+    return null;
+  }
+
+  const rrRaw = Math.abs((take - entry) / Math.max(Math.abs(entry - stop), 1e-9));
+  const rr = Number.isFinite(rrRaw) ? rrRaw : 0;
+  const symbol = sanitizeSignalText(signal.symbol, "Ativo");
+  const signalId = sanitizeSignalText(signal.signalId)
+    || `ls_${symbol.toLowerCase().replace(/[^a-z0-9]/g, "")}_${Math.max(0, Math.floor(nowMs))}`;
+  const setup = sanitizeSignalText(signal.setup, "Confluencia tecnica em validacao");
+  const snapshotAtMs = Number.isFinite(signal.snapshotAtMs)
+    ? Math.max(0, Math.floor(Number(signal.snapshotAtMs)))
+    : nowMs;
+
+  return {
+    assetId: sanitizeSignalText(signal.assetId, ""),
+    entry,
+    module: sanitizeSignalText(signal.module, "crypto").toLowerCase(),
+    rr,
+    score,
+    setup,
+    signalId,
+    snapshotAtMs,
+    status,
+    stop,
+    strategy: sanitizeSignalText(signal.strategy, "crypto"),
+    symbol,
+    take,
+    tf,
+    tone,
+  };
+}
+
+export function normalizeLiveSignals(signals, nowMs = Date.now()) {
+  if (!Array.isArray(signals)) {
+    return [];
+  }
+
+  return signals
+    .map((signal) => normalizeLiveSignal(signal, nowMs))
+    .filter((signal) => signal !== null)
+    .sort((left, right) => right.score - left.score);
+}
+
 function renderCard(signal) {
   const arrow = signal.tone === "bull" ? "↗" : signal.tone === "bear" ? "↘" : "→";
   const tfLabel = TF_LABEL[signal.tf] ?? signal.tf;
@@ -208,7 +293,16 @@ function renderCard(signal) {
         <span class="live-signals__card-rr">R:R 1:${signal.rr.toFixed(1)}</span>
       </div>
       <div class="live-signals__card-actions">
-        <button type="button" class="live-signals__audit-btn" data-action="audit" data-signal-id="${escapeHtml(signal.signalId)}" data-symbol="${escapeHtml(signal.symbol)}">
+        <button
+          type="button"
+          class="live-signals__audit-btn"
+          data-action="audit"
+          data-signal-id="${escapeHtml(signal.signalId)}"
+          data-symbol="${escapeHtml(signal.symbol)}"
+          data-asset-id="${escapeHtml(signal.assetId)}"
+          data-module="${escapeHtml(signal.module)}"
+          data-strategy="${escapeHtml(signal.strategy)}"
+        >
           Auditar Sinal
         </button>
         <span class="live-signals__card-timestamp">${formatTimestamp(signal.snapshotAtMs)}</span>
@@ -226,7 +320,7 @@ function applyFilters(signals, prefs) {
 }
 
 // --- Bootstrap publico -----------------------------------------------------
-export function bootstrapLiveSignals({ onAuditSignal } = {}) {
+export function bootstrapLiveSignals({ onAuditSignal, fetchSignals } = {}) {
   const stage = document.querySelector("#live-signals-stage");
   if (!(stage instanceof HTMLElement)) return;
 
@@ -249,6 +343,7 @@ export function bootstrapLiveSignals({ onAuditSignal } = {}) {
   let lastSignals = [];
   let lastNotifiedIds = new Set();
   let pollTimer = null;
+  let refreshInFlight = false;
 
   function syncSoundButton() {
     if (!(soundToggle instanceof HTMLButtonElement)) return;
@@ -317,24 +412,65 @@ export function bootstrapLiveSignals({ onAuditSignal } = {}) {
     statusPill.textContent = message;
   }
 
-  function refreshSignals() {
+  async function refreshSignals() {
+    if (refreshInFlight) {
+      return;
+    }
+
+    refreshInFlight = true;
+
+    if (feed instanceof HTMLElement) {
+      feed.setAttribute("aria-busy", "true");
+    }
+
+    setStatus("syncing", "Sincronizando radar...");
+
     try {
-      const next = generateMockSignals();
+      const nowMs = Date.now();
+      let next = [];
+      let sourceLabel = "mock";
+
+      if (typeof fetchSignals === "function") {
+        const fetched = await fetchSignals();
+        const normalizedFetched = normalizeLiveSignals(fetched, nowMs);
+
+        if (normalizedFetched.length > 0) {
+          next = normalizedFetched;
+          sourceLabel = "real";
+        }
+      }
+
+      if (next.length === 0) {
+        next = normalizeLiveSignals(generateMockSignals(nowMs), nowMs);
+      }
+
       lastSignals = next;
       maybeNotify(next);
       renderFeed();
-      setStatus("live", `Radar ao vivo · ${next.length} ativos`);
+
+      if (sourceLabel === "real") {
+        setStatus("live", `Radar ao vivo · ${next.length} ativos`);
+      } else {
+        setStatus("live", `Radar degradado · ${next.length} ativos`);
+      }
     } catch (err) {
+      const fallback = normalizeLiveSignals(generateMockSignals(Date.now()), Date.now());
+      lastSignals = fallback;
+      renderFeed();
       setStatus("error", "Falha ao sincronizar radar");
       // eslint-disable-next-line no-console
       console.warn("[live-signals] refresh failed", err);
+    } finally {
+      refreshInFlight = false;
     }
   }
 
   function startPolling() {
     if (pollTimer) return;
-    refreshSignals();
-    pollTimer = setInterval(refreshSignals, 5000);
+    void refreshSignals();
+    pollTimer = setInterval(() => {
+      void refreshSignals();
+    }, 5000);
   }
 
   function stopPolling() {
@@ -398,8 +534,15 @@ export function bootstrapLiveSignals({ onAuditSignal } = {}) {
       if (!(btn instanceof HTMLButtonElement)) return;
       const symbol = btn.dataset.symbol ?? "";
       const signalId = btn.dataset.signalId ?? "";
+      const assetId = btn.dataset.assetId ?? "";
+      const module = btn.dataset.module ?? "";
+      const strategy = btn.dataset.strategy ?? "";
       if (typeof onAuditSignal === "function") {
-        try { onAuditSignal({ symbol, signalId }); } catch { /* swallow */ }
+        try {
+          onAuditSignal({ assetId, module, signalId, strategy, symbol });
+        } catch {
+          /* swallow */
+        }
       }
     });
   }
