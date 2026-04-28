@@ -518,6 +518,81 @@ test("Execution gate aguarda quando CVD ainda nao confirma", () => {
   assert.ok(gate.score >= 60 && gate.score < 76);
 });
 
+test("Execution gate veta entrada direcional quando macro blackout esta ativo (ADR-122)", () => {
+  const gate = buildExecutionGateSnapshot({
+    liquidityHeatmap: {
+      nearestBelow: { distancePercent: -1.4, label: "SSL 92%" },
+      ready: true,
+    },
+    macroGate: {
+      alertLevel: "red",
+      blockDirectionalRisk: true,
+      nextEvent: { impact: "high", minutesToEvent: 22, name: "FOMC Rate Decision" },
+    },
+    marketRegime: {
+      direction: "bullish",
+      key: "trend",
+      label: "Tendencia Institucional",
+      ready: true,
+      riskMultiplier: 0.85,
+    },
+    orderFlow: {
+      cvd: { ready: true, tone: "bull" },
+      volume: { anomaly: false, label: "Normal", ready: true, tone: "neutral" },
+    },
+    signal: {
+      confidence: 88,
+      riskReward: 2.4,
+      tone: "buy",
+    },
+  });
+
+  assert.equal(gate.status, "blocked");
+  assert.equal(gate.label, "MACRO BLACKOUT");
+  assert.equal(gate.hardBlocked, true);
+  assert.equal(gate.riskScale, 0);
+  assert.match(gate.guidance, /macro blackout/i);
+  const macroCheck = gate.checks.find((check) => check.id === "macro-gate");
+  assert.ok(macroCheck, "deve incluir check macro-gate");
+  assert.equal(macroCheck.ok, false);
+  assert.equal(macroCheck.blocking, true);
+});
+
+test("Execution gate ignora macro quando alertLevel green (ADR-122)", () => {
+  const gate = buildExecutionGateSnapshot({
+    liquidityHeatmap: {
+      nearestBelow: { distancePercent: -1.4, label: "SSL 92%" },
+      ready: true,
+    },
+    macroGate: {
+      alertLevel: "green",
+      blockDirectionalRisk: false,
+      nextEvent: { impact: "medium", minutesToEvent: 720, name: "ECB Minutes" },
+    },
+    marketRegime: {
+      direction: "bullish",
+      key: "trend",
+      label: "Tendencia Institucional",
+      ready: true,
+      riskMultiplier: 0.85,
+    },
+    orderFlow: {
+      cvd: { ready: true, tone: "bull" },
+      volume: { anomaly: false, label: "Normal", ready: true, tone: "neutral" },
+    },
+    signal: {
+      confidence: 82,
+      riskReward: 1.9,
+      tone: "buy",
+    },
+  });
+
+  assert.equal(gate.status, "armed");
+  assert.equal(gate.hardBlocked, false);
+  const macroCheck = gate.checks.find((check) => check.id === "macro-gate");
+  assert.ok(macroCheck && macroCheck.ok === true);
+});
+
 test("Execution plan libera gatilho quando preco esta na zona armada", () => {
   const plan = buildExecutionPlanSnapshot({
     currentPrice: 100.6,

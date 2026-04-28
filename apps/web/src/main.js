@@ -156,6 +156,7 @@ import {
   clearInstitutionalDerivativesCard,
 } from "./modules/intelligence-desk/institutional-derivatives-card.js";
 import {
+  getMacroGateState,
   mountMacroGatePill,
 } from "./modules/intelligence-desk/macro-gate-pill.js";
 import {
@@ -13811,7 +13812,9 @@ function renderTimingDeskHtml(analysis, snapshot, currency) {
   const orderFlow = buildTimingOrderFlowSnapshot({ snapshot });
   const marketRegime = buildMarketRegimeSnapshot({ snapshot, orderFlow });
   const liquidityHeatmap = buildLiquidityHeatmapSnapshot({ snapshot });
-  const executionGate = buildExecutionGateSnapshot({ analysis, liquidityHeatmap, marketRegime, orderFlow });
+  // ADR-122 — Onda 4: integra macro gate ao execution gate (veto direcional em janela macro).
+  const macroGate = getMacroGateState();
+  const executionGate = buildExecutionGateSnapshot({ analysis, liquidityHeatmap, macroGate, marketRegime, orderFlow });
   const currentPrice = resolveTimingCurrentPrice(snapshot);
   const executionPlan = buildExecutionPlanSnapshot({ analysis, currentPrice, executionGate });
   const executionJournal = syncExecutionJournalFromTiming({ analysis, currentPrice, executionGate, executionPlan, snapshot });

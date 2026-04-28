@@ -73,7 +73,15 @@ function createCheck({ blocking = false, detail, id, label, ok, weight }) {
   };
 }
 
-function resolveStatus({ hardBlocked, score, signalTone }) {
+function resolveStatus({ hardBlocked, macroBlocked, score, signalTone }) {
+  if (macroBlocked) {
+    return {
+      label: "MACRO BLACKOUT",
+      status: "blocked",
+      tone: "danger",
+    };
+  }
+
   if (hardBlocked || score < 52) {
     return {
       label: "BLOQUEADO",
@@ -97,7 +105,11 @@ function resolveStatus({ hardBlocked, score, signalTone }) {
   };
 }
 
-function guidanceForStatus(status, signalTone) {
+function guidanceForStatus(status, signalTone, macroBlocked) {
+  if (macroBlocked) {
+    return "Macro blackout: evento de alto impacto iminente bloqueia novas entradas direcionais.";
+  }
+
   if (status === "armed") {
     return signalTone === "sell"
       ? "Gate armado para venda: executar apenas no gatilho e manter invalidacao curta."
@@ -144,7 +156,10 @@ export function buildExecutionGateSnapshot(input = {}) {
   const trendOk = regimeAlignsWithSignal(marketRegime, signalTone);
   const riskRewardOk = Number.isFinite(riskReward) && riskReward >= minRiskReward;
   const flowConflict = cvdReady && flowConflictsWithSignal(flowTone, signalTone);
-  const hardBlocked = !signalOk || !regimeOk || !trendOk || flowConflict || !riskRewardOk;
+  const macroGate = input.macroGate ?? null;
+  const macroProvided = macroGate !== null && typeof macroGate === "object";
+  const macroBlocked = macroProvided && macroGate.blockDirectionalRisk === true;
+  const hardBlocked = !signalOk || !regimeOk || !trendOk || flowConflict || !riskRewardOk || macroBlocked;
   const checks = [
     createCheck({
       blocking: true,
@@ -203,17 +218,30 @@ export function buildExecutionGateSnapshot(input = {}) {
       weight: 12,
     }),
   ];
+  if (macroProvided) {
+    const macroDetail = macroGate.nextEvent
+      ? `${macroGate.nextEvent.name ?? "evento"} em ${macroGate.nextEvent.minutesToEvent ?? "?"}min (${macroGate.alertLevel ?? "n/d"})`
+      : `Calendario macro ${macroGate.alertLevel ?? "n/d"}`;
+    checks.push(createCheck({
+      blocking: true,
+      detail: macroDetail,
+      id: "macro-gate",
+      label: "Janela macro liberada",
+      ok: !macroBlocked,
+      weight: 14,
+    }));
+  }
   const totalWeight = checks.reduce((acc, check) => acc + check.weight, 0);
   const passedWeight = checks.reduce((acc, check) => acc + (check.ok ? check.weight : 0), 0);
   const score = roundNumber((passedWeight / Math.max(totalWeight, 1)) * 100, 1);
-  const status = resolveStatus({ hardBlocked, score, signalTone });
+  const status = resolveStatus({ hardBlocked, macroBlocked, score, signalTone });
   const riskScale = status.status === "blocked"
     ? 0
     : clampNumber(regimeRiskMultiplier * (score / 100), 0.1, 1);
 
   return {
     checks,
-    guidance: guidanceForStatus(status.status, signalTone),
+    guidance: guidanceForStatus(status.status, signalTone, macroBlocked),
     hardBlocked,
     label: status.label,
     metrics: {

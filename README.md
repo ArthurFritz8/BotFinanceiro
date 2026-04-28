@@ -177,6 +177,7 @@ Politica de retencao:
 91. ADR 119: `docs/ADR/ADR-119-onda2-ingestao-institucional-derivativos-cvd-orderbook.md`
 92. ADR 120: `docs/ADR/ADR-120-onda2-frontend-card-institucional-derivativos-perp.md`
 93. ADR 121: `docs/ADR/ADR-121-onda3-macro-execution-gate-pill.md`
+94. ADR 122: `docs/ADR/ADR-122-onda4-execution-gate-consome-macro-pill.md`
 
 ## Relatorio completo desta entrega
 
