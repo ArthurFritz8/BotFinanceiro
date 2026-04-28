@@ -3107,6 +3107,22 @@ body.sidebar-collapsed .app-shell {
   font-variant-numeric: tabular-nums;
 }
 
+/* ADR-125: sparkline funding 24h. */
+.institutional-derivatives__sparkline {
+  margin-top: 0.18rem;
+  height: 22px;
+  color: rgba(122, 166, 224, 0.72);
+  display: block;
+}
+
+.institutional-derivatives__cell[data-tone="bull"] .institutional-derivatives__sparkline {
+  color: rgba(101, 235, 182, 0.85);
+}
+
+.institutional-derivatives__cell[data-tone="bear"] .institutional-derivatives__sparkline {
+  color: rgba(255, 127, 149, 0.85);
+}
+
 .institutional-derivatives__footer {
   font-size: 0.72rem;
   color: rgba(160, 184, 212, 0.7);

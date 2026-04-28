@@ -165,3 +165,56 @@ void it("GET /v1/crypto/orderbook-depth rejeita levels invalidos", async () => {
   const response = await app.inject({ method: "GET", url: "/v1/crypto/orderbook-depth?assetId=bitcoin&levels=37" });
   assert.equal(response.statusCode, 400);
 });
+
+// ADR-125: sparkline funding history.
+void it("GET /v1/crypto/funding-history retorna pontos 24h + summary + Cache-Control 60s", async () => {
+  const nowMs = Date.now();
+  const eightHourMs = 8 * 3600 * 1000;
+  // 4 entries cobrindo ~32h: ultima dentro de 24h.
+  const fundingPayload = [
+    { symbol: "BTCUSDT", fundingTime: nowMs - 3 * eightHourMs, fundingRate: "0.0001", markPrice: "60000" },
+    { symbol: "BTCUSDT", fundingTime: nowMs - 2 * eightHourMs, fundingRate: "0.00015", markPrice: "60100" },
+    { symbol: "BTCUSDT", fundingTime: nowMs - eightHourMs, fundingRate: "0.0002", markPrice: "60200" },
+    { symbol: "BTCUSDT", fundingTime: nowMs - 60_000, fundingRate: "0.00025", markPrice: "60300" },
+  ];
+
+  let fetchCount = 0;
+  globalThis.fetch = ((input) => {
+    const url = String(input);
+    if (url.includes("/fapi/v1/fundingRate")) {
+      fetchCount += 1;
+      return Promise.resolve(jsonResponse(fundingPayload));
+    }
+    return Promise.reject(new Error(`unexpected fetch ${url}`));
+  }) as typeof fetch;
+
+  const response = await app.inject({ method: "GET", url: "/v1/crypto/funding-history?assetId=bitcoin&hours=24" });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers["cache-control"], "public, max-age=60, stale-while-revalidate=120");
+  const body = response.json<{
+    data: {
+      symbol: string;
+      hours: number;
+      points: Array<{ fundingRateBps: number; fundingTime: string }>;
+      summary: { count: number; trend: string; latestRateBps: number; avgRateBps: number };
+      cache: { state: string };
+    };
+  }>();
+  assert.equal(body.data.symbol, "BTCUSDT");
+  assert.equal(body.data.hours, 24);
+  // Cutoff -24h descarta apenas a entrada de -32h. Restam 3 pontos.
+  assert.equal(body.data.points.length, 3);
+  // 0.00025 = 2.5 bps (latest)
+  assert.equal(body.data.summary.latestRateBps, 2.5);
+  assert.equal(body.data.summary.count, 3);
+  // trend: 1.5 -> 2.0 -> 2.5 = up
+  assert.equal(body.data.summary.trend, "up");
+  assert.equal(body.data.cache.state, "miss");
+
+  // Segunda request mesmo asset/hours: cache hit, sem novo fetch.
+  const response2 = await app.inject({ method: "GET", url: "/v1/crypto/funding-history?assetId=bitcoin&hours=24" });
+  assert.equal(response2.statusCode, 200);
+  const body2 = response2.json<{ data: { cache: { state: string } } }>();
+  assert.equal(body2.data.cache.state, "hit");
+  assert.equal(fetchCount, 1);
+});

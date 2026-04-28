@@ -60,6 +60,15 @@ const depthSchema = z.object({
   asks: z.array(depthLevelTuple),
 });
 
+// ADR-125: historico de funding rate para sparkline 24h.
+const fundingRateItemSchema = z.object({
+  symbol: z.string().trim().min(1),
+  fundingTime: z.number().int(),
+  fundingRate: z.string(),
+  markPrice: z.string().optional(),
+});
+const fundingRateArraySchema = z.array(fundingRateItemSchema);
+
 type PremiumIndexPayload = z.infer<typeof premiumIndexSchema>;
 type OpenInterestPayload = z.infer<typeof openInterestSchema>;
 
@@ -399,6 +408,46 @@ export class BinanceFuturesMarketDataAdapter {
       asks: parsed.data.asks.map(parseLevel).filter((entry): entry is { price: number; quantity: number } => entry !== null),
       lastUpdateId: parsed.data.lastUpdateId,
     };
+  }
+
+  // ADR-125: historico de funding rate para sparkline.
+  // Binance: funding ocorre a cada 8h; limit=8 cobre ~64h, suficiente para janelas 24h/48h.
+  public async getFundingHistory(input: {
+    symbol: string;
+    limit?: number;
+  }): Promise<Array<{ fundingTime: number; fundingRate: number; markPrice: number | null }>> {
+    const symbol = symbolSchema.parse(input.symbol);
+    const limit = Math.max(1, Math.min(1000, Math.trunc(input.limit ?? 8)));
+    const query = new URLSearchParams({ symbol, limit: String(limit) }).toString();
+
+    const payload = await retryWithExponentialBackoff(
+      () => this.requestJson(`/fapi/v1/fundingRate?${query}`),
+      {
+        attempts: 3,
+        baseDelayMs: 200,
+        jitterPercent: 20,
+        shouldRetry: shouldRetryFuturesRequest,
+      },
+    );
+
+    const parsed = fundingRateArraySchema.safeParse(payload);
+    if (!parsed.success) {
+      throw new AppError({
+        code: "BINANCE_FUTURES_SCHEMA_MISMATCH",
+        details: { issues: parsed.error.issues, retryable: false, symbol },
+        message: "Binance futures fundingRate schema mismatch",
+        statusCode: 502,
+      });
+    }
+
+    return parsed.data
+      .map((entry) => ({
+        fundingTime: entry.fundingTime,
+        fundingRate: Number.parseFloat(entry.fundingRate),
+        markPrice: entry.markPrice ? Number.parseFloat(entry.markPrice) : null,
+      }))
+      .filter((entry) => Number.isFinite(entry.fundingRate))
+      .sort((a, b) => a.fundingTime - b.fundingTime);
   }
 
   public shutdown(): void {

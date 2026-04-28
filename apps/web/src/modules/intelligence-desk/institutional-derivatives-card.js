@@ -30,6 +30,8 @@ function createMarkup() {
         <span class="institutional-derivatives__label">Funding (perp)</span>
         <span class="institutional-derivatives__value" data-field="funding-bps">—</span>
         <span class="institutional-derivatives__hint" data-field="funding-interpretation">aguardando</span>
+        <div class="institutional-derivatives__sparkline" data-field="funding-sparkline" aria-hidden="true"></div>
+        <span class="institutional-derivatives__hint" data-field="funding-trend">24h —</span>
       </article>
       <article class="institutional-derivatives__cell" data-cell="oi" aria-label="Open interest">
         <span class="institutional-derivatives__label">Open Interest</span>
@@ -58,6 +60,8 @@ function cacheElements() {
   elements = {
     fundingBps: rootElement.querySelector('[data-field="funding-bps"]'),
     fundingInterpretation: rootElement.querySelector('[data-field="funding-interpretation"]'),
+    fundingSparkline: rootElement.querySelector('[data-field="funding-sparkline"]'),
+    fundingTrend: rootElement.querySelector('[data-field="funding-trend"]'),
     openInterest: rootElement.querySelector('[data-field="open-interest"]'),
     markPrice: rootElement.querySelector('[data-field="mark-price"]'),
     cvd: rootElement.querySelector('[data-field="cvd"]'),
@@ -137,6 +141,8 @@ function clearRendered() {
   if (!elements) return;
   setText(elements.fundingBps, "—");
   setText(elements.fundingInterpretation, "aguardando");
+  if (elements.fundingSparkline) elements.fundingSparkline.innerHTML = "";
+  setText(elements.fundingTrend, "24h —");
   setText(elements.openInterest, "—");
   setText(elements.markPrice, "mark —");
   setText(elements.cvd, "—");
@@ -189,6 +195,65 @@ function humanInterpretation(interpretation) {
     case "extreme_short": return "shorts em panico";
     default: return "neutro";
   }
+}
+
+// ADR-125: helper puro para sparkline SVG inline (DOM-free, testavel).
+// Recebe array de bps e retorna string SVG (ou string vazia se < 2 pontos).
+export function renderFundingSparkline(bpsValues, options) {
+  const opts = options ?? {};
+  const width = typeof opts.width === "number" ? opts.width : 80;
+  const height = typeof opts.height === "number" ? opts.height : 24;
+  const stroke = typeof opts.stroke === "string" ? opts.stroke : "currentColor";
+
+  if (!Array.isArray(bpsValues) || bpsValues.length < 2) {
+    return "";
+  }
+
+  const finiteValues = bpsValues.filter((v) => typeof v === "number" && Number.isFinite(v));
+  if (finiteValues.length < 2) return "";
+
+  const minValue = Math.min(...finiteValues);
+  const maxValue = Math.max(...finiteValues);
+  const range = maxValue - minValue;
+  const denom = range > 0 ? range : 1; // evita div/0 quando todos iguais
+  const stepX = finiteValues.length > 1 ? width / (finiteValues.length - 1) : 0;
+
+  const points = finiteValues.map((value, index) => {
+    const x = index * stepX;
+    // Inverte Y (SVG: 0 no topo). Achata em linha central se range=0.
+    const normalized = range > 0 ? (value - minValue) / denom : 0.5;
+    const y = height - normalized * height;
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  });
+
+  const path = `M${points[0]} L${points.slice(1).join(" L")}`;
+  return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" width="100%" height="${height}" role="presentation"><path d="${path}" fill="none" stroke="${stroke}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+
+function fundingTrendLabel(trend, latestBps, hours) {
+  const hoursLabel = `${hours}h`;
+  if (trend === "up") return `${hoursLabel} ↑ ${formatBps(latestBps)}`;
+  if (trend === "down") return `${hoursLabel} ↓ ${formatBps(latestBps)}`;
+  if (trend === "flat") return `${hoursLabel} → ${formatBps(latestBps)}`;
+  return `${hoursLabel} —`;
+}
+
+function renderFundingHistory(payload) {
+  if (!elements || !payload || typeof payload !== "object") return;
+  const points = Array.isArray(payload.points) ? payload.points : [];
+  const summary = payload.summary ?? {};
+  const hours = typeof payload.hours === "number" ? payload.hours : 24;
+  const bpsValues = points
+    .map((p) => (typeof p?.fundingRateBps === "number" ? p.fundingRateBps : null))
+    .filter((v) => v !== null);
+
+  if (elements.fundingSparkline) {
+    elements.fundingSparkline.innerHTML = renderFundingSparkline(bpsValues, { width: 80, height: 22 });
+  }
+  setText(
+    elements.fundingTrend,
+    fundingTrendLabel(summary.trend ?? "n/a", summary.latestRateBps ?? null, hours),
+  );
 }
 
 function renderCvd(payload) {
@@ -257,10 +322,11 @@ export async function updateInstitutionalDerivativesCard(assetId) {
   const requestToken = ++activeRequestToken;
   setFooter(`Sincronizando ${normalized}…`, "neutral");
 
-  const [derivativesResult, cvdResult, orderbookResult] = await Promise.allSettled([
+  const [derivativesResult, cvdResult, orderbookResult, fundingHistoryResult] = await Promise.allSettled([
     fetchEndpoint(`/v1/crypto/derivatives?assetId=${encodeURIComponent(normalized)}`),
     fetchEndpoint(`/v1/crypto/cvd?assetId=${encodeURIComponent(normalized)}&limit=500`),
     fetchEndpoint(`/v1/crypto/orderbook-depth?assetId=${encodeURIComponent(normalized)}&levels=20`),
+    fetchEndpoint(`/v1/crypto/funding-history?assetId=${encodeURIComponent(normalized)}&hours=24`),
   ]);
 
   // Latest-wins: se um update mais recente ja foi disparado, descarta esta resposta.
@@ -293,6 +359,15 @@ export async function updateInstitutionalDerivativesCard(assetId) {
     lastSnapshotByAsset.set(`${normalized}:orderbook`, orderbookResult.value);
   } else if (orderbookResult.reason?.status === 400 || orderbookResult.reason?.status === 404) {
     unsupportedCount += 1;
+  }
+
+  // ADR-125: funding-history e auxiliar (nao entra no okCount/3 que mede feeds primarios).
+  if (fundingHistoryResult.status === "fulfilled") {
+    renderFundingHistory(fundingHistoryResult.value);
+    lastSnapshotByAsset.set(`${normalized}:funding-history`, fundingHistoryResult.value);
+  } else if (elements?.fundingSparkline) {
+    elements.fundingSparkline.innerHTML = "";
+    setText(elements.fundingTrend, "24h —");
   }
 
   if (okCount === 3) {
@@ -331,4 +406,5 @@ export const _testables = {
   imbalanceTone,
   cvdTone,
   humanInterpretation,
+  fundingTrendLabel,
 };

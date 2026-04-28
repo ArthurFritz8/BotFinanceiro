@@ -172,6 +172,12 @@ const orderbookQuerySchema = z.object({
     .default(20),
 });
 
+// ADR-125: historico de funding rate para sparkline 24h.
+const fundingHistoryQuerySchema = z.object({
+  assetId: z.string().trim().min(1).max(64).default("bitcoin"),
+  hours: z.coerce.number().int().min(8).max(168).default(24),
+});
+
 function normalizeOrigin(value: string): string {
   const trimmedValue = value.trim();
 
@@ -356,5 +362,14 @@ export async function getOrderbookDepth(request: FastifyRequest, reply: FastifyR
     assetId: parsedQuery.assetId,
     levels: parsedQuery.levels as 5 | 10 | 20 | 50 | 100,
   });
+  void reply.send(buildSuccessResponse(request.id, snapshot));
+}
+
+// ADR-125: handler para sparkline funding history.
+export async function getFundingHistory(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const parsedQuery = fundingHistoryQuerySchema.parse(request.query);
+  const snapshot = await cryptoDerivativesService.getFundingHistory(parsedQuery);
+  // Cache HTTP alinhado com TTL server-side (60s) e cadencia real do funding (8h).
+  void reply.header("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
   void reply.send(buildSuccessResponse(request.id, snapshot));
 }

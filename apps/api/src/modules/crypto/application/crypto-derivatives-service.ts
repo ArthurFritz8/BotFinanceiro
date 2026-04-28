@@ -24,10 +24,12 @@ import { resolveBinanceSymbol } from "../../../integrations/market_data/binance-
 const DERIVATIVES_TTL_MS = 10_000;
 const CVD_TTL_MS = 3_000;
 const ORDERBOOK_TTL_MS = 5_000;
+const FUNDING_HISTORY_TTL_MS = 60_000; // ADR-125: funding muda a cada 8h, 60s e generoso.
 const STALE_TOLERANCE_MS = 60_000;
 
 const assetIdSchema = z.string().trim().min(1).max(64);
 const cvdLimitSchema = z.coerce.number().int().min(50).max(1000).default(500);
+const fundingHistoryHoursSchema = z.coerce.number().int().min(8).max(168).default(24);
 const orderbookLevelsSchema = z.union([
   z.literal(5),
   z.literal(10),
@@ -98,6 +100,30 @@ interface CacheEntry<T> {
   storedAtMs: number;
 }
 
+// ADR-125: snapshot do historico de funding rate para sparkline 24h.
+export interface CryptoFundingHistoryPoint {
+  fundingTime: string; // ISO
+  fundingTimeMs: number;
+  fundingRate: number;
+  fundingRateBps: number;
+}
+export interface CryptoFundingHistorySnapshot {
+  assetId: string;
+  symbol: string;
+  hours: number;
+  points: CryptoFundingHistoryPoint[];
+  summary: {
+    count: number;
+    avgRateBps: number | null;
+    minRateBps: number | null;
+    maxRateBps: number | null;
+    latestRateBps: number | null;
+    trend: "up" | "down" | "flat" | "n/a";
+  };
+  fetchedAt: string;
+  cache: DerivativesCacheState;
+}
+
 function classifyFundingInterpretation(rate: number | null): CryptoDerivativesSnapshot["fundingPressure"]["interpretation"] {
   if (rate === null || !Number.isFinite(rate)) return "neutral";
   // Funding rate em proporcao (ex.: 0.0001 = 0.01% = 1bp).
@@ -114,6 +140,7 @@ export class CryptoDerivativesService {
   private readonly derivativesCache = new Map<string, CacheEntry<BinanceFuturesContractSnapshot>>();
   private readonly cvdCache = new Map<string, CacheEntry<Omit<CryptoCvdSnapshot, "cache">>>();
   private readonly orderbookCache = new Map<string, CacheEntry<Omit<CryptoOrderbookSnapshot, "cache">>>();
+  private readonly fundingHistoryCache = new Map<string, CacheEntry<Omit<CryptoFundingHistorySnapshot, "cache">>>();
 
   public constructor(adapter?: BinanceFuturesMarketDataAdapter) {
     this.adapter = adapter ?? new BinanceFuturesMarketDataAdapter();
@@ -258,6 +285,67 @@ export class CryptoDerivativesService {
     }
   }
 
+  // ADR-125: historico de funding rate para sparkline 24h.
+  // Cache TTL 60s alinhado com cadencia macro (funding muda apenas a cada 8h).
+  public async getFundingHistory(input: {
+    assetId: string;
+    hours?: number;
+  }): Promise<CryptoFundingHistorySnapshot> {
+    const assetId = assetIdSchema.parse(input.assetId).toLowerCase();
+    const hours = fundingHistoryHoursSchema.parse(input.hours ?? 24);
+    const symbol = resolveBinanceSymbol(assetId);
+    // Funding ocorre a cada 8h => entries necessarias = ceil(hours/8) + 1 (margem).
+    const limit = Math.min(1000, Math.max(2, Math.ceil(hours / 8) + 1));
+    const cacheKey = `${symbol}:${hours}`;
+    const nowMs = Date.now();
+    const cached = this.fundingHistoryCache.get(cacheKey);
+
+    if (cached && nowMs - cached.storedAtMs < FUNDING_HISTORY_TTL_MS) {
+      return { ...cached.value, cache: { state: "hit", ageMs: nowMs - cached.storedAtMs } };
+    }
+
+    try {
+      const rawHistory = await this.adapter.getFundingHistory({ symbol, limit });
+      const cutoffMs = nowMs - hours * 3_600_000;
+      const filtered = rawHistory.filter((entry) => entry.fundingTime >= cutoffMs);
+      const points: CryptoFundingHistoryPoint[] = filtered.map((entry) => ({
+        fundingTime: new Date(entry.fundingTime).toISOString(),
+        fundingTimeMs: entry.fundingTime,
+        fundingRate: entry.fundingRate,
+        fundingRateBps: Number((entry.fundingRate * 10000).toFixed(3)),
+      }));
+
+      const bpsValues = points.map((p) => p.fundingRateBps);
+      const summary = bpsValues.length === 0
+        ? { count: 0, avgRateBps: null, minRateBps: null, maxRateBps: null, latestRateBps: null, trend: "n/a" as const }
+        : {
+            count: bpsValues.length,
+            avgRateBps: Number((bpsValues.reduce((acc, v) => acc + v, 0) / bpsValues.length).toFixed(3)),
+            minRateBps: Number(Math.min(...bpsValues).toFixed(3)),
+            maxRateBps: Number(Math.max(...bpsValues).toFixed(3)),
+            latestRateBps: bpsValues[bpsValues.length - 1] ?? null,
+            trend: classifyFundingTrend(bpsValues),
+          };
+
+      const snapshot: Omit<CryptoFundingHistorySnapshot, "cache"> = {
+        assetId,
+        symbol,
+        hours,
+        points,
+        summary,
+        fetchedAt: new Date(nowMs).toISOString(),
+      };
+      this.fundingHistoryCache.set(cacheKey, { value: snapshot, storedAtMs: nowMs });
+      return { ...snapshot, cache: { state: "miss", ageMs: 0 } };
+    } catch (error) {
+      if (cached && nowMs - cached.storedAtMs < STALE_TOLERANCE_MS) {
+        logger.warn({ err: error, symbol }, "funding history fresh fetch failed; serving stale");
+        return { ...cached.value, cache: { state: "stale", ageMs: nowMs - cached.storedAtMs } };
+      }
+      throw error;
+    }
+  }
+
   private buildDerivativesResponse(
     assetId: string,
     symbol: string,
@@ -281,6 +369,16 @@ export class CryptoDerivativesService {
 
 function roundQty(value: number): number {
   return Number(value.toFixed(6));
+}
+
+// ADR-125: classifica trend do funding pelo delta entre primeiro e ultimo bps.
+function classifyFundingTrend(bpsValues: number[]): "up" | "down" | "flat" | "n/a" {
+  if (bpsValues.length < 2) return "n/a";
+  const first = bpsValues[0] ?? 0;
+  const last = bpsValues[bpsValues.length - 1] ?? 0;
+  const delta = last - first;
+  if (Math.abs(delta) < 0.5) return "flat"; // < 0.5 bps de variacao = lateral.
+  return delta > 0 ? "up" : "down";
 }
 
 function roundLiq(value: number): number {

@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { _testables } from "../src/modules/intelligence-desk/institutional-derivatives-card.js";
+import { _testables, renderFundingSparkline } from "../src/modules/intelligence-desk/institutional-derivatives-card.js";
 
 const {
   formatBps,
@@ -15,6 +15,7 @@ const {
   imbalanceTone,
   cvdTone,
   humanInterpretation,
+  fundingTrendLabel,
 } = _testables;
 
 test("formatBps prefixa sinal e usa 2 casas decimais", () => {
@@ -71,4 +72,37 @@ test("humanInterpretation expoe rotulos PT-BR para todos os estados", () => {
   assert.equal(humanInterpretation("extreme_short"), "shorts em panico");
   assert.equal(humanInterpretation("neutral"), "neutro");
   assert.equal(humanInterpretation("unknown"), "neutro");
+});
+
+// ADR-125: sparkline funding 24h.
+test("renderFundingSparkline retorna SVG path com viewBox correto e M/L points", () => {
+  const svg = renderFundingSparkline([1, 2, 3, 4], { width: 80, height: 24 });
+  assert.ok(svg.startsWith('<svg viewBox="0 0 80 24"'));
+  assert.ok(svg.includes('<path'));
+  assert.ok(svg.includes('d="M0.00,24.00 L'));
+  // 4 pontos: 3 segmentos L
+  const lCount = (svg.match(/ L\d/g) ?? []).length;
+  assert.equal(lCount, 3);
+});
+
+test("renderFundingSparkline retorna string vazia quando entrada e curta ou invalida", () => {
+  assert.equal(renderFundingSparkline([], {}), "");
+  assert.equal(renderFundingSparkline([1], {}), "");
+  assert.equal(renderFundingSparkline(null, {}), "");
+  assert.equal(renderFundingSparkline([Number.NaN, 1], {}), "");
+});
+
+test("renderFundingSparkline achata em linha central quando todos valores iguais (range=0)", () => {
+  const svg = renderFundingSparkline([2, 2, 2], { width: 60, height: 20 });
+  // Sem range, normalized=0.5 => y = 20 - 0.5*20 = 10 para todos os pontos.
+  assert.ok(svg.includes("M0.00,10.00"));
+  assert.ok(svg.includes("30.00,10.00"));
+  assert.ok(svg.includes("60.00,10.00"));
+});
+
+test("fundingTrendLabel formata seta + bps por trend", () => {
+  assert.equal(fundingTrendLabel("up", 2.5, 24), "24h ↑ +2.50 bps");
+  assert.equal(fundingTrendLabel("down", -1.2, 24), "24h ↓ -1.20 bps");
+  assert.equal(fundingTrendLabel("flat", 0.1, 24), "24h → +0.10 bps");
+  assert.equal(fundingTrendLabel("n/a", null, 48), "48h —");
 });

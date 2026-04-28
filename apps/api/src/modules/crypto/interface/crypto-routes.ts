@@ -6,6 +6,7 @@ import {
   getCryptoStrategyChart,
   getCvd,
   getDerivatives,
+  getFundingHistory,
   getLiveChart,
   getMarketOverview,
   getNewsIntelligence,
@@ -33,4 +34,6 @@ export function registerCryptoRoutes(app: FastifyInstance): void {
   app.get("/crypto/derivatives", getDerivatives);
   app.get("/crypto/cvd", getCvd);
   app.get("/crypto/orderbook-depth", getOrderbookDepth);
+  // ADR-125 — Onda 9: sparkline de funding rate.
+  app.get("/crypto/funding-history", getFundingHistory);
 }
