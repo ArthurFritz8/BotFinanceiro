@@ -149,6 +149,12 @@ import {
   isStaleChartAssetGenerationError,
 } from "./modules/chart-lab/chart-asset-generation.js";
 import { resetChartAssetContext } from "./modules/chart-lab/chart-asset-context-reset.js";
+import { registerAssetContextResetHandler } from "./modules/chart-lab/chart-asset-context-reset.js";
+import {
+  mountInstitutionalDerivativesCard,
+  updateInstitutionalDerivativesCard,
+  clearInstitutionalDerivativesCard,
+} from "./modules/intelligence-desk/institutional-derivatives-card.js";
 import {
   buildBinaryOptionsLiveStreamDescriptor,
   buildCryptoLiveStreamDescriptor,
@@ -2258,6 +2264,24 @@ function schedulePersistGhostTrackerStates() {
 }
 
 hydrateGhostTrackerStatesFromStorage();
+
+// ADR-120 — Onda 2 frontend: monta card institucional de derivativos perp e
+// registra reset handler para limpar ao trocar de ativo. Defensivo: se o
+// elemento HTML nao existir (DOM incompleto em ambiente de teste), no-op.
+(function bootstrapInstitutionalDerivativesCard() {
+  try {
+    const cardRoot = document.querySelector("#institutional-derivatives");
+    if (cardRoot instanceof HTMLElement) {
+      mountInstitutionalDerivativesCard(cardRoot);
+      registerAssetContextResetHandler(() => {
+        clearInstitutionalDerivativesCard();
+      });
+    }
+  } catch (bootstrapError) {
+    // eslint-disable-next-line no-console
+    console.warn("institutional-derivatives-card bootstrap falhou", bootstrapError);
+  }
+})();
 
 function hydrateExecutionJournalStateFromStorage() {
   if (typeof window === "undefined" || !window.localStorage) {
@@ -16660,6 +16684,20 @@ async function syncIntelligenceDeskForCurrentContext(options = {}) {
     ok: hasSnapshot || !statusIsError,
     reason,
   });
+
+  // ADR-120 — Onda 2 frontend: atualiza card institucional perp para o ativo atual.
+  // Usa try/catch defensivo: nunca pode quebrar o fluxo principal de sync.
+  try {
+    const currentAssetId = chartAssetSelect instanceof HTMLSelectElement
+      ? chartAssetSelect.value
+      : null;
+    if (typeof currentAssetId === "string" && currentAssetId.length > 0) {
+      void updateInstitutionalDerivativesCard(currentAssetId);
+    }
+  } catch (institutionalCardError) {
+    // eslint-disable-next-line no-console
+    console.warn("institutional-derivatives-card update falhou", institutionalCardError);
+  }
 }
 
 function scheduleChartContextSync(options = {}) {

@@ -175,6 +175,7 @@ Politica de retencao:
 89. ADR 117: `docs/ADR/ADR-117-hardening-contexto-copilot-chart-lab.md`
 90. ADR 118: `docs/ADR/ADR-118-onda1-hardening-institucional-intelligence-desk.md`
 91. ADR 119: `docs/ADR/ADR-119-onda2-ingestao-institucional-derivativos-cvd-orderbook.md`
+92. ADR 120: `docs/ADR/ADR-120-onda2-frontend-card-institucional-derivativos-perp.md`
 
 ## Relatorio completo desta entrega
 
