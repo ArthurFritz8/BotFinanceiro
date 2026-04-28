@@ -156,6 +156,9 @@ import {
   clearInstitutionalDerivativesCard,
 } from "./modules/intelligence-desk/institutional-derivatives-card.js";
 import {
+  mountMacroGatePill,
+} from "./modules/intelligence-desk/macro-gate-pill.js";
+import {
   buildBinaryOptionsLiveStreamDescriptor,
   buildCryptoLiveStreamDescriptor,
 } from "./modules/chart-lab/chart-live-stream-selection.js";
@@ -2280,6 +2283,19 @@ hydrateGhostTrackerStatesFromStorage();
   } catch (bootstrapError) {
     // eslint-disable-next-line no-console
     console.warn("institutional-derivatives-card bootstrap falhou", bootstrapError);
+  }
+})();
+
+// ADR-121 — Onda 3: monta macro execution gate pill (no-op se elemento ausente).
+(function bootstrapMacroGatePill() {
+  try {
+    const pillRoot = document.querySelector("#macro-gate-pill");
+    if (pillRoot instanceof HTMLElement) {
+      mountMacroGatePill(pillRoot);
+    }
+  } catch (bootstrapError) {
+    // eslint-disable-next-line no-console
+    console.warn("macro-gate-pill bootstrap falhou", bootstrapError);
   }
 })();
 

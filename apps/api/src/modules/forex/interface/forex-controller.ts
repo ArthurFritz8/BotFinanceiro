@@ -3,7 +3,10 @@ import { z } from "zod";
 
 import { buildSuccessResponse } from "../../../shared/http/api-response.js";
 import { ForexMarketService } from "../application/forex-market-service.js";
-import { InstitutionalMacroService } from "../application/institutional-macro-service.js";
+import {
+  getUpcomingMacroEvents,
+  InstitutionalMacroService,
+} from "../application/institutional-macro-service.js";
 
 const pairSchema = z
   .string()
@@ -125,5 +128,15 @@ export async function getInstitutionalMacroSnapshot(
     timezone: parsedQuery.timezone,
   });
 
+  void reply.send(buildSuccessResponse(request.id, snapshot));
+}
+
+// ADR-121 — Onda 3: macro execution gate. Endpoint enxuto consumido pela
+// pill macro do Intelligence Desk e por futura integracao com execution-gate.
+export async function getMacroUpcomingEvents(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const snapshot = await getUpcomingMacroEvents();
   void reply.send(buildSuccessResponse(request.id, snapshot));
 }

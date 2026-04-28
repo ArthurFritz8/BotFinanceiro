@@ -1284,6 +1284,71 @@ body.sidebar-collapsed .app-shell {
   color: #ffd6d6;
 }
 
+/* ADR-121 — Macro execution gate pill */
+.macro-gate-pill {
+  align-items: center;
+  background: rgba(56, 215, 138, 0.16);
+  border: 1px solid rgba(120, 230, 170, 0.5);
+  border-radius: 999px;
+  color: #d6fbe5;
+  display: inline-flex;
+  font-size: 0.66rem;
+  font-weight: 600;
+  gap: 0.35rem;
+  letter-spacing: 0.05em;
+  padding: 0.22rem 0.6rem;
+  text-transform: none;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+.macro-gate-pill.is-hidden {
+  display: none;
+}
+.macro-gate-pill__dot {
+  background: #4cf0a4;
+  border-radius: 50%;
+  display: inline-block;
+  height: 0.5rem;
+  width: 0.5rem;
+}
+.macro-gate-pill__label {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.macro-gate-pill__detail {
+  color: inherit;
+  opacity: 0.92;
+}
+.macro-gate-pill[data-alert-level="yellow"] {
+  background: rgba(244, 200, 64, 0.18);
+  border-color: rgba(255, 220, 130, 0.55);
+  color: #fff1bf;
+}
+.macro-gate-pill[data-alert-level="yellow"] .macro-gate-pill__dot {
+  background: #f6c947;
+}
+.macro-gate-pill[data-alert-level="red"] {
+  background: rgba(255, 102, 110, 0.22);
+  border-color: rgba(255, 160, 170, 0.6);
+  color: #ffe0e2;
+  animation: macro-gate-pulse 2.4s ease-in-out infinite;
+}
+.macro-gate-pill[data-alert-level="red"] .macro-gate-pill__dot {
+  background: #ff7b85;
+}
+@keyframes macro-gate-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 110, 120, 0.0); }
+  50% { box-shadow: 0 0 0 6px rgba(255, 110, 120, 0.18); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .macro-gate-pill {
+    transition: none;
+  }
+  .macro-gate-pill[data-alert-level="red"] {
+    animation: none;
+  }
+}
+
 .chart-controls {
   align-items: end;
   display: grid;

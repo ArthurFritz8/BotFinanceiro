@@ -1058,6 +1058,81 @@ function buildMacroRadarMessage(
   return `${sourceLabel} Sem choque macro iminente. Proximo evento relevante: ${nextEvent.name} em ~${nextEvent.hoursToEvent}h.`;
 }
 
+// ADR-121 — Onda 3: macro execution gate.
+//
+// Expoe lista enxuta de eventos macro proximos para o frontend renderizar pill
+// visual + servir de fonte unica para futuro bloqueio em execution-gate.
+//
+// Camadas:
+// 1) Tenta carregar agenda externa (FOREX_MACRO_CALENDAR_URL configurado).
+// 2) Cai em fallback sintetico se externa indisponivel.
+// 3) Calcula minutesToNextHighImpact, alertLevel e blockDirectionalRisk.
+//
+// Convencao alertLevel:
+//   red    -> high-impact <= 3h (blockDirectionalRisk=true).
+//   yellow -> high-impact <= 8h ou medium-impact <= 3h.
+//   green  -> caso contrario.
+
+export interface MacroUpcomingEventsResponse {
+  alertLevel: MacroAlertLevel;
+  blockDirectionalRisk: boolean;
+  events: Array<{
+    hoursToEvent: number;
+    minutesToEvent: number;
+    impact: "high" | "medium";
+    name: string;
+  }>;
+  fetchedAt: string;
+  minutesToNextHighImpact: number | null;
+  nextEvent: {
+    hoursToEvent: number;
+    minutesToEvent: number;
+    impact: "high" | "medium";
+    name: string;
+  } | null;
+  source: "external" | "fallback";
+}
+
+export async function getUpcomingMacroEvents(): Promise<MacroUpcomingEventsResponse> {
+  const now = new Date();
+  const externalEvents = await loadExternalMacroEvents(now);
+  const fallbackEvents = buildFallbackMacroEvents(now);
+  const sourceEvents = externalEvents ?? fallbackEvents;
+  const source: "external" | "fallback" = externalEvents ? "external" : "fallback";
+
+  const enrichedEvents = sourceEvents
+    .slice(0, 6)
+    .map((eventItem) => ({
+      hoursToEvent: eventItem.hoursToEvent,
+      minutesToEvent: Math.max(0, eventItem.hoursToEvent * 60),
+      impact: eventItem.impact,
+      name: eventItem.name,
+    }));
+
+  const firstHighImpact = enrichedEvents.find((eventItem) => eventItem.impact === "high");
+  const minutesToNextHighImpact = firstHighImpact ? firstHighImpact.minutesToEvent : null;
+
+  let alertLevel: MacroAlertLevel = "green";
+  if (minutesToNextHighImpact !== null && minutesToNextHighImpact <= 180) {
+    alertLevel = "red";
+  } else if (
+    (minutesToNextHighImpact !== null && minutesToNextHighImpact <= 480)
+    || enrichedEvents.some((eventItem) => eventItem.impact === "medium" && eventItem.minutesToEvent <= 180)
+  ) {
+    alertLevel = "yellow";
+  }
+
+  return {
+    alertLevel,
+    blockDirectionalRisk: alertLevel === "red",
+    events: enrichedEvents,
+    fetchedAt: now.toISOString(),
+    minutesToNextHighImpact,
+    nextEvent: enrichedEvents[0] ?? null,
+    source,
+  };
+}
+
 export class InstitutionalMacroService {
   public async getStrategySnapshot(input: {
     mode?: InstitutionalMacroMode;
