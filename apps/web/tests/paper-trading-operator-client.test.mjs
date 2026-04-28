@@ -101,6 +101,30 @@ test("canSubmitAutoSignal exige token, autoArmed, guard armado e payload", () =>
   assert.equal(canSubmitAutoSignal({ automationGuard: guardArmed, operatorSettings: settingsOk, payload: null }), false);
 });
 
+test("canSubmitAutoSignal veta submissao quando macro blackout esta ativo (ADR-123)", () => {
+  const guardArmed = { canAutoPaper: true };
+  const settingsOk = { autoArmed: true, token: validToken };
+  const payload = { asset: "bitcoin" };
+  const macroBlackout = { alertLevel: "red", blockDirectionalRisk: true };
+  const macroGreen = { alertLevel: "green", blockDirectionalRisk: false };
+
+  assert.equal(
+    canSubmitAutoSignal({ automationGuard: guardArmed, macroGate: macroBlackout, operatorSettings: settingsOk, payload }),
+    false,
+    "blackout macro deve vetar submissao automatica",
+  );
+  assert.equal(
+    canSubmitAutoSignal({ automationGuard: guardArmed, macroGate: macroGreen, operatorSettings: settingsOk, payload }),
+    true,
+    "macro green nao deve vetar",
+  );
+  assert.equal(
+    canSubmitAutoSignal({ automationGuard: guardArmed, macroGate: null, operatorSettings: settingsOk, payload }),
+    true,
+    "ausencia de macroGate preserva backward-compat",
+  );
+});
+
 test("submitAutoSignal envia header dedicado e parseia envelope sucesso", async () => {
   let capturedUrl = null;
   let capturedInit = null;

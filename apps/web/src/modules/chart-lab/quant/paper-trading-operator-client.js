@@ -151,15 +151,19 @@ export function buildAutoSignalPayload(input = {}) {
 
 /**
  * Decide se o operador pode disparar auto-paper neste ciclo. Combina o
- * Auto Guard (ADR-101) com as preferencias persistidas do operador.
+ * Auto Guard (ADR-101) com as preferencias persistidas do operador e o
+ * macro execution gate (ADR-122/ADR-123): bloqueia submissao quando ha
+ * blackout macro ativo (FOMC/CPI/NFP iminente).
  */
-export function canSubmitAutoSignal({ automationGuard, operatorSettings, payload }) {
+export function canSubmitAutoSignal({ automationGuard, macroGate, operatorSettings, payload }) {
   if (!operatorSettings || operatorSettings.autoArmed !== true) return false;
   if (!operatorSettings.token || operatorSettings.token.length < PAPER_TRADING_OPERATOR_MIN_TOKEN_LENGTH) {
     return false;
   }
   if (!automationGuard || automationGuard.canAutoPaper !== true) return false;
   if (!payload) return false;
+  // ADR-123: macro blackout veta submissao automatica mesmo com tudo armado.
+  if (macroGate && macroGate.blockDirectionalRisk === true) return false;
   return true;
 }
 

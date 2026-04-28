@@ -2394,8 +2394,10 @@ function buildOperatorPayloadFromContext({ executionPlan, executionQuality, snap
 function maybeDispatchOperatorAutoSignal({ automationGuard, executionPlan, executionQuality, snapshot }) {
   const settings = operatorAutoPaperSettings;
   const payload = buildOperatorPayloadFromContext({ executionPlan, executionQuality, snapshot });
+  // ADR-123: macro blackout veta submissao automatica do auto-paper.
+  const macroGate = getMacroGateState();
 
-  if (!canSubmitOperatorAutoSignal({ automationGuard, operatorSettings: settings, payload })) {
+  if (!canSubmitOperatorAutoSignal({ automationGuard, macroGate, operatorSettings: settings, payload })) {
     return;
   }
 
