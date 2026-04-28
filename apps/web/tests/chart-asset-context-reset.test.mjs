@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  clearAssetContextResetHandlers,
+  getAssetContextResetHandlerCount,
   hasChartAssetContextChanged,
   normalizeChartAssetContext,
+  registerAssetContextResetHandler,
   resetChartAssetContext,
 } from "../src/modules/chart-lab/chart-asset-context-reset.js";
 
@@ -118,4 +121,69 @@ test("Chart asset context reset permite reset forçado", () => {
 
   assert.equal(result.changed, true);
   assert.equal(callCount, 1);
+});
+
+test("Chart asset context reset dispara handlers globais registrados (ADR-118)", () => {
+  clearAssetContextResetHandlers();
+  assert.equal(getAssetContextResetHandlerCount(), 0);
+
+  const events = [];
+  const unregisterA = registerAssetContextResetHandler((payload) => {
+    events.push({ name: "A", reason: payload.reason, asset: payload.next.assetId });
+  });
+  const unregisterB = registerAssetContextResetHandler((payload) => {
+    events.push({ name: "B", asset: payload.next.assetId });
+  });
+
+  assert.equal(getAssetContextResetHandlerCount(), 2);
+
+  resetChartAssetContext({
+    nextContext: { assetId: "ethereum", symbol: "ETHUSDT" },
+    previousContext: { assetId: "bitcoin", symbol: "BTCUSDT" },
+    reason: "asset-select",
+  });
+
+  assert.equal(events.length, 2);
+  assert.deepEqual(events[0], { name: "A", reason: "asset-select", asset: "ethereum" });
+  assert.equal(events[1].name, "B");
+
+  // Sem mudanca -> nao dispara.
+  events.length = 0;
+  resetChartAssetContext({
+    nextContext: { assetId: "ethereum", symbol: "ETHUSDT" },
+    previousContext: { assetId: "ethereum", symbol: "ETHUSDT" },
+  });
+  assert.equal(events.length, 0);
+
+  unregisterA();
+  assert.equal(getAssetContextResetHandlerCount(), 1);
+  unregisterB();
+  assert.equal(getAssetContextResetHandlerCount(), 0);
+});
+
+test("Chart asset context reset isola erro de handler global sem derrubar pipeline", () => {
+  clearAssetContextResetHandlers();
+  const events = [];
+
+  registerAssetContextResetHandler(() => {
+    throw new Error("handler com bug");
+  });
+  registerAssetContextResetHandler((payload) => {
+    events.push(payload.next.assetId);
+  });
+
+  // Silencia console.warn esperado.
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const result = resetChartAssetContext({
+      nextContext: { assetId: "solana" },
+      previousContext: { assetId: "bitcoin" },
+    });
+    assert.equal(result.changed, true);
+    assert.deepEqual(events, ["solana"]);
+  } finally {
+    console.warn = originalWarn;
+    clearAssetContextResetHandlers();
+  }
 });

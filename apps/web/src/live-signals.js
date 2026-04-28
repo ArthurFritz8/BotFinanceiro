@@ -344,6 +344,9 @@ export function bootstrapLiveSignals({ onAuditSignal, fetchSignals } = {}) {
   let lastNotifiedIds = new Set();
   let pollTimer = null;
   let refreshInFlight = false;
+  // ADR-118: rastreia origem dos dados (mock|real) para que o UI exponha
+  // claramente que o operador esta vendo dados simulados, nao um feed real.
+  let lastSourceLabel = "mock";
 
   function syncSoundButton() {
     if (!(soundToggle instanceof HTMLButtonElement)) return;
@@ -398,10 +401,16 @@ export function bootstrapLiveSignals({ onAuditSignal, fetchSignals } = {}) {
     if (!(feed instanceof HTMLElement)) return;
     const visible = applyFilters(lastSignals, prefs);
     feed.removeAttribute("aria-busy");
+    // Marca origem nos containers para o CSS exibir badge "SIMULAÇÃO".
+    feed.dataset.source = lastSourceLabel;
+    if (stage instanceof HTMLElement) {
+      stage.dataset.source = lastSourceLabel;
+    }
     feed.innerHTML = visible.map(renderCard).join("");
     if (activeCount) activeCount.textContent = String(visible.length);
     if (feedMeta) {
-      feedMeta.textContent = `${visible.length}/${lastSignals.length} setups visiveis · atualizado ${formatTimestamp(Date.now())}`;
+      const sourceTag = lastSourceLabel === "real" ? "feed real" : "feed simulado";
+      feedMeta.textContent = `${visible.length}/${lastSignals.length} setups visiveis · ${sourceTag} · atualizado ${formatTimestamp(Date.now())}`;
     }
     if (monitorCount) monitorCount.textContent = String(lastSignals.length || "—");
   }
@@ -445,17 +454,19 @@ export function bootstrapLiveSignals({ onAuditSignal, fetchSignals } = {}) {
       }
 
       lastSignals = next;
+      lastSourceLabel = sourceLabel;
       maybeNotify(next);
       renderFeed();
 
       if (sourceLabel === "real") {
         setStatus("live", `Radar ao vivo · ${next.length} ativos`);
       } else {
-        setStatus("live", `Radar degradado · ${next.length} ativos`);
+        setStatus("live", `Radar simulado (sem feed real) · ${next.length} ativos`);
       }
     } catch (err) {
       const fallback = normalizeLiveSignals(generateMockSignals(Date.now()), Date.now());
       lastSignals = fallback;
+      lastSourceLabel = "mock";
       renderFeed();
       setStatus("error", "Falha ao sincronizar radar");
       // eslint-disable-next-line no-console

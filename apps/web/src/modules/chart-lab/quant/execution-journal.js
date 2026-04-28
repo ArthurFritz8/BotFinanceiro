@@ -1,6 +1,10 @@
 const DEFAULT_ENTRY_LIMIT = 80;
 const DEFAULT_DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
 const FINAL_STATUSES = new Set(["target2", "stopped", "invalid", "blocked"]);
+// ADR-118: amostra minima fail-honest. Abaixo deste N, winRate retorna null
+// (nao zero) para o consumidor renderizar "--" em vez de "0%" enganoso.
+export const EXECUTION_JOURNAL_MIN_RESOLVED_FOR_WIN_RATE = 5;
+export const EXECUTION_JOURNAL_ROBUST_SAMPLE_THRESHOLD = 30;
 
 function toFiniteNumber(value, fallback = Number.NaN) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -380,25 +384,33 @@ export function summarizeExecutionJournal(state) {
   const averageR = resolved > 0
     ? roundNumber(resolvedEntries.reduce((acc, entry) => acc + toFiniteNumber(entry.outcomeR, 0), 0) / resolved, 2)
     : 0;
-  const winRate = resolved > 0 ? roundNumber((wins / resolved) * 100, 1) : 0;
-  const score = resolved >= 5
+  const hasMinSample = resolved >= EXECUTION_JOURNAL_MIN_RESOLVED_FOR_WIN_RATE;
+  // Fail-honest: sem amostra minima, winRate retorna null para evitar
+  // "100% win rate com 1 trade" induzindo o operador a martingale.
+  const winRate = hasMinSample ? roundNumber((wins / resolved) * 100, 1) : null;
+  const score = hasMinSample
     ? roundNumber(clampNumber(50 + (winRate - 50) * 0.55 + averageR * 18, 0, 100), 1)
     : 0;
-  const tone = resolved < 5 ? "neutral" : score >= 68 ? "bull" : score >= 48 ? "warn" : "danger";
+  const tone = !hasMinSample ? "neutral" : score >= 68 ? "bull" : score >= 48 ? "warn" : "danger";
 
   return {
     averageR,
-    guidance: resolved < 5
-      ? `${resolved}/5 planos fechados para ativar score institucional.`
+    guidance: !hasMinSample
+      ? `${resolved}/${EXECUTION_JOURNAL_MIN_RESOLVED_FOR_WIN_RATE} planos fechados para ativar score institucional.`
       : score >= 68
         ? "Journal confirma edge positivo recente; manter disciplina no gate."
         : score >= 48
           ? "Edge moderado: reduzir tamanho ate nova amostra melhorar."
           : "Edge fraco: preservar capital e revisar setups recentes.",
     losses,
+    minResolvedForWinRate: EXECUTION_JOURNAL_MIN_RESOLVED_FOR_WIN_RATE,
     open,
     resolved,
-    sampleState: resolved < 5 ? "Aquecendo" : resolved >= 20 ? "Robusto" : "Moderado",
+    sampleState: !hasMinSample
+      ? "Aquecendo"
+      : resolved >= EXECUTION_JOURNAL_ROBUST_SAMPLE_THRESHOLD
+        ? "Robusto"
+        : "Moderado",
     score,
     tone,
     total: safeState.entries.length,

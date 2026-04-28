@@ -8189,6 +8189,33 @@ body.sidebar-collapsed .app-shell {
   color: #64748b; font-size: 0.88rem;
   border: 1px dashed rgba(255, 255, 255, 0.08); border-radius: 10px;
 }
+/* ADR-118: badge SIMULAÇÃO quando feed nao tem fonte real conectada. */
+.live-signals__feed[data-source="mock"]::before,
+.live-signals__feed[data-source="simulated"]::before {
+  content: "● SIMULAÇÃO — feed real ainda não conectado";
+  display: block;
+  padding: 0.45rem 0.8rem;
+  margin-bottom: 0.55rem;
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-radius: 8px;
+}
+.live-signals__feed[data-source="mock"][aria-busy="true"]::before,
+.live-signals__feed[data-source="simulated"][aria-busy="true"]::before {
+  content: "Carregando radar…";
+  color: #64748b;
+  background: transparent;
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  font-weight: normal;
+  letter-spacing: normal;
+  text-transform: none;
+}
 
 /* --- Card de sinal --- */
 .live-signals__card {

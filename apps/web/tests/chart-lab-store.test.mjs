@@ -92,3 +92,37 @@ test("Chart Lab store atualiza selecao incremental sem apagar campos validos", (
     symbol: "SOLUSDT",
   });
 });
+
+test("Chart Lab store expoe snapshotEpoch monotonico para deteccao de race", () => {
+  const store = createChartLabStore();
+
+  assert.equal(store.getSnapshotEpoch(), 0);
+
+  store.setSnapshot({ assetId: "bitcoin", points: [] });
+  const epoch1 = store.getSnapshotEpoch();
+  assert.equal(epoch1, 1);
+
+  store.setSnapshot({ assetId: "bitcoin", points: [{ close: 100 }] });
+  const epoch2 = store.getSnapshotEpoch();
+  assert.equal(epoch2, 2);
+  assert.ok(epoch2 > epoch1, "epoch deve incrementar monotonicamente");
+
+  // Reset para null tambem incrementa (sinaliza invalidacao explicita).
+  store.setSnapshot(null);
+  assert.equal(store.getSnapshotEpoch(), 3);
+});
+
+test("Chart Lab store expoe selectionEpoch que so incrementa em mudanca real", () => {
+  const store = createChartLabStore();
+  const initial = store.getSelectionEpoch();
+
+  // Patch sem mudanca real (mesmos valores) NAO deve incrementar.
+  store.patchSelection({ assetId: store.getSelection().assetId });
+  assert.equal(store.getSelectionEpoch(), initial);
+
+  store.patchSelection({ assetId: "ethereum" });
+  assert.equal(store.getSelectionEpoch(), initial + 1);
+
+  store.patchSelection({ broker: "bybit" });
+  assert.equal(store.getSelectionEpoch(), initial + 2);
+});

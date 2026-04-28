@@ -13709,8 +13709,12 @@ function formatExecutionJournalStatus(status) {
 function renderTimingExecutionJournalPanel(journal, recentEntries, currency) {
   const summary = journal ?? summarizeExecutionJournal(executionJournalState);
   const entries = Array.isArray(recentEntries) ? recentEntries : getRecentExecutionJournalEntries(executionJournalState, 5);
-  const scoreLabel = summary.resolved >= 5 ? summary.score.toFixed(0) : "--";
-  const winRateLabel = summary.resolved > 0 ? `${summary.winRate.toFixed(1)}%` : "n/d";
+  const minResolvedForWinRate = Number.isFinite(summary.minResolvedForWinRate) ? summary.minResolvedForWinRate : 5;
+  const scoreLabel = summary.resolved >= minResolvedForWinRate ? summary.score.toFixed(0) : "--";
+  // ADR-118: respeita amostra minima para nao expor "100% win rate" com 1-2 trades.
+  const winRateLabel = summary.winRate !== null && Number.isFinite(summary.winRate)
+    ? `${summary.winRate.toFixed(1)}%`
+    : `Aquecendo · ${summary.resolved}/${minResolvedForWinRate}`;
   const averageRLabel = summary.resolved > 0 ? `${summary.averageR >= 0 ? "+" : ""}${summary.averageR.toFixed(2)}R` : "n/d";
   const entriesHtml = entries.length > 0
     ? entries.map((entry) => {

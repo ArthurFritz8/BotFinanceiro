@@ -667,6 +667,31 @@ test("Execution journal zera score institucional antes de cinco planos fechados"
   assert.equal(summary.resolved, 4);
   assert.equal(summary.score, 0);
   assert.equal(summary.sampleState, "Aquecendo");
+  // ADR-118 fail-honest: winRate retorna null com amostra insuficiente.
+  assert.equal(summary.winRate, null);
+  assert.equal(summary.minResolvedForWinRate, 5);
+});
+
+test("Execution journal exibe winRate apenas com amostra >= 5 trades", () => {
+  const wins = Array.from({ length: 4 }, () => ({ outcomeR: 2, status: "target2" }));
+  const losses = [{ outcomeR: -1, status: "stopped" }];
+  const summary = summarizeExecutionJournal({ entries: [...wins, ...losses] });
+
+  assert.equal(summary.resolved, 5);
+  assert.equal(summary.winRate, 80);
+  assert.equal(summary.sampleState, "Moderado");
+  assert.ok(summary.score > 0);
+});
+
+test("Execution journal sampleState='Robusto' apenas com >= 30 trades fechados", () => {
+  const entries = Array.from({ length: 30 }, (_, i) => ({
+    outcomeR: i % 2 === 0 ? 2 : -1,
+    status: i % 2 === 0 ? "target2" : "stopped",
+  }));
+  const summary = summarizeExecutionJournal({ entries });
+
+  assert.equal(summary.resolved, 30);
+  assert.equal(summary.sampleState, "Robusto");
 });
 
 test("Execution quality classifica plano prime com journal validado", () => {

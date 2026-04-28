@@ -87,10 +87,23 @@ export function createChartLabStore(initialState = {}) {
       ...(initialState.selection && typeof initialState.selection === "object" ? initialState.selection : {}),
     },
   });
+  // ADR-118: epoch monotonico para deteccao de race entre renders e snapshots.
+  // Cada setSnapshot() incrementa, permitindo aos consumidores (renderers das abas)
+  // capturar o epoch antes de calculo pesado e abortar se mudou ao terminar.
+  let snapshotEpoch = state.snapshot ? 1 : 0;
+  let selectionEpoch = 1;
 
   return {
     getState() {
       return cloneState(state);
+    },
+
+    getSnapshotEpoch() {
+      return snapshotEpoch;
+    },
+
+    getSelectionEpoch() {
+      return selectionEpoch;
     },
 
     patch(patch = {}) {
@@ -110,12 +123,22 @@ export function createChartLabStore(initialState = {}) {
     },
 
     patchSelection(patch = {}) {
+      const previousSelection = state.selection;
+      const nextSelection = normalizeSelection({
+        ...state.selection,
+        ...(patch && typeof patch === "object" ? patch : {}),
+      }, state.selection);
+      // Incrementa selectionEpoch apenas se algum campo realmente mudou,
+      // para evitar invalidacoes ruidosas em patches no-op.
+      const changed = Object.keys(nextSelection).some(
+        (key) => previousSelection[key] !== nextSelection[key],
+      );
+      if (changed) {
+        selectionEpoch += 1;
+      }
       state = {
         ...state,
-        selection: normalizeSelection({
-          ...state.selection,
-          ...(patch && typeof patch === "object" ? patch : {}),
-        }, state.selection),
+        selection: nextSelection,
       };
       return cloneSelection(state.selection);
     },
@@ -129,9 +152,13 @@ export function createChartLabStore(initialState = {}) {
     },
 
     setSnapshot(snapshot) {
+      const normalized = normalizeSnapshot(snapshot);
+      // Incrementa epoch sempre que chamado, mesmo com snapshot identico,
+      // porque o ato de re-set sinaliza intencao de invalidar derivados.
+      snapshotEpoch += 1;
       state = {
         ...state,
-        snapshot: normalizeSnapshot(snapshot),
+        snapshot: normalized,
       };
       return state.snapshot;
     },
