@@ -181,6 +181,7 @@ Politica de retencao:
 95. ADR 123: `docs/ADR/ADR-123-onda5-auto-paper-respeita-macro-blackout.md`
 96. ADR 124: `docs/ADR/ADR-124-onda8-cache-http-macro-upcoming-events.md`
 97. ADR 125: `docs/ADR/ADR-125-onda9-funding-rate-sparkline-24h.md`
+98. ADR 126: `docs/ADR/ADR-126-onda10-a11y-institucional-aria-live.md`
 
 ## Relatorio completo desta entrega
 

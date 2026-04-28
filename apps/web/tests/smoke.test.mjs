@@ -597,3 +597,14 @@ test("styles.css define badge de confluencia com dots preenchidos por data-ok=tr
   assert.match(css, /\.institutional-confluence-badge\[data-tone="bull"\]/);
 });
 
+
+test("ADR-126: institutional-derivatives card e macro-gate-pill expoem aria-live polite + role status", async () => {
+  const derivativesSrc = await readWebFile("src/modules/intelligence-desk/institutional-derivatives-card.js");
+  assert.match(derivativesSrc, /setAttribute\("role",\s*"region"\)/, "card root deve ser landmark");
+  assert.match(derivativesSrc, /role="status"\s+aria-live="polite"\s+aria-atomic="true"/, "footer deve anunciar mudancas via screen reader");
+  assert.match(derivativesSrc, /Funding rate \$\{formatBps/, "funding-bps deve ter aria-label dinamico humano");
+
+  const macroSrc = await readWebFile("src/modules/intelligence-desk/macro-gate-pill.js");
+  assert.match(macroSrc, /role="status"\s+aria-live="polite"\s+aria-atomic="true"/, "detail do macro pill deve anunciar countdown");
+  assert.match(macroSrc, /setAttribute\("role",\s*"region"\)/, "macro pill deve ser landmark");
+});

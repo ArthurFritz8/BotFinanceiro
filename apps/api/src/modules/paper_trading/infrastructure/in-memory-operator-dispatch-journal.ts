@@ -86,6 +86,16 @@ export class InMemoryOperatorDispatchJournal {
   private readonly filePath: string | null;
 
   /**
+   * Sequencer monotonico interno por instancia para servir de tiebreaker
+   * estavel no sort do snapshot (occurredAtMs DESC, seq DESC). Sem ele,
+   * dois `record()` no mesmo `Date.now()` produzem ordem instavel e
+   * quebram testes deterministicos do operator journal.
+   */
+  private nextSeq = 0;
+
+  private readonly seqByEntryId: Map<string, number> = new Map();
+
+  /**
    * Construtor aceita tanto `number` (compat ADR-105) quanto opcoes
    * estruturadas com `maxEntries` e/ou `filePath` (ADR-109).
    */
@@ -136,13 +146,15 @@ export class InMemoryOperatorDispatchJournal {
         const parsed: unknown = JSON.parse(line);
         const entry = operatorDispatchEntrySchema.parse(parsed);
         this.entries.push(entry);
+        this.seqByEntryId.set(entry.id, this.nextSeq++);
         this.cumulative[entry.action] += 1;
       } catch {
         /* linha invalida: ignora para nao quebrar boot */
       }
     }
     if (this.entries.length > this.maxEntries) {
-      this.entries.splice(0, this.entries.length - this.maxEntries);
+      const removed = this.entries.splice(0, this.entries.length - this.maxEntries);
+      for (const old of removed) this.seqByEntryId.delete(old.id);
     }
   }
 
@@ -159,8 +171,10 @@ export class InMemoryOperatorDispatchJournal {
     } satisfies OperatorDispatchEntry;
     const entry = operatorDispatchEntrySchema.parse(candidate);
     this.entries.push(entry);
+    this.seqByEntryId.set(entry.id, this.nextSeq++);
     if (this.entries.length > this.maxEntries) {
-      this.entries.splice(0, this.entries.length - this.maxEntries);
+      const removed = this.entries.splice(0, this.entries.length - this.maxEntries);
+      for (const old of removed) this.seqByEntryId.delete(old.id);
     }
     this.cumulative[entry.action] += 1;
     if (this.filePath) {
@@ -215,9 +229,14 @@ export class InMemoryOperatorDispatchJournal {
       else if (entry.action === "skipped") skipped += 1;
       else errors += 1;
     }
-    const ordered = [...filtered].sort(
-      (a, b) => b.occurredAtMs - a.occurredAtMs,
-    );
+    const ordered = [...filtered].sort((a, b) => {
+      if (b.occurredAtMs !== a.occurredAtMs) return b.occurredAtMs - a.occurredAtMs;
+      // Tiebreaker estavel: seq DESC garante ordem cronologica de insercao
+      // mesmo quando Date.now() coincide entre records adjacentes.
+      const seqA = this.seqByEntryId.get(a.id) ?? 0;
+      const seqB = this.seqByEntryId.get(b.id) ?? 0;
+      return seqB - seqA;
+    });
     const safeLimit =
       Number.isInteger(query.limit) && query.limit !== undefined && query.limit > 0
         ? Math.min(query.limit, this.maxEntries)
@@ -237,6 +256,8 @@ export class InMemoryOperatorDispatchJournal {
 
   public clear(): void {
     this.entries.length = 0;
+    this.seqByEntryId.clear();
+    this.nextSeq = 0;
     this.cumulative.opened = 0;
     this.cumulative.skipped = 0;
     this.cumulative.error = 0;

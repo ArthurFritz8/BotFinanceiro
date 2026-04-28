@@ -20,6 +20,9 @@ let activeRequestToken = 0;
 let lastSnapshotByAsset = new Map();
 
 function createMarkup() {
+  // ADR-126: a11y institucional. role=region + aria-label expoe o card como landmark
+  // navegavel; footer tem role=status + aria-live=polite para que screen readers
+  // anunciem mudancas de feed sem interromper a leitura em curso.
   return `
     <header class="institutional-derivatives__header">
       <h3 class="institutional-derivatives__title">Fluxo institucional perp</h3>
@@ -49,7 +52,7 @@ function createMarkup() {
         <span class="institutional-derivatives__hint" data-field="spread">spread —</span>
       </article>
     </div>
-    <footer class="institutional-derivatives__footer" data-field="footer">
+    <footer class="institutional-derivatives__footer" data-field="footer" role="status" aria-live="polite" aria-atomic="true">
       Selecione um ativo cripto para ativar.
     </footer>
   `;
@@ -180,6 +183,16 @@ function renderDerivatives(payload) {
 
   setText(elements.fundingBps, formatBps(rateBps));
   setText(elements.fundingInterpretation, humanInterpretation(interpretation));
+  // ADR-126: aria-label dinamico para que screen reader leia algo coerente
+  // ao inves de apenas "+6.00 bps". Inclui interpretacao humana.
+  if (elements.fundingBps && rateBps !== null) {
+    elements.fundingBps.setAttribute(
+      "aria-label",
+      `Funding rate ${formatBps(rateBps)}, ${humanInterpretation(interpretation)}`,
+    );
+  } else if (elements.fundingBps) {
+    elements.fundingBps.removeAttribute("aria-label");
+  }
   setCellTone("funding", fundingTone(interpretation));
 
   setText(elements.openInterest, formatNumberCompact(derivatives.openInterest));
@@ -298,6 +311,11 @@ export function mountInstitutionalDerivativesCard(root) {
   if (!(root instanceof HTMLElement)) return;
   rootElement = root;
   rootElement.classList.add("institutional-derivatives");
+  // ADR-126: landmark a11y do card.
+  if (!rootElement.hasAttribute("role")) rootElement.setAttribute("role", "region");
+  if (!rootElement.hasAttribute("aria-label")) {
+    rootElement.setAttribute("aria-label", "Fluxo institucional de perpetuos: funding, open interest, CVD e orderbook");
+  }
   rootElement.innerHTML = createMarkup();
   cacheElements();
   clearRendered();

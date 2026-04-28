@@ -26,11 +26,18 @@ let stateListeners = new Set();
 
 function createMarkup(rootEl) {
   if (!rootEl.querySelector('[data-field="detail"]')) {
+    // ADR-126: a11y. role=status + aria-live=polite no detail anuncia mudanca
+    // de evento iminente (ex.: countdown caindo de 1h30 para "agora") sem
+    // interromper o leitor.
     rootEl.innerHTML = `
       <span class="macro-gate-pill__dot" aria-hidden="true"></span>
       <span class="macro-gate-pill__label">Macro</span>
-      <span class="macro-gate-pill__detail" data-field="detail">aguardando</span>
+      <span class="macro-gate-pill__detail" data-field="detail" role="status" aria-live="polite" aria-atomic="true">aguardando</span>
     `;
+  }
+  if (!rootEl.hasAttribute("role")) rootEl.setAttribute("role", "region");
+  if (!rootEl.hasAttribute("aria-label")) {
+    rootEl.setAttribute("aria-label", "Pill de gate macro: proximo evento de alto impacto");
   }
 }
 
