@@ -21,6 +21,9 @@ import {
 import {
   CryptoSyncPolicyService,
 } from "../application/crypto-sync-policy-service.js";
+import {
+  CryptoDerivativesService,
+} from "../application/crypto-derivatives-service.js";
 
 const syncPolicyQuerySchema = z.object({
   scope: z.enum(["hot", "warm", "cold"]).optional(),
@@ -146,6 +149,28 @@ const cryptoSpotPriceService = new CryptoSpotPriceService();
 const cryptoChartService = new CryptoChartService();
 const cryptoNewsIntelligenceService = new CryptoNewsIntelligenceService();
 const cryptoMarketOverviewService = new CryptoMarketOverviewService();
+const cryptoDerivativesService = new CryptoDerivativesService();
+
+// ADR-119: schemas dos endpoints institucionais (derivatives / CVD / orderbook).
+const derivativesQuerySchema = z.object({
+  assetId: z.string().trim().min(1).max(64).default("bitcoin"),
+});
+
+const cvdQuerySchema = z.object({
+  assetId: z.string().trim().min(1).max(64).default("bitcoin"),
+  limit: z.coerce.number().int().min(50).max(1000).default(500),
+});
+
+const orderbookQuerySchema = z.object({
+  assetId: z.string().trim().min(1).max(64).default("bitcoin"),
+  levels: z.coerce
+    .number()
+    .int()
+    .refine((value) => [5, 10, 20, 50, 100].includes(value), {
+      message: "levels must be one of 5, 10, 20, 50, 100",
+    })
+    .default(20),
+});
 
 function normalizeOrigin(value: string): string {
   const trimmedValue = value.trim();
@@ -310,4 +335,26 @@ export async function getNewsIntelligence(request: FastifyRequest, reply: Fastif
   const newsIntelligence = await cryptoNewsIntelligenceService.getNewsIntelligence(parsedQuery);
 
   void reply.send(buildSuccessResponse(request.id, newsIntelligence));
+}
+
+// ADR-119: handlers institucionais — derivativos, CVD, orderbook L2.
+export async function getDerivatives(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const parsedQuery = derivativesQuerySchema.parse(request.query);
+  const snapshot = await cryptoDerivativesService.getDerivatives(parsedQuery);
+  void reply.send(buildSuccessResponse(request.id, snapshot));
+}
+
+export async function getCvd(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const parsedQuery = cvdQuerySchema.parse(request.query);
+  const snapshot = await cryptoDerivativesService.getCvd(parsedQuery);
+  void reply.send(buildSuccessResponse(request.id, snapshot));
+}
+
+export async function getOrderbookDepth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const parsedQuery = orderbookQuerySchema.parse(request.query);
+  const snapshot = await cryptoDerivativesService.getOrderbook({
+    assetId: parsedQuery.assetId,
+    levels: parsedQuery.levels as 5 | 10 | 20 | 50 | 100,
+  });
+  void reply.send(buildSuccessResponse(request.id, snapshot));
 }

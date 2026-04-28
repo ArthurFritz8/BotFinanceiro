@@ -43,6 +43,23 @@ const openInterestSchema = z.object({
   time: z.coerce.number().int().nullable().optional(),
 });
 
+// ADR-119: aggTrades para CVD; depth para orderbook L2.
+const aggTradeItemSchema = z.object({
+  a: z.number().int(),
+  p: z.string(),
+  q: z.string(),
+  T: z.number().int(),
+  m: z.boolean(),
+});
+const aggTradesArraySchema = z.array(aggTradeItemSchema);
+
+const depthLevelTuple = z.tuple([z.string(), z.string()]);
+const depthSchema = z.object({
+  lastUpdateId: z.number().int(),
+  bids: z.array(depthLevelTuple),
+  asks: z.array(depthLevelTuple),
+});
+
 type PremiumIndexPayload = z.infer<typeof premiumIndexSchema>;
 type OpenInterestPayload = z.infer<typeof openInterestSchema>;
 
@@ -281,6 +298,106 @@ export class BinanceFuturesMarketDataAdapter {
       },
       symbol,
       venue: "binance_futures",
+    };
+  }
+
+  // ADR-119: agg-trades brutos para deriva CVD (Cumulative Volume Delta).
+  // Retorna trades agregados ordenados do mais antigo ao mais recente.
+  public async getAggTrades(input: {
+    symbol: string;
+    limit?: number;
+  }): Promise<Array<{
+    tradeId: number;
+    price: number;
+    quantity: number;
+    timestamp: number;
+    isBuyerMaker: boolean;
+  }>> {
+    const symbol = symbolSchema.parse(input.symbol);
+    const limit = Math.max(1, Math.min(1000, Math.trunc(input.limit ?? 500)));
+    const query = new URLSearchParams({ symbol, limit: String(limit) }).toString();
+
+    const payload = await retryWithExponentialBackoff(
+      () => this.requestJson(`/fapi/v1/aggTrades?${query}`),
+      {
+        attempts: 3,
+        baseDelayMs: 200,
+        jitterPercent: 20,
+        shouldRetry: shouldRetryFuturesRequest,
+      },
+    );
+
+    const parsed = aggTradesArraySchema.safeParse(payload);
+    if (!parsed.success) {
+      throw new AppError({
+        code: "BINANCE_FUTURES_SCHEMA_MISMATCH",
+        details: { issues: parsed.error.issues, retryable: false, symbol },
+        message: "Binance futures aggTrades schema mismatch",
+        statusCode: 502,
+      });
+    }
+
+    return parsed.data
+      .map((trade) => ({
+        tradeId: trade.a,
+        price: Number.parseFloat(trade.p),
+        quantity: Number.parseFloat(trade.q),
+        timestamp: trade.T,
+        isBuyerMaker: trade.m,
+      }))
+      .filter((trade) => Number.isFinite(trade.price) && Number.isFinite(trade.quantity) && trade.quantity > 0)
+      .sort((a, b) => a.timestamp - b.timestamp);
+  }
+
+  // ADR-119: snapshot L2 (bids + asks) para heatmap institucional.
+  // levels in {5, 10, 20, 50, 100, 500, 1000} - Binance enforce.
+  public async getOrderbookDepth(input: {
+    symbol: string;
+    levels?: 5 | 10 | 20 | 50 | 100;
+  }): Promise<{
+    symbol: string;
+    bids: Array<{ price: number; quantity: number }>;
+    asks: Array<{ price: number; quantity: number }>;
+    lastUpdateId: number;
+  }> {
+    const symbol = symbolSchema.parse(input.symbol);
+    const levels = input.levels ?? 20;
+    const query = new URLSearchParams({ symbol, limit: String(levels) }).toString();
+
+    const payload = await retryWithExponentialBackoff(
+      () => this.requestJson(`/fapi/v1/depth?${query}`),
+      {
+        attempts: 3,
+        baseDelayMs: 200,
+        jitterPercent: 20,
+        shouldRetry: shouldRetryFuturesRequest,
+      },
+    );
+
+    const parsed = depthSchema.safeParse(payload);
+    if (!parsed.success) {
+      throw new AppError({
+        code: "BINANCE_FUTURES_SCHEMA_MISMATCH",
+        details: { issues: parsed.error.issues, retryable: false, symbol },
+        message: "Binance futures depth schema mismatch",
+        statusCode: 502,
+      });
+    }
+
+    function parseLevel(level: [string, string]): { price: number; quantity: number } | null {
+      const price = Number.parseFloat(level[0]);
+      const quantity = Number.parseFloat(level[1]);
+      if (!Number.isFinite(price) || !Number.isFinite(quantity) || quantity <= 0) {
+        return null;
+      }
+      return { price, quantity };
+    }
+
+    return {
+      symbol,
+      bids: parsed.data.bids.map(parseLevel).filter((entry): entry is { price: number; quantity: number } => entry !== null),
+      asks: parsed.data.asks.map(parseLevel).filter((entry): entry is { price: number; quantity: number } => entry !== null),
+      lastUpdateId: parsed.data.lastUpdateId,
     };
   }
 

@@ -4,9 +4,12 @@ import {
   getAssetCatalog,
   getChart,
   getCryptoStrategyChart,
+  getCvd,
+  getDerivatives,
   getLiveChart,
   getMarketOverview,
   getNewsIntelligence,
+  getOrderbookDepth,
   postIntelligenceSyncTelemetry,
   getSpotPrice,
   getSpotPriceBatch,
@@ -26,4 +29,8 @@ export function registerCryptoRoutes(app: FastifyInstance): void {
   app.get("/crypto/spot-price/batch", getSpotPriceBatch);
   app.get("/crypto/sync-policy", getSyncPolicy);
   app.post("/crypto/intelligence-sync/telemetry", postIntelligenceSyncTelemetry);
+  // ADR-119 — Onda 2: ingestao institucional.
+  app.get("/crypto/derivatives", getDerivatives);
+  app.get("/crypto/cvd", getCvd);
+  app.get("/crypto/orderbook-depth", getOrderbookDepth);
 }
