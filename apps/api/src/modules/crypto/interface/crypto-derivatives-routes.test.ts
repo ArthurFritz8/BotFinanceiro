@@ -170,9 +170,10 @@ void it("GET /v1/crypto/orderbook-depth rejeita levels invalidos", async () => {
 void it("GET /v1/crypto/funding-history retorna pontos 24h + summary + Cache-Control 60s", async () => {
   const nowMs = Date.now();
   const eightHourMs = 8 * 3600 * 1000;
-  // 4 entries cobrindo ~32h: ultima dentro de 24h.
+  // 4 entries cobrindo ~32h: a primeira esta ~32h atras (fora da janela 24h),
+  // demais 3 dentro da janela. Empurramos a primeira para -32h - 5min para garantir cutoff.
   const fundingPayload = [
-    { symbol: "BTCUSDT", fundingTime: nowMs - 3 * eightHourMs, fundingRate: "0.0001", markPrice: "60000" },
+    { symbol: "BTCUSDT", fundingTime: nowMs - 4 * eightHourMs - 5 * 60_000, fundingRate: "0.0001", markPrice: "60000" },
     { symbol: "BTCUSDT", fundingTime: nowMs - 2 * eightHourMs, fundingRate: "0.00015", markPrice: "60100" },
     { symbol: "BTCUSDT", fundingTime: nowMs - eightHourMs, fundingRate: "0.0002", markPrice: "60200" },
     { symbol: "BTCUSDT", fundingTime: nowMs - 60_000, fundingRate: "0.00025", markPrice: "60300" },
