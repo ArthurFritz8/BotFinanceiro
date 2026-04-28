@@ -179,6 +179,7 @@ Politica de retencao:
 93. ADR 121: `docs/ADR/ADR-121-onda3-macro-execution-gate-pill.md`
 94. ADR 122: `docs/ADR/ADR-122-onda4-execution-gate-consome-macro-pill.md`
 95. ADR 123: `docs/ADR/ADR-123-onda5-auto-paper-respeita-macro-blackout.md`
+96. ADR 124: `docs/ADR/ADR-124-onda8-cache-http-macro-upcoming-events.md`
 
 ## Relatorio completo desta entrega
 

@@ -133,10 +133,14 @@ export async function getInstitutionalMacroSnapshot(
 
 // ADR-121 — Onda 3: macro execution gate. Endpoint enxuto consumido pela
 // pill macro do Intelligence Desk e por futura integracao com execution-gate.
+// ADR-124 — Onda 8: cache HTTP 30s alinha com cache server-side e reduz
+// pressao em provider externo quando multiplas abas/clientes pollam.
 export async function getMacroUpcomingEvents(
   request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
   const snapshot = await getUpcomingMacroEvents();
-  void reply.send(buildSuccessResponse(request.id, snapshot));
+  void reply
+    .header("Cache-Control", "public, max-age=30, stale-while-revalidate=60")
+    .send(buildSuccessResponse(request.id, snapshot));
 }

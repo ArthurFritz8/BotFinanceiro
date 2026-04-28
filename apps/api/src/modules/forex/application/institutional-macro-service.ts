@@ -1094,7 +1094,17 @@ export interface MacroUpcomingEventsResponse {
 }
 
 export async function getUpcomingMacroEvents(): Promise<MacroUpcomingEventsResponse> {
-  const now = new Date();
+  // ADR-124 — Onda 8: cache server-side TTL 30s. Reduz pressao em provider
+  // externo (FOREX_MACRO_CALENDAR_URL) quando multiplos clientes/abas pollam.
+  const nowMs = Date.now();
+  if (
+    upcomingMacroEventsCache !== null
+    && nowMs - upcomingMacroEventsCache.fetchedAtMs < UPCOMING_MACRO_EVENTS_TTL_MS
+  ) {
+    return upcomingMacroEventsCache.response;
+  }
+
+  const now = new Date(nowMs);
   const externalEvents = await loadExternalMacroEvents(now);
   const fallbackEvents = buildFallbackMacroEvents(now);
   const sourceEvents = externalEvents ?? fallbackEvents;
@@ -1122,7 +1132,7 @@ export async function getUpcomingMacroEvents(): Promise<MacroUpcomingEventsRespo
     alertLevel = "yellow";
   }
 
-  return {
+  const response: MacroUpcomingEventsResponse = {
     alertLevel,
     blockDirectionalRisk: alertLevel === "red",
     events: enrichedEvents,
@@ -1131,6 +1141,16 @@ export async function getUpcomingMacroEvents(): Promise<MacroUpcomingEventsRespo
     nextEvent: enrichedEvents[0] ?? null,
     source,
   };
+
+  upcomingMacroEventsCache = { fetchedAtMs: nowMs, response };
+  return response;
+}
+
+// ADR-124 — Onda 8: cache helper exportado para testes (reset entre cenarios).
+export const UPCOMING_MACRO_EVENTS_TTL_MS = 30_000;
+let upcomingMacroEventsCache: { fetchedAtMs: number; response: MacroUpcomingEventsResponse } | null = null;
+export function _resetUpcomingMacroEventsCacheForTests(): void {
+  upcomingMacroEventsCache = null;
 }
 
 export class InstitutionalMacroService {

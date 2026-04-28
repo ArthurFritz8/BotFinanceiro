@@ -9,6 +9,9 @@ process.env.YAHOO_FINANCE_API_BASE_URL ??= "https://query1.finance.yahoo.com";
 process.env.INTERNAL_API_TOKEN ??= "test_internal_token_12345";
 
 const { buildApp } = await import("../../../main/app.js");
+const { _resetUpcomingMacroEventsCacheForTests } = await import(
+  "../application/institutional-macro-service.js"
+);
 
 const app = buildApp();
 await app.ready();
@@ -21,6 +24,8 @@ void beforeEach(() => {
   globalThis.fetch = originalFetch;
   delete process.env.FOREX_MACRO_CALENDAR_URL;
   delete process.env.FOREX_MACRO_CALENDAR_API_KEY;
+  // ADR-124: reset cache TTL 30s entre testes para isolamento.
+  _resetUpcomingMacroEventsCacheForTests();
 });
 
 void after(async () => {
@@ -81,4 +86,32 @@ void it("blockDirectionalRisk fica true quando high-impact <=3h via fallback", a
   assert.equal(body.data.alertLevel, "red");
   assert.equal(body.data.blockDirectionalRisk, true);
   assert.ok(body.data.minutesToNextHighImpact <= 60);
+});
+
+void it("ADR-124: define Cache-Control public 30s + cacheia server-side evitando refetch ao provider", async () => {
+  let fetchCount = 0;
+  process.env.FOREX_MACRO_CALENDAR_URL = "https://example.test/calendar";
+  globalThis.fetch = ((input) => {
+    const url = String(input);
+    if (url.includes("example.test/calendar")) {
+      fetchCount += 1;
+      const oneHourFromNow = Date.now() + 60 * 60 * 1000;
+      return Promise.resolve(new Response(JSON.stringify([
+        { event: "FOMC Rate Decision", country: "US", impact: "high", timestamp: oneHourFromNow },
+      ]), { status: 200, headers: { "content-type": "application/json" } }));
+    }
+    return Promise.reject(new Error(`unexpected ${url}`));
+  }) as typeof fetch;
+
+  const r1 = await app.inject({ method: "GET", url: "/v1/macro/upcoming-events" });
+  const r2 = await app.inject({ method: "GET", url: "/v1/macro/upcoming-events" });
+  const r3 = await app.inject({ method: "GET", url: "/v1/macro/upcoming-events" });
+
+  assert.equal(r1.statusCode, 200);
+  assert.equal(r2.statusCode, 200);
+  assert.equal(r3.statusCode, 200);
+  assert.equal(r1.headers["cache-control"], "public, max-age=30, stale-while-revalidate=60");
+  assert.equal(r2.headers["cache-control"], "public, max-age=30, stale-while-revalidate=60");
+  // 3 chamadas HTTP -> apenas 1 fetch ao provider externo (cache server-side TTL 30s).
+  assert.equal(fetchCount, 1, "provider externo deve ser chamado apenas 1x dentro da janela de cache");
 });
